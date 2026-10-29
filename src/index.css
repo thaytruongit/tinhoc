@@ -1,0 +1,271 @@
+@import "tailwindcss";
+
+:root {
+  --cp-surface: #f8f9ff;
+  --cp-surface-dim: #d0dbed;
+  --cp-surface-bright: #f8f9ff;
+  --cp-surface-container-lowest: #ffffff;
+  --cp-surface-container-low: #eff4ff;
+  --cp-surface-container: #e5eeff;
+  --cp-surface-container-high: #dfe9fb;
+  --cp-surface-container-highest: #d9e3f5;
+  --cp-surface-variant: #d9e3f5;
+  --cp-on-surface: #121c29;
+  --cp-on-surface-variant: #544339;
+  --cp-inverse-surface: #27313f;
+  --cp-inverse-on-surface: #eaf1ff;
+  --cp-outline: #877367;
+  --cp-outline-variant: #dac2b4;
+  --cp-surface-tint: #954a05;
+  --cp-primary: #954a05;
+  --cp-on-primary: #ffffff;
+  --cp-primary-container: #ff9e58;
+  --cp-on-primary-container: #723600;
+  --cp-inverse-primary: #ffb786;
+  --cp-secondary: #006495;
+  --cp-on-secondary: #ffffff;
+  --cp-secondary-container: #4cb6fd;
+  --cp-on-secondary-container: #004569;
+  --cp-tertiary: #006c4c;
+  --cp-on-tertiary: #ffffff;
+  --cp-tertiary-container: #48cb9a;
+  --cp-on-tertiary-container: #005239;
+  --cp-error: #ba1a1a;
+  --cp-on-error: #ffffff;
+  --cp-error-container: #ffdad6;
+  --cp-on-error-container: #93000a;
+  --cp-primary-fixed: #ffdcc6;
+  --cp-primary-fixed-dim: #ffb786;
+  --cp-on-primary-fixed: #311300;
+  --cp-on-primary-fixed-variant: #723600;
+  --cp-secondary-fixed: #cbe6ff;
+  --cp-secondary-fixed-dim: #8fcdff;
+  --cp-on-secondary-fixed: #001e30;
+  --cp-on-secondary-fixed-variant: #004b71;
+  --cp-tertiary-fixed: #7bfac5;
+  --cp-tertiary-fixed-dim: #5cddaa;
+  --cp-on-tertiary-fixed: #002115;
+  --cp-on-tertiary-fixed-variant: #005139;
+  --cp-background: #f8f9ff;
+  --cp-on-background: #121c29;
+}
+
+.dark {
+  --cp-surface: #0c131d;
+  --cp-surface-dim: #090e16;
+  --cp-surface-bright: #1b2636;
+  --cp-surface-container-lowest: #131d2b;
+  --cp-surface-container-low: #172334;
+  --cp-surface-container: #1d2b3f;
+  --cp-surface-container-high: #24344c;
+  --cp-surface-container-highest: #2c3f5b;
+  --cp-surface-variant: #25354d;
+  --cp-on-surface: #ecf2ff;
+  --cp-on-surface-variant: #b8c6dc;
+  --cp-inverse-surface: #e5eeff;
+  --cp-inverse-on-surface: #121c29;
+  --cp-outline: #7f90a8;
+  --cp-outline-variant: #36475e;
+  --cp-surface-tint: #ff9e58;
+  --cp-primary: #ff9e58;
+  --cp-on-primary: #2d1200;
+  --cp-primary-container: #b85d0a;
+  --cp-on-primary-container: #fff4ec;
+  --cp-inverse-primary: #954a05;
+  --cp-secondary: #5cc0ff;
+  --cp-on-secondary: #001e30;
+  --cp-secondary-container: #004d73;
+  --cp-on-secondary-container: #d8eeff;
+  --cp-tertiary: #50d2a0;
+  --cp-on-tertiary: #002115;
+  --cp-tertiary-container: #00593e;
+  --cp-on-tertiary-container: #d0ffee;
+  --cp-error: #ff897d;
+  --cp-on-error: #3b0002;
+  --cp-error-container: #690005;
+  --cp-on-error-container: #ffdad6;
+  --cp-primary-fixed: #3b2210;
+  --cp-primary-fixed-dim: #5c3416;
+  --cp-on-primary-fixed: #ffdcc6;
+  --cp-on-primary-fixed-variant: #ffb786;
+  --cp-secondary-fixed: #122d44;
+  --cp-secondary-fixed-dim: #1b4160;
+  --cp-on-secondary-fixed: #cbe6ff;
+  --cp-on-secondary-fixed-variant: #8fcdff;
+  --cp-tertiary-fixed: #0f3528;
+  --cp-tertiary-fixed-dim: #164c3a;
+  --cp-on-tertiary-fixed: #7bfac5;
+  --cp-on-tertiary-fixed-variant: #5cddaa;
+  --cp-background: #0c131d;
+  --cp-on-background: #ecf2ff;
+}
+
+@theme {
+  --color-surface: var(--cp-surface);
+  --color-surface-dim: var(--cp-surface-dim);
+  --color-surface-bright: var(--cp-surface-bright);
+  --color-surface-container-lowest: var(--cp-surface-container-lowest);
+  --color-surface-container-low: var(--cp-surface-container-low);
+  --color-surface-container: var(--cp-surface-container);
+  --color-surface-container-high: var(--cp-surface-container-high);
+  --color-surface-container-highest: var(--cp-surface-container-highest);
+  --color-surface-variant: var(--cp-surface-variant);
+  --color-on-surface: var(--cp-on-surface);
+  --color-on-surface-variant: var(--cp-on-surface-variant);
+  --color-inverse-surface: var(--cp-inverse-surface);
+  --color-inverse-on-surface: var(--cp-inverse-on-surface);
+  --color-outline: var(--cp-outline);
+  --color-outline-variant: var(--cp-outline-variant);
+  --color-surface-tint: var(--cp-surface-tint);
+  --color-primary: var(--cp-primary);
+  --color-on-primary: var(--cp-on-primary);
+  --color-primary-container: var(--cp-primary-container);
+  --color-on-primary-container: var(--cp-on-primary-container);
+  --color-inverse-primary: var(--cp-inverse-primary);
+  --color-secondary: var(--cp-secondary);
+  --color-on-secondary: var(--cp-on-secondary);
+  --color-secondary-container: var(--cp-secondary-container);
+  --color-on-secondary-container: var(--cp-on-secondary-container);
+  --color-tertiary: var(--cp-tertiary);
+  --color-on-tertiary: var(--cp-on-tertiary);
+  --color-tertiary-container: var(--cp-tertiary-container);
+  --color-on-tertiary-container: var(--cp-on-tertiary-container);
+  --color-error: var(--cp-error);
+  --color-on-error: var(--cp-on-error);
+  --color-error-container: var(--cp-error-container);
+  --color-on-error-container: var(--cp-on-error-container);
+  --color-primary-fixed: var(--cp-primary-fixed);
+  --color-primary-fixed-dim: var(--cp-primary-fixed-dim);
+  --color-on-primary-fixed: var(--cp-on-primary-fixed);
+  --color-on-primary-fixed-variant: var(--cp-on-primary-fixed-variant);
+  --color-secondary-fixed: var(--cp-secondary-fixed);
+  --color-secondary-fixed-dim: var(--cp-secondary-fixed-dim);
+  --color-on-secondary-fixed: var(--cp-on-secondary-fixed);
+  --color-on-secondary-fixed-variant: var(--cp-on-secondary-fixed-variant);
+  --color-tertiary-fixed: var(--cp-tertiary-fixed);
+  --color-tertiary-fixed-dim: var(--cp-tertiary-fixed-dim);
+  --color-on-tertiary-fixed: var(--cp-on-tertiary-fixed);
+  --color-on-tertiary-fixed-variant: var(--cp-on-tertiary-fixed-variant);
+  --color-background: var(--cp-background);
+  --color-on-background: var(--cp-on-background);
+
+  --spacing-space-xs: 0.25rem;
+  --spacing-space-sm: 0.5rem;
+  --spacing-space-md: 1rem;
+  --spacing-space-lg: 1.5rem;
+  --spacing-space-xl: 2rem;
+  --spacing-space-2xl: 3rem;
+  --spacing-gutter: 1.25rem;
+  --spacing-gutter-mobile: 0.75rem;
+  --spacing-margin: 2rem;
+  --spacing-margin-mobile: 1rem;
+
+  --radius-DEFAULT: 1rem;
+  --radius-lg: 2rem;
+  --radius-xl: 3rem;
+  --radius-full: 9999px;
+
+  --font-headline-xl: "Nunito", sans-serif;
+  --font-headline-xl-mobile: "Nunito", sans-serif;
+  --font-headline-lg: "Nunito", sans-serif;
+  --font-headline-md: "Nunito", sans-serif;
+  --font-headline-sm: "Nunito", sans-serif;
+  --font-body-lg: "Nunito", sans-serif;
+  --font-body-md: "Nunito", sans-serif;
+  --font-body-sm: "Nunito", sans-serif;
+  --font-label-lg: "Be Vietnam Pro", sans-serif;
+  --font-label-md: "Be Vietnam Pro", sans-serif;
+  --font-label-sm: "Be Vietnam Pro", sans-serif;
+}
+
+@layer base {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: "Nunito", sans-serif;
+    background-color: var(--cp-background);
+    color: var(--cp-on-surface);
+    overscroll-behavior: none;
+  }
+}
+
+.text-headline-xl {
+  font-family: "Nunito", sans-serif;
+  font-size: 36px;
+  line-height: 44px;
+  letter-spacing: -0.02em;
+  font-weight: 800;
+}
+.text-headline-xl-mobile {
+  font-family: "Nunito", sans-serif;
+  font-size: 26px;
+  line-height: 34px;
+  letter-spacing: -0.01em;
+  font-weight: 800;
+}
+.text-headline-lg {
+  font-family: "Nunito", sans-serif;
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 800;
+}
+.text-headline-md {
+  font-family: "Nunito", sans-serif;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 800;
+}
+.text-headline-sm {
+  font-family: "Nunito", sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 700;
+}
+.text-body-lg {
+  font-family: "Nunito", sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+}
+.text-body-md {
+  font-family: "Nunito", sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+.text-body-sm {
+  font-family: "Nunito", sans-serif;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+}
+.text-label-lg {
+  font-family: "Be Vietnam Pro", sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: 0.02em;
+  font-weight: 700;
+}
+.text-label-md {
+  font-family: "Be Vietnam Pro", sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.01em;
+  font-weight: 700;
+}
+.text-label-sm {
+  font-family: "Be Vietnam Pro", sans-serif;
+  font-size: 11px;
+  line-height: 14px;
+  letter-spacing: 0.02em;
+  font-weight: 700;
+}
+.rounded-DEFAULT {
+  border-radius: 1rem;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 24;
+  user-select: none;
+}

@@ -1,0 +1,41 @@
+name: Supabase PostgreSQL Anti-Hibernation Cron (24/7 Keep-Alive)
+
+on:
+  schedule:
+    # Chạy định kỳ mỗi 12 giờ (00:00 và 12:00 UTC hàng ngày) để giữ Supabase không bao giờ bị ngủ đông sau 7 ngày
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+
+jobs:
+  keep-supabase-awake:
+    name: Ping Supabase / Cloud SQL Keep-Alive
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Application Keep-Alive Cron Endpoint
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -n "$APP_URL" ]; then
+            echo "Pinging $APP_URL/api/cron/keep-alive..."
+            curl -sS -X POST "$APP_URL/api/cron/keep-alive?source=github-actions-cron" \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              -H "Content-Type: application/json" \
+              -d '{"source":"github-actions-cron"}' || true
+          else
+            echo "APP_URL secret not set; skipping app endpoint ping."
+          fi
+
+      - name: Direct Ping Supabase REST API (if SUPABASE_URL configured)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
+            echo "Pinging Supabase REST API live_classroom_states table..."
+            curl -sS "$SUPABASE_URL/rest/v1/live_classroom_states?select=session_key,updated_at&limit=1" \
+              -H "apikey: $SUPABASE_ANON_KEY" \
+              -H "Authorization: Bearer $SUPABASE_ANON_KEY" || true
+          else
+            echo "SUPABASE_URL / SUPABASE_ANON_KEY secrets not set; skipping direct REST ping."
+          fi

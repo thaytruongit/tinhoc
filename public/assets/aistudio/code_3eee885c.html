@@ -1,0 +1,422 @@
+<!DOCTYPE html><html lang="vi"><head><meta charset="utf-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><meta content="web_dashboard" name="shell-type"><link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800&amp;family=Be+Vietnam+Pro:wght@500;600;700&amp;display=swap" rel="stylesheet"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={"darkMode":"class","theme":{"extend":{"colors":{"inverse-surface":"#27313f","on-primary-fixed-variant":"#723600","on-primary-fixed":"#311300","primary-container":"#ff9e58","on-tertiary-container":"#005239","surface-bright":"#f8f9ff","on-secondary-container":"#004569","on-surface":"#121c29","surface-container":"#e5eeff","on-secondary-fixed-variant":"#004b71","background":"#f8f9ff","surface-tint":"#954a05","surface-container-low":"#eff4ff","primary-fixed":"#ffdcc6","primary":"#954a05","error-container":"#ffdad6","on-error-container":"#93000a","secondary-fixed":"#cbe6ff","error":"#ba1a1a","inverse-primary":"#ffb786","tertiary-fixed-dim":"#5cddaa","on-tertiary-fixed":"#002115","outline":"#877367","on-primary":"#ffffff","on-error":"#ffffff","surface":"#f8f9ff","surface-container-high":"#dfe9fb","surface-container-highest":"#d9e3f5","surface-dim":"#d0dbed","tertiary":"#006c4c","on-primary-container":"#723600","on-secondary":"#ffffff","on-tertiary":"#ffffff","secondary-fixed-dim":"#8fcdff","on-background":"#121c29","inverse-on-surface":"#eaf1ff","surface-container-lowest":"#ffffff","surface-variant":"#d9e3f5","secondary-container":"#4cb6fd","on-secondary-fixed":"#001e30","secondary":"#006495","on-surface-variant":"#544339","primary-fixed-dim":"#ffb786","outline-variant":"#dac2b4","tertiary-fixed":"#7bfac5","tertiary-container":"#48cb9a","on-tertiary-fixed-variant":"#005139"},"borderRadius":{"DEFAULT":"1rem","lg":"2rem","xl":"3rem","full":"9999px"},"spacing":{"space-sm":"0.5rem","space-xs":"0.25rem","margin-mobile":"1rem","space-xl":"2rem","space-lg":"1.5rem","space-md":"1rem","gutter":"1.25rem","space-2xl":"3rem","gutter-mobile":"0.75rem","margin":"2rem"},"fontFamily":{"headline-xl":["Nunito"],"body-lg":["Nunito"],"label-sm":["Be Vietnam Pro"],"body-md":["Nunito"],"label-lg":["Be Vietnam Pro"],"headline-sm":["Nunito"],"headline-xl-mobile":["Nunito"],"body-sm":["Nunito"],"label-md":["Be Vietnam Pro"],"headline-md":["Nunito"],"headline-lg":["Nunito"]},"fontSize":{"headline-xl":["36px",{"lineHeight":"44px","letterSpacing":"-0.02em","fontWeight":"800"}],"body-lg":["16px",{"lineHeight":"24px","fontWeight":"600"}],"label-sm":["11px",{"lineHeight":"14px","letterSpacing":"0.02em","fontWeight":"700"}],"body-md":["14px",{"lineHeight":"20px","fontWeight":"500"}],"label-lg":["14px",{"lineHeight":"20px","letterSpacing":"0.02em","fontWeight":"700"}],"headline-sm":["16px",{"lineHeight":"24px","fontWeight":"700"}],"headline-xl-mobile":["26px",{"lineHeight":"34px","letterSpacing":"-0.01em","fontWeight":"800"}],"body-sm":["12px",{"lineHeight":"18px","fontWeight":"500"}],"label-md":["12px",{"lineHeight":"16px","letterSpacing":"0.01em","fontWeight":"700"}],"headline-md":["20px",{"lineHeight":"28px","fontWeight":"800"}],"headline-lg":["28px",{"lineHeight":"36px","fontWeight":"800"}]}}}}</script></head><body class="bg-background font-body-md text-body-md text-on-surface antialiased"><aside class="fixed left-0 top-0 h-full w-72 bg-surface-container-lowest shadow-[0_1px_16px_rgba(77,183,254,0.12)] z-50 flex flex-col justify-between py-space-lg px-space-md"><div class="flex flex-col gap-space-lg"><div class="flex items-center gap-space-sm px-space-sm"><div class="w-11 h-11 rounded-lg bg-primary-container text-on-primary-container flex items-center justify-center shadow-[0_4px_12px_rgba(255,158,88,0.35)]"><span class="material-symbols-outlined text-[26px]">cloud_done</span></div><div class="flex flex-col"><span class="font-headline-md text-headline-md text-on-surface leading-tight tracking-tight">CloudPlay OS</span><span class="font-label-sm text-label-sm text-secondary font-bold tracking-wide uppercase">Tin Học 6 Cloud</span></div></div><nav class="flex flex-col gap-space-xs" data-active-classes="bg-primary-fixed text-on-primary-fixed-variant shadow-[0_4px_12px_rgba(149,74,5,0.12)] font-bold"><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all group" data-path="trang-chu" href="#"><div class="w-9 h-9 rounded-full bg-secondary-fixed flex items-center justify-center text-on-secondary-fixed-variant group-hover:scale-105 transition-transform"><span class="material-symbols-outlined text-[20px]">home</span></div><span class="font-label-lg text-label-lg">Trang chủ</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all group" data-path="lo-trinh-hoc-tap" href="#"><div class="w-9 h-9 rounded-full bg-primary-fixed flex items-center justify-center text-on-primary-fixed-variant group-hover:scale-105 transition-transform"><span class="material-symbols-outlined text-[20px]">alt_route</span></div><span class="font-label-lg text-label-lg">Lộ trình học tập</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all group" data-path="lop-hoc-dau-truong-cup" href="#"><div class="w-9 h-9 rounded-full bg-tertiary-fixed flex items-center justify-center text-on-tertiary-fixed-variant group-hover:scale-105 transition-transform"><span class="material-symbols-outlined text-[20px]">emoji_events</span></div><span class="font-label-lg text-label-lg">Lớp học &amp; Đấu trường Cúp</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all group" data-path="tro-ly-ai-cu-vang" href="#"><div class="w-9 h-9 rounded-full bg-secondary-container flex items-center justify-center text-on-secondary-container group-hover:scale-105 transition-transform"><span class="material-symbols-outlined text-[20px]">smart_toy</span></div><span class="font-label-lg text-label-lg">Trợ lý AI Cú Vàng</span></a></nav></div><div class="flex flex-col gap-space-sm px-space-sm"><div class="bg-surface-container-low rounded-lg p-space-md flex flex-col gap-space-xs"><div class="flex items-center justify-between"><span class="font-label-sm text-label-sm text-on-surface-variant">Cloud DB Trực Tuyến</span><span class="flex items-center gap-1.5 font-label-sm text-label-sm text-tertiary font-bold"><span class="w-2.5 h-2.5 rounded-full bg-tertiary-fixed-dim animate-pulse inline-block"></span>Ổn định</span></div><div class="flex items-center justify-between text-on-surface-variant"><span class="font-label-sm text-label-sm">Phiên bản</span><span class="font-label-sm text-label-sm font-semibold">v2.4.0 (Live)</span></div><a class="mt-space-xs flex items-center justify-center gap-space-xs py-1.5 px-space-sm rounded-full bg-surface-container-lowest text-secondary font-label-sm text-label-sm font-bold shadow-[0_2px_8px_rgba(0,100,149,0.08)] hover:bg-secondary-fixed hover:text-on-secondary-fixed-variant transition-colors" data-path="ho-tro-truc-tuyen" href="#"><span class="material-symbols-outlined text-[16px]">support_agent</span>Hỗ trợ trực tuyến</a></div></div></aside><div class="pl-72"><header class="fixed top-0 left-72 right-0 h-20 bg-surface-container-lowest/90 backdrop-blur-xl shadow-[0_1px_12px_rgba(77,183,254,0.08)] z-40 flex items-center justify-between px-space-xl"><div class="flex items-center gap-space-md"><div class="flex flex-col"><span class="font-headline-sm text-headline-sm text-on-surface">Cổng Học Sinh</span><span class="font-label-sm text-label-sm text-on-surface-variant">Phòng Học Trực Tuyến Cloud • THCS</span></div><div class="hidden xl:flex items-center gap-space-xs bg-surface-container-low px-space-md py-1.5 rounded-full text-secondary"><span class="material-symbols-outlined text-[18px]">devices</span><span class="font-label-sm text-label-sm font-bold">Cặp đôi: Minh &amp; An (Máy 12)</span></div></div><div class="flex items-center gap-space-md"><div class="flex items-center gap-space-xs bg-primary-fixed px-space-md py-1.5 rounded-full text-on-primary-fixed-variant shadow-[0_2px_8px_rgba(149,74,5,0.08)]"><span class="material-symbols-outlined text-[18px] text-primary">bolt</span><span class="font-label-lg text-label-lg">1,250 XP</span></div><div class="flex items-center gap-space-xs bg-surface-container px-space-md py-1.5 rounded-full text-on-secondary-container shadow-[0_2px_8px_rgba(0,69,105,0.08)]"><span class="material-symbols-outlined text-[18px] text-primary-container">local_fire_department</span><span class="font-label-lg text-label-lg">Chuỗi 15 ngày</span></div><div class="flex items-center gap-space-xs bg-surface-container-low px-space-sm py-1 rounded-full text-on-surface-variant"><span class="material-symbols-outlined text-[18px]">school</span><span class="font-label-sm text-label-sm font-bold">Học sinh</span></div><button class="w-10 h-10 rounded-full bg-surface-container-low text-on-surface-variant flex items-center justify-center hover:bg-surface-container hover:text-on-surface transition-colors"><span class="material-symbols-outlined text-[20px]">notifications</span></button><div class="flex items-center gap-space-sm pl-space-xs"><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div><div class="flex flex-col text-left"><span class="font-label-lg text-label-lg text-on-surface leading-tight">Em Minh</span><span class="font-label-sm text-label-sm text-on-surface-variant">Lớp 6A10</span></div></div></div></header><main class="relative w-full pt-20 bg-background min-h-screen px-space-xl py-space-lg"><div class="flex flex-col w-full gap-space-lg pb-space-2xl">
+<!-- TOP HERO BREADCRUMB & STAGE STEPPER -->
+<div class="relative overflow-hidden rounded-lg bg-surface-container-lowest p-space-lg shadow-[0_12px_32px_-8px_rgba(77,183,254,0.18)]">
+<!-- Ambient glowing cloud blobs -->
+<div class="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-secondary-container/20 blur-3xl pointer-events-none"></div>
+<div class="absolute left-1/3 -bottom-20 w-80 h-80 rounded-full bg-primary-fixed/30 blur-3xl pointer-events-none"></div>
+<div class="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-space-md mb-space-lg">
+<div class="flex items-center gap-space-md">
+<div class="w-14 h-14 rounded-lg bg-primary-fixed flex items-center justify-center text-primary shadow-[0_6px_16px_rgba(149,74,5,0.15)] flex-shrink-0">
+<span class="material-symbols-outlined text-[32px]">flag_circle</span>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center gap-space-xs">
+<span class="px-space-xs py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-label-sm text-label-sm font-bold uppercase tracking-wider">Tiết 1: Thông tin và dữ liệu</span>
+<span class="w-1.5 h-1.5 rounded-full bg-outline-variant"></span>
+<span class="font-label-sm text-label-sm text-on-surface-variant font-semibold">Chủ đề A • Khám phá máy tính</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mt-0.5">Chặng 4: Vận Dụng &amp; Mở Rộng Kiến Thức Thực Tế</h1>
+</div>
+</div>
+<!-- Mascot mini encouragement chip -->
+<div class="flex items-center gap-space-sm bg-surface-container-low px-space-md py-2.5 rounded-full shadow-[0_4px_12px_rgba(48,58,72,0.06)] self-start lg:self-auto">
+<div class="w-8 h-8 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center font-bold text-sm shadow-inner">
+          🦉
+        </div>
+<div class="flex flex-col pr-1">
+<span class="font-label-sm text-label-sm text-on-surface-variant">Cú Vàng AI cổ vũ</span>
+<span class="font-label-md text-label-md text-on-surface">"Chỉ còn 1 bước cuối để ôm trọn Huy hiệu Tuần 1!"</span>
+</div>
+</div>
+</div>
+<!-- 4-STAGES SERPENTINE PROGRESS BAR -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-space-md pt-space-xs">
+<!-- Stage 1: Done -->
+<div class="group relative flex items-center gap-space-sm bg-surface-container-lowest p-space-sm rounded-lg shadow-[0_4px_16px_rgba(0,108,76,0.08)]">
+<div class="w-10 h-10 rounded-full bg-tertiary-fixed text-on-tertiary-fixed flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-[22px]">check_circle</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-label-sm text-tertiary font-bold uppercase">Chặng 1 • Đã đạt 100đ</span>
+<span class="font-label-md text-label-md text-on-surface truncate">Khởi động: Thế giới dữ liệu</span>
+</div>
+</div>
+<!-- Stage 2: Done -->
+<div class="group relative flex items-center gap-space-sm bg-surface-container-lowest p-space-sm rounded-lg shadow-[0_4px_16px_rgba(0,108,76,0.08)]">
+<div class="w-10 h-10 rounded-full bg-tertiary-fixed text-on-tertiary-fixed flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-[22px]">check_circle</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-label-sm text-tertiary font-bold uppercase">Chặng 2 • Đã đạt 100đ</span>
+<span class="font-label-md text-label-md text-on-surface truncate">Khám phá: Vật mang tin</span>
+</div>
+</div>
+<!-- Stage 3: Done -->
+<div class="group relative flex items-center gap-space-sm bg-surface-container-lowest p-space-sm rounded-lg shadow-[0_4px_16px_rgba(0,108,76,0.08)]">
+<div class="w-10 h-10 rounded-full bg-tertiary-fixed text-on-tertiary-fixed flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-[22px]">check_circle</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-label-sm text-tertiary font-bold uppercase">Chặng 3 • Đã đạt 95đ</span>
+<span class="font-label-md text-label-md text-on-surface truncate">Luyện tập: Phân biệt nhanh</span>
+</div>
+</div>
+<!-- Stage 4: Current Active -->
+<div class="relative flex items-center gap-space-sm bg-primary-fixed p-space-sm rounded-lg shadow-[0_6px_20px_rgba(149,74,5,0.18)]">
+<div class="relative w-10 h-10 rounded-full bg-primary text-on-primary flex items-center justify-center shadow-md">
+<span class="material-symbols-outlined text-[22px] animate-bounce">rocket_launch</span>
+<span class="absolute -top-1 -right-1 w-3.5 h-3.5 bg-primary-container rounded-full animate-ping"></span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-label-sm text-primary font-bold uppercase">Chặng 4 • Đang diễn ra</span>
+<span class="font-label-md text-label-md text-on-primary-fixed-variant truncate">Vận dụng dự án thực tế</span>
+</div>
+</div>
+</div>
+</div>
+<!-- MAIN 2-COLUMN SECTION -->
+<div class="grid grid-cols-1 xl:grid-cols-12 gap-space-lg">
+<!-- LEFT 7 COLS: MISSION DETAILS & FILE TEMPLATE -->
+<div class="xl:col-span-7 flex flex-col gap-space-lg">
+<!-- PROJECT CARD -->
+<div class="rounded-lg bg-surface-container-lowest p-space-xl shadow-[0_12px_32px_-8px_rgba(77,183,254,0.14)] flex flex-col gap-space-md">
+<div class="flex flex-col sm:flex-row sm:items-start justify-between gap-space-sm">
+<div class="flex items-start gap-space-sm">
+<span class="w-12 h-12 rounded-lg bg-secondary-fixed text-on-secondary-fixed-variant flex items-center justify-center flex-shrink-0 shadow-sm">
+<span class="material-symbols-outlined text-[28px]">assignment_turned_in</span>
+</span>
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-secondary font-bold uppercase tracking-wider">Nhiệm vụ trọng tâm</span>
+<h2 class="font-headline-md text-headline-md text-on-surface">Dự án nhỏ tại nhà: Khảo sát thông tin thời tiết 3 ngày &amp; lập bảng biểu theo dõi gia đình</h2>
+</div>
+</div>
+<span class="self-start px-space-sm py-1 rounded-full bg-primary-fixed text-on-primary-fixed-variant font-label-sm text-label-sm font-bold shadow-sm whitespace-nowrap">
+            Hạn: 23:59 Chủ Nhật
+          </span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant">
+          Áp dụng kiến thức: <strong class="text-on-surface">"Dữ liệu là các con số/hình ảnh thu thập được, còn Thông tin là ý nghĩa rút ra từ dữ liệu"</strong>. Em hãy trở thành một nhà khí tượng học nhí cho ngôi nhà của mình!
+        </p>
+<!-- STEPS OVERVIEW (3 CARDS) -->
+<div class="grid grid-cols-1 gap-space-sm pt-space-xs">
+<!-- Step 1 -->
+<div class="flex items-start gap-space-md p-space-md rounded-lg bg-surface-container-low transition-all hover:bg-surface-container">
+<div class="w-10 h-10 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center flex-shrink-0 font-headline-sm text-headline-sm">
+              1
+            </div>
+<div class="flex flex-col gap-0.5">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[18px] text-secondary">thermostat</span>
+<h3 class="font-label-lg text-label-lg text-on-surface">Bước 1: Thu thập số liệu (Thu thập dữ liệu thô)</h3>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+                Ghi chép nhiệt độ (°C), độ ẩm (%), tình trạng trời (nắng/mưa/nhiều mây) vào 3 thời điểm: Sáng (7h), Trưa (12h), Tối (19h) trong 3 ngày liên tiếp thông qua TV, app điện thoại hoặc nhiệt kế trong nhà.
+              </p>
+</div>
+</div>
+<!-- Step 2 -->
+<div class="flex items-start gap-space-md p-space-md rounded-lg bg-surface-container-low transition-all hover:bg-surface-container">
+<div class="w-10 h-10 rounded-full bg-primary-fixed text-on-primary-fixed-variant flex items-center justify-center flex-shrink-0 font-headline-sm text-headline-sm">
+              2
+            </div>
+<div class="flex flex-col gap-0.5">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[18px] text-primary">table_chart</span>
+<h3 class="font-label-lg text-label-lg text-on-surface">Bước 2: Điền vào bảng mẫu theo dõi</h3>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+                Nhập số liệu vào tệp biểu mẫu đính kèm (Word / Excel) hoặc kẻ bảng tay gọn gàng vào vở Tin học và chụp ảnh rõ nét.
+              </p>
+</div>
+</div>
+<!-- Step 3 -->
+<div class="flex items-start gap-space-md p-space-md rounded-lg bg-surface-container-low transition-all hover:bg-surface-container">
+<div class="w-10 h-10 rounded-full bg-tertiary-fixed text-on-tertiary-fixed flex items-center justify-center flex-shrink-0 font-headline-sm text-headline-sm">
+              3
+            </div>
+<div class="flex flex-col gap-0.5">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[18px] text-tertiary">tips_and_updates</span>
+<h3 class="font-label-lg text-label-lg text-on-surface">Bước 3: Rút ra nhận xét &amp; Lời khuyên gia đình</h3>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+                Từ bảng dữ liệu, rút ra thông tin có ích: Ngày nào nhiệt độ biến động nhiều nhất? Đưa ra 2-3 lời khuyên chọn trang phục hoặc bảo vệ sức khỏe cho bố mẹ và bản thân.
+              </p>
+</div>
+</div>
+</div>
+<!-- DOWNLOAD TEMPLATE BOX -->
+<div class="mt-space-xs p-space-md rounded-lg bg-surface-container flex flex-col sm:flex-row items-center justify-between gap-space-md">
+<div class="flex items-center gap-space-md">
+<div class="w-12 h-12 rounded-lg bg-surface-container-lowest text-secondary flex items-center justify-center shadow-[0_2px_8px_rgba(0,100,149,0.12)] flex-shrink-0">
+<span class="material-symbols-outlined text-[28px]">description</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-lg text-label-lg text-on-surface">Mau_Bang_Theo_Doi_Thoi_Tiet.docx</span>
+<div class="flex items-center gap-space-xs text-on-surface-variant font-label-sm text-label-sm">
+<span class="">Dung lượng: 142 KB</span>
+<span class="">•</span>
+<span class="text-tertiary font-bold">Mẫu chuẩn Bộ GD&amp;ĐT</span>
+</div>
+</div>
+</div>
+<button class="w-full sm:w-auto px-space-lg py-2.5 rounded-full bg-secondary text-on-secondary font-label-md text-label-md font-bold flex items-center justify-center gap-space-xs shadow-[0_4px_12px_rgba(0,100,149,0.2)] hover:scale-105 active:scale-95 transition-all" type="button">
+<span class="material-symbols-outlined text-[18px]">cloud_download</span>
+<span class="">Tải tệp mẫu</span>
+</button>
+</div>
+</div>
+<!-- RUBRICS EVALUATION ACCORDION -->
+<div class="rounded-lg bg-surface-container-lowest p-space-lg shadow-[0_12px_32px_-8px_rgba(77,183,254,0.14)]">
+<div class="flex items-center justify-between mb-space-md">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary text-[24px]">verified</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Bảng tiêu chí tự chấm điểm (Rubrics 10đ - TT22)</h3>
+</div>
+<span class="px-space-xs py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed-variant font-label-sm text-label-sm font-bold">Thang điểm 10</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-space-sm">
+<!-- Item 1 -->
+<div class="p-space-md rounded-lg bg-surface-container-low flex flex-col justify-between gap-space-sm">
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-secondary font-bold uppercase">Tiêu chí 1</span>
+<span class="font-headline-sm text-headline-sm text-primary">3.0 đ</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface">Thu thập dữ liệu đầy đủ</span>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Đủ 3 ngày liên tục, đúng 3 mốc thời gian sáng/trưa/tối.</p>
+</div>
+<div class="w-full h-1.5 rounded-full bg-surface-container overflow-hidden">
+<div class="w-full h-full bg-primary rounded-full"></div>
+</div>
+</div>
+<!-- Item 2 -->
+<div class="p-space-md rounded-lg bg-surface-container-low flex flex-col justify-between gap-space-sm">
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-secondary font-bold uppercase">Tiêu chí 2</span>
+<span class="font-headline-sm text-headline-sm text-secondary">4.0 đ</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface">Kẻ bảng &amp; Trình bày</span>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Cột dòng rõ ràng, có đơn vị đo (°C, %), định dạng đẹp mắt.</p>
+</div>
+<div class="w-full h-1.5 rounded-full bg-surface-container overflow-hidden">
+<div class="w-full h-full bg-secondary rounded-full"></div>
+</div>
+</div>
+<!-- Item 3 -->
+<div class="p-space-md rounded-lg bg-surface-container-low flex flex-col justify-between gap-space-sm">
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-secondary font-bold uppercase">Tiêu chí 3</span>
+<span class="font-headline-sm text-headline-sm text-tertiary">3.0 đ</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface">Thông tin &amp; Khuyên bảo</span>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Rút ra kết luận ý nghĩa và có giải pháp trang phục thiết thực.</p>
+</div>
+<div class="w-full h-1.5 rounded-full bg-surface-container overflow-hidden">
+<div class="w-full h-full bg-tertiary rounded-full"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- RIGHT 5 COLS: SUBMISSION ZONE & EXTRA CHALLENGE -->
+<div class="xl:col-span-5 flex flex-col gap-space-lg">
+<!-- CLOUD SUBMISSION ZONE -->
+<div class="rounded-lg bg-surface-container-lowest p-space-xl shadow-[0_12px_32px_-8px_rgba(77,183,254,0.18)] flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="w-8 h-8 rounded-full bg-primary-fixed text-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]">cloud_upload</span>
+</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface">Khu vực nộp bài trực tuyến</h2>
+</div>
+<span class="flex items-center gap-1 font-label-sm text-label-sm text-tertiary font-bold bg-tertiary-fixed/40 px-2 py-0.5 rounded-full">
+<span class="w-2 h-2 rounded-full bg-tertiary animate-pulse"></span>
+            Cloud Sync
+          </span>
+</div>
+<!-- 3 SUBMISSION TABS -->
+<div class="flex p-1 rounded-full bg-surface-container-low gap-1" id="submission-tabs">
+<button class="submission-tab flex-1 py-1.5 px-space-xs rounded-full font-label-sm text-label-sm font-bold text-center bg-surface-container-lowest text-secondary shadow-sm transition-all flex items-center justify-center gap-1" onclick="switchSubmissionTab('tab-upload', this)" type="button">
+<span class="material-symbols-outlined text-[16px]">upload_file</span>
+<span class="">File tệp</span>
+</button>
+<button class="submission-tab flex-1 py-1.5 px-space-xs rounded-full font-label-sm text-label-sm font-semibold text-on-surface-variant hover:text-on-surface text-center transition-all flex items-center justify-center gap-1" onclick="switchSubmissionTab('tab-ocr', this)" type="button">
+<span class="material-symbols-outlined text-[16px]">document_scanner</span>
+<span class="">Chụp vở AI</span>
+</button>
+<button class="submission-tab flex-1 py-1.5 px-space-xs rounded-full font-label-sm text-label-sm font-semibold text-on-surface-variant hover:text-on-surface text-center transition-all flex items-center justify-center gap-1" onclick="switchSubmissionTab('tab-editor', this)" type="button">
+<span class="material-symbols-outlined text-[16px]">edit_note</span>
+<span class="">Gõ bài</span>
+</button>
+</div>
+<!-- TAB 1 CONTENT: DRAG DROP -->
+<div class="tab-content flex flex-col gap-space-sm" id="tab-upload">
+<div class="p-space-lg rounded-lg bg-surface-container-low flex flex-col items-center justify-center text-center gap-space-xs cursor-pointer hover:bg-surface-container transition-colors group">
+<div class="w-12 h-12 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant flex items-center justify-center group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-[28px]">drive_folder_upload</span>
+</div>
+<span class="font-label-lg text-label-lg text-on-surface font-bold">Kéo thả tệp hoặc bấm để chọn</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Hỗ trợ các định dạng: .docx, .xlsx, .pdf (Tối đa 25MB)</span>
+</div>
+</div>
+<!-- TAB 2 CONTENT: AI OCR (Hidden by default) -->
+<div class="tab-content hidden flex-col gap-space-sm" id="tab-ocr">
+<div class="p-space-md rounded-lg bg-surface-container-low flex flex-col gap-space-xs text-center items-center">
+<div class="w-12 h-12 rounded-full bg-primary-fixed text-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-[26px]">photo_camera</span>
+</div>
+<span class="font-label-lg text-label-lg text-on-surface font-bold">Tải ảnh trang vở viết tay</span>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Hệ thống Trợ lý Cú Vàng sẽ tự động quét chữ (AI OCR) chuyển thành văn bản để cô giáo chấm bài nhanh hơn.</p>
+<button class="mt-2 px-space-md py-1.5 rounded-full bg-primary-fixed text-on-primary-fixed-variant font-label-sm text-label-sm font-bold flex items-center gap-1" type="button">
+<span class="material-symbols-outlined text-[16px]">add_a_photo</span>
+<span class="">Chụp ảnh mới / Tải ảnh lên</span>
+</button>
+</div>
+</div>
+<!-- TAB 3 CONTENT: CLOUD TEXT EDITOR (Hidden by default) -->
+<div class="tab-content hidden flex-col gap-space-sm" id="tab-editor">
+<div class="p-space-sm rounded-lg bg-surface-container-low flex flex-col gap-space-xs">
+<div class="flex items-center justify-between pb-1">
+<span class="font-label-sm text-label-sm text-on-surface-variant font-bold">Trình soạn thảo trực tuyến Cloud</span>
+<span class="font-label-sm text-label-sm text-tertiary">Đã lưu nháp</span>
+</div>
+<textarea class="w-full rounded-md p-space-sm bg-surface-container-lowest text-on-surface font-body-sm text-body-sm outline-none resize-none shadow-inner" placeholder="Nhập tóm tắt kết quả theo dõi thời tiết 3 ngày của em tại đây..." rows="4"></textarea>
+</div>
+</div>
+<!-- CURRENT UPLOADED FILE ITEM -->
+<div class="flex flex-col gap-1">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase font-bold tracking-wide">Tệp đính kèm sẵn sàng</span>
+<div class="p-space-sm rounded-lg bg-surface-container flex items-center justify-between">
+<div class="flex items-center gap-space-sm min-w-0">
+<div class="w-10 h-10 rounded-lg bg-surface-container-lowest text-primary flex items-center justify-center shadow-sm flex-shrink-0">
+<span class="material-symbols-outlined text-[24px]">task</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-md text-label-md text-on-surface truncate font-bold">BaiLam_Tuan1_TuanMinh.docx</span>
+<div class="flex items-center gap-space-xs font-label-sm text-label-sm">
+<span class="text-tertiary font-bold flex items-center gap-0.5">
+<span class="material-symbols-outlined text-[14px]">check</span> Sẵn sàng nộp
+                  </span>
+<span class="text-on-surface-variant">• 268 KB</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-1">
+<button class="w-8 h-8 rounded-full bg-surface-container-lowest text-on-surface-variant hover:text-on-surface flex items-center justify-center shadow-sm" title="Xem trước" type="button">
+<span class="material-symbols-outlined text-[18px]">visibility</span>
+</button>
+<button class="w-8 h-8 rounded-full bg-surface-container-lowest text-error hover:bg-error-container flex items-center justify-center shadow-sm" title="Xóa tệp" type="button">
+<span class="material-symbols-outlined text-[18px]">delete</span>
+</button>
+</div>
+</div>
+</div>
+<!-- DEADLINE BADGE -->
+<div class="flex items-center justify-between p-space-sm rounded-lg bg-error-container/40 text-on-error-container">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[20px] text-error">alarm</span>
+<span class="font-label-sm text-label-sm font-bold">Thời hạn nộp bài:</span>
+</div>
+<span class="font-label-md text-label-md font-extrabold text-error">23:59 Chủ Nhật tuần này</span>
+</div>
+<!-- MAIN SUBMIT BUTTON -->
+<button class="w-full py-3.5 px-space-lg rounded-full bg-primary text-on-primary font-headline-sm text-headline-sm shadow-[0_8px_24px_rgba(149,74,5,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-space-sm" id="submit-btn" onclick="triggerSubmitSuccess()" type="button"><span class="material-symbols-outlined text-[24px]">rocket_launch</span><span class="">🚀 Gửi bài làm cho Thầy Trường &amp; Hoàn thành Tiết 1</span></button>
+</div>
+<!-- EXTENSION CHALLENGE & EXTRA TROPHY -->
+<div class="rounded-lg bg-surface-container-lowest p-space-lg shadow-[0_12px_32px_-8px_rgba(77,183,254,0.14)] flex flex-col gap-space-sm relative overflow-hidden">
+<div class="absolute -right-10 -bottom-10 w-32 h-32 rounded-full bg-tertiary-fixed/30 blur-2xl pointer-events-none"></div>
+<div class="flex items-center justify-between">
+<span class="px-space-xs py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed-variant font-label-sm text-label-sm font-bold flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">military_tech</span>
+            Thử thách mở rộng nhận Cúp
+          </span>
+<span class="font-headline-sm text-headline-sm text-primary flex items-center gap-0.5">
+            +50 XP
+          </span>
+</div>
+<div class="flex items-start gap-space-md pt-1">
+<div class="w-12 h-12 rounded-lg bg-surface-container-low flex items-center justify-center text-primary-container flex-shrink-0 shadow-inner">
+<span class="material-symbols-outlined text-[30px]">auto_stories</span>
+</div>
+<div class="flex flex-col gap-0.5">
+<h4 class="font-label-lg text-label-lg text-on-surface">Bài đọc chuyên đề: Lịch sử các vật mang tin</h4>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+              Khám phá hành trình 5.000 năm từ phiến đá cổ Babylon, thẻ tre thời Chiến Quốc cho tới chip nhớ thể rắn và đám mây Cloud hiện đại.
+            </p>
+</div>
+</div>
+<div class="flex items-center justify-between pt-space-xs">
+<div class="flex items-center gap-space-xs text-on-surface-variant font-label-sm text-label-sm">
+<span class="material-symbols-outlined text-[16px]">schedule</span>
+<span class="">Khoảng 4 phút đọc</span>
+</div>
+<button class="px-space-md py-1.5 rounded-full bg-surface-container text-secondary font-label-sm text-label-sm font-bold hover:bg-secondary-fixed hover:text-on-secondary-fixed-variant transition-colors flex items-center gap-1" type="button">
+<span class="">Đọc và nhận Cúp</span>
+<span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- TOAST NOTIFICATION FOR SUBMISSION CONFIRMATION -->
+<div class="fixed bottom-6 right-6 hidden z-50 bg-inverse-surface text-inverse-on-surface p-space-md rounded-lg shadow-2xl flex items-center gap-space-md animate-fade-in max-w-md" id="submit-toast">
+<div class="w-10 h-10 rounded-full bg-tertiary-fixed text-on-tertiary-fixed flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined text-[24px]">verified</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-lg text-label-lg font-bold">Nộp bài thành công!</span>
+<span class="font-body-sm text-body-sm opacity-90">Bài làm đã chuyển đến khay chấm của Thầy Đỗ Mạnh Trường. Bạn nhận được +100 XP!</span>
+</div>
+</div>
+</div>
+<script>
+  function switchSubmissionTab(tabId, el) {
+    // Update tab pills
+    const tabs = document.querySelectorAll('.submission-tab');
+    tabs.forEach(tab => {
+      tab.classList.remove('bg-surface-container-lowest', 'text-secondary', 'shadow-sm');
+      tab.classList.add('text-on-surface-variant', 'font-semibold');
+      tab.classList.remove('font-bold');
+    });
+    el.classList.add('bg-surface-container-lowest', 'text-secondary', 'shadow-sm', 'font-bold');
+    el.classList.remove('text-on-surface-variant', 'font-semibold');
+
+    // Update tab content displays
+    const contents = document.querySelectorAll('.tab-content');
+    contents.forEach(c => {
+      c.classList.add('hidden');
+      c.classList.remove('flex');
+    });
+    const target = document.getElementById(tabId);
+    if (target) {
+      target.classList.remove('hidden');
+      target.classList.add('flex');
+    }
+  }
+
+  function triggerSubmitSuccess() {
+    const toast = document.getElementById('submit-toast');
+    const btn = document.getElementById('submit-btn');
+    
+    // Animate button
+    btn.innerHTML = `<span class="material-symbols-outlined text-[24px] animate-spin">refresh</span><span>Đang truyền tệp lên Cloud...</span>`;
+    btn.disabled = true;
+    
+    setTimeout(() => {
+      btn.innerHTML = `<span class="material-symbols-outlined text-[24px]">check_circle</span><span>Đã gửi thành công cho Cô Hoàng Lan!</span>`;
+      btn.classList.remove('bg-primary');
+      btn.classList.add('bg-tertiary');
+      
+      toast.classList.remove('hidden');
+      setTimeout(() => {
+        toast.classList.add('hidden');
+      }, 5000);
+    }, 900);
+  }
+</script></main></div>
+
+</body></html>

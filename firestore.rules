@@ -1,0 +1,254 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0: Global Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'manhtruongdo1984@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Entity Validation Blueprints
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+        'uid', 'displayName', 'studentCode', 'classId', 'role',
+        'xp', 'streakDays', 'stars', 'groupNumber', 'partnerName',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'uid', 'displayName', 'studentCode', 'classId', 'role',
+        'xp', 'streakDays', 'stars', 'groupNumber', 'partnerName',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+      data.studentCode is string && data.studentCode.size() >= 1 && data.studentCode.size() <= 32 && data.studentCode.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.classId is string && data.classId.size() >= 1 && data.classId.size() <= 16 && data.classId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.role is string && (data.role == 'student' || data.role == 'teacher') &&
+      data.xp is int && data.xp >= 0 && data.xp <= 1000000 &&
+      data.streakDays is int && data.streakDays >= 0 && data.streakDays <= 3650 &&
+      data.stars is int && data.stars >= 0 && data.stars <= 10000 &&
+      data.groupNumber is int && data.groupNumber >= 1 && data.groupNumber <= 4 &&
+      data.partnerName is string && data.partnerName.size() >= 1 && data.partnerName.size() <= 80 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidWorksheetSubmission(data) {
+      return data.keys().hasAll([
+        'submissionId', 'studentUid', 'studentName', 'studentCode',
+        'classId', 'lessonId', 'stageId', 'score', 'maxScore',
+        'status', 'answersSummary', 'teacherFeedback', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'submissionId', 'studentUid', 'studentName', 'studentCode',
+        'classId', 'lessonId', 'stageId', 'score', 'maxScore',
+        'status', 'answersSummary', 'teacherFeedback', 'createdAt', 'updatedAt'
+      ]) &&
+      data.submissionId is string && data.submissionId.size() >= 1 && data.submissionId.size() <= 128 && data.submissionId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.studentUid is string && data.studentUid.size() >= 1 && data.studentUid.size() <= 128 && data.studentUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 80 &&
+      data.studentCode is string && data.studentCode.size() >= 1 && data.studentCode.size() <= 32 && data.studentCode.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.classId is string && data.classId.size() >= 1 && data.classId.size() <= 16 && data.classId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.lessonId is string && data.lessonId.size() >= 1 && data.lessonId.size() <= 64 && data.lessonId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.stageId is int && data.stageId >= 1 && data.stageId <= 4 &&
+      (data.score is int || data.score is float) && data.score >= 0 && data.score <= 10 &&
+      (data.maxScore is int || data.maxScore is float) && data.maxScore == 10 &&
+      data.status is string && (data.status == 'in_progress' || data.status == 'submitted' || data.status == 'graded') &&
+      data.answersSummary is string && data.answersSummary.size() >= 1 && data.answersSummary.size() <= 2000 &&
+      data.teacherFeedback is string && data.teacherFeedback.size() >= 0 && data.teacherFeedback.size() <= 1000 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidLessonConfig(data) {
+      return data.keys().hasAll([
+        'lessonId', 'authorUid', 'classId', 'title', 'topic',
+        'activeStage', 'status', 'videoUrl', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'lessonId', 'authorUid', 'classId', 'title', 'topic',
+        'activeStage', 'status', 'videoUrl', 'createdAt', 'updatedAt'
+      ]) &&
+      data.lessonId is string && data.lessonId.size() >= 1 && data.lessonId.size() <= 128 && data.lessonId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128 && data.authorUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.classId is string && data.classId.size() >= 1 && data.classId.size() <= 16 && data.classId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+      data.topic is string && data.topic.size() >= 1 && data.topic.size() <= 200 &&
+      data.activeStage is int && data.activeStage >= 1 && data.activeStage <= 4 &&
+      data.status is string && (data.status == 'draft' || data.status == 'published' || data.status == 'archived') &&
+      data.videoUrl is string && data.videoUrl.size() >= 1 && data.videoUrl.size() <= 500 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidWordCloudEntry(data) {
+      return data.keys().hasAll([
+        'entryId', 'authorUid', 'authorName', 'classId', 'lessonId', 'word', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'entryId', 'authorUid', 'authorName', 'classId', 'lessonId', 'word', 'createdAt'
+      ]) &&
+      data.entryId is string && data.entryId.size() >= 1 && data.entryId.size() <= 128 && data.entryId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128 && data.authorUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+      data.classId is string && data.classId.size() >= 1 && data.classId.size() <= 16 && data.classId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.lessonId is string && data.lessonId.size() >= 1 && data.lessonId.size() <= 64 && data.lessonId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.word is string && data.word.size() >= 1 && data.word.size() <= 60 &&
+      data.createdAt is timestamp;
+    }
+
+    // Collection 1: /admins/{adminUid}
+    match /admins/{adminUid} {
+      allow get: if isVerifiedUser() && isValidId(adminUid) && (adminUid == request.auth.uid || isAdmin());
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+
+    // Collection 2: /users/{userId}
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || existing().classId == '6A10' || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || resource.data.classId == '6A10' || isBootstrappedAdmin());
+
+      allow create: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        userId == request.auth.uid &&
+        incoming().uid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (incoming().role == 'student' || isAdmin());
+
+      allow update: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (
+            userId == request.auth.uid &&
+            incoming().role == existing().role &&
+            incoming().studentCode == existing().studentCode &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'classId', 'xp', 'streakDays', 'stars', 'groupNumber', 'partnerName', 'updatedAt'
+            ])
+          ) ||
+          isAdmin()
+        );
+
+      allow delete: if isVerifiedUser() && isValidId(userId) && isAdmin();
+    }
+
+    // Collection 3: /worksheets/{submissionId}
+    match /worksheets/{submissionId} {
+      allow get: if isSignedIn() && isValidId(submissionId) && (existing().studentUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.studentUid == request.auth.uid || isBootstrappedAdmin());
+
+      allow create: if isVerifiedUser() &&
+        isValidId(submissionId) &&
+        isValidWorksheetSubmission(incoming()) &&
+        incoming().submissionId == submissionId &&
+        incoming().studentUid == request.auth.uid &&
+        incoming().status != 'graded' &&
+        incoming().teacherFeedback == '' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser() &&
+        isValidId(submissionId) &&
+        isValidWorksheetSubmission(incoming()) &&
+        incoming().submissionId == existing().submissionId &&
+        incoming().studentUid == existing().studentUid &&
+        incoming().lessonId == existing().lessonId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (
+            existing().studentUid == request.auth.uid &&
+            existing().status != 'graded' &&
+            incoming().status != 'graded' &&
+            incoming().teacherFeedback == existing().teacherFeedback &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'score', 'status', 'answersSummary', 'updatedAt'
+            ])
+          ) ||
+          isAdmin()
+        );
+
+      allow delete: if isVerifiedUser() && isValidId(submissionId) && isAdmin();
+    }
+
+    // Collection 4: /lessons/{lessonId}
+    match /lessons/{lessonId} {
+      allow get: if isSignedIn() && isValidId(lessonId) && (existing().status == 'published' || existing().authorUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.status == 'published' || resource.data.authorUid == request.auth.uid || isBootstrappedAdmin());
+
+      allow create: if isVerifiedUser() &&
+        isValidId(lessonId) &&
+        isValidLessonConfig(incoming()) &&
+        incoming().lessonId == lessonId &&
+        incoming().authorUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+
+      allow update: if isVerifiedUser() &&
+        isValidId(lessonId) &&
+        isValidLessonConfig(incoming()) &&
+        incoming().lessonId == existing().lessonId &&
+        incoming().authorUid == existing().authorUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'classId', 'title', 'topic', 'activeStage', 'status', 'videoUrl', 'updatedAt'
+        ]) &&
+        isAdmin();
+
+      allow delete: if isVerifiedUser() && isValidId(lessonId) && isAdmin();
+    }
+
+    // Collection 5: /wordCloudEntries/{entryId}
+    match /wordCloudEntries/{entryId} {
+      allow get: if isSignedIn() && isValidId(entryId) && (existing().classId == '6A10' || existing().authorUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.classId == '6A10' || resource.data.authorUid == request.auth.uid || isBootstrappedAdmin());
+
+      allow create: if isVerifiedUser() &&
+        isValidId(entryId) &&
+        isValidWordCloudEntry(incoming()) &&
+        incoming().entryId == entryId &&
+        incoming().authorUid == request.auth.uid &&
+        incoming().createdAt == request.time;
+
+      allow update: if false;
+      allow delete: if isVerifiedUser() && isValidId(entryId) && isAdmin();
+    }
+  }
+}

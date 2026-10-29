@@ -1,0 +1,6 @@
+{
+  "name": "CloudPlay Learning OS - Tin Học THPT & THCS",
+  "description": "Hệ thống phiếu học tập điện tử và Web App tương tác phát triển năng lực tự học môn Tin học với kho bài tập đa phương tiện, chấm điểm tự động AI, đồng bộ Cloud thời gian thực và chế độ ngoại tuyến.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
