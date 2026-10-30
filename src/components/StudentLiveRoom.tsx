@@ -1,0 +1,710 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  type CurriculumPeriodSpec,
+  type LiveClassroomSession,
+  type StudentRosterItem,
+  type StudentWorkDraft,
+  type TaggedLessonSubmission,
+  INITIAL_MINIGAME_QUESTIONS,
+} from '../data/mockCurriculumData';
+import {
+  WarmupEssayActivity,
+  DragDropActivity,
+  FillBlankActivity,
+  MatchingActivity,
+  ShortAnswerActivity,
+  QuizArena25sActivity,
+  GoogleDrivePracticalActivity,
+  ApplicationThreeTasksActivity,
+} from './InteractiveActivities';
+import { PeerReviewModal } from './PeerReviewModal';
+import {
+  playStageBroadcastSound,
+  triggerSynchronizedCelebration,
+} from '../utils/soundEffects';
+
+interface StudentLiveRoomProps {
+  currentStudent: StudentRosterItem;
+  students: StudentRosterItem[];
+  periodSpec: CurriculumPeriodSpec;
+  liveSession?: LiveClassroomSession;
+  unlockedStages: Record<number, boolean>;
+  companionMode?: 'unselected' | 'paired' | 'solo';
+  onExitLiveRoom: () => void;
+  onAwardXp: (delta: number) => void;
+  onShowToast: (msg: string) => void;
+  onUpdateDraft?: (updater: (prev: StudentWorkDraft) => StudentWorkDraft) => void;
+  onSaveSubmission?: (sub: Partial<TaggedLessonSubmission>) => void;
+}
+
+export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
+  currentStudent,
+  students,
+  periodSpec,
+  liveSession,
+  unlockedStages,
+  companionMode = 'paired',
+  onExitLiveRoom,
+  onAwardXp,
+  onShowToast,
+}) => {
+  const teacherCurrentStage = (liveSession?.activeStage as 1 | 2 | 3 | 4) || 1;
+  const [activeStage, setActiveStage] = useState<1 | 2 | 3 | 4>(teacherCurrentStage);
+  const [stage2SubTab, setStage2SubTab] = useState<'drag' | 'fill' | 'match' | 'short'>('drag');
+  const [showPeerReviewModal, setShowPeerReviewModal] = useState(false);
+  const [completedStages, setCompletedStages] = useState<Record<number, boolean>>({});
+
+  // Track last teacher broadcast stage so whenever Teacher switches activity, Student automatically follows
+  const lastTeacherStageRef = useRef<number>(teacherCurrentStage);
+
+  useEffect(() => {
+    const incomingStage = liveSession?.activeStage;
+    if (incomingStage && incomingStage !== lastTeacherStageRef.current) {
+      lastTeacherStageRef.current = incomingStage;
+      setActiveStage(incomingStage);
+      playStageBroadcastSound();
+      onShowToast(
+        `📢 Giáo viên vừa phát trực tiếp Hoạt động ${incomingStage} — Màn hình của em đã tự động chuyển sang Hoạt động ${incomingStage}!`
+      );
+    }
+  }, [liveSession?.activeStage]);
+
+  // Stage 2 local state
+  const [dragSlots, setDragSlots] = useState<Record<number, string | null>>({});
+  const [fillBlankAnswers, setFillBlankAnswers] = useState<{ a: string; b: string; c: string }>({
+    a: '',
+    b: '',
+    c: '',
+  });
+  const [matchingConnections, setMatchingConnections] = useState<Record<string, string>>({});
+  const [shortAnswers, setShortAnswers] = useState<Record<string, string>>({});
+  const [warmupAnswer, setWarmupAnswer] = useState('');
+  const [appAnswers, setAppAnswers] = useState({
+    deepAnalysis: '',
+    practicalTask: '',
+    extendedTask: '',
+  });
+
+  const isSolo =
+    companionMode === 'solo' ||
+    !currentStudent.partnerName ||
+    currentStudent.partnerName === 'Học cá nhân (1 mình)';
+
+  const partnerStudent = isSolo
+    ? null
+    : students.find((s) => s.id === currentStudent.partnerId) || {
+        name: currentStudent.partnerName || 'Nguyễn Bảo An',
+      };
+
+  // A stage is unlocked if:
+  // 1) It is Stage 1, OR
+  // 2) It is unlocked in unlockedStages, OR
+  // 3) It is <= the teacher's current activeStage (so students can ALWAYS go back to previous activities to finish them!)
+  const isStageUnlocked = (stage: 1 | 2 | 3 | 4): boolean => {
+    return Boolean(
+      stage === 1 ||
+        unlockedStages[stage] ||
+        stage <= teacherCurrentStage
+    );
+  };
+
+  // Nav items per Image 1
+  const navItems = [
+    {
+      id: 1 as const,
+      label: 'Khởi động',
+      icon: 'psychology',
+      points: '1.0đ',
+    },
+    {
+      id: 2 as const,
+      label: 'Khám phá',
+      icon: 'menu_book',
+      points: '4.0đ',
+    },
+    {
+      id: 3 as const,
+      label: 'Luyện tập',
+      icon: 'extension',
+      points: '3.0đ',
+    },
+    {
+      id: 4 as const,
+      label: 'Vận dụng',
+      icon: 'assignment_turned_in',
+      points: '2.0đ',
+    },
+  ];
+
+  const markStageCompleted = (stage: 1 | 2 | 3 | 4, xpBonus: number, msg: string) => {
+    setCompletedStages((prev) => ({ ...prev, [stage]: true }));
+    triggerSynchronizedCelebration('xp');
+    onAwardXp(xpBonus);
+    onShowToast(msg);
+  };
+
+  return (
+    <div className="flex w-full min-h-screen bg-white text-slate-900">
+      {/* 1. LEFT VERTICAL SIDEBAR - BRIGHT WHITE THEME MATCHING IMAGE 1 */}
+      <aside className="w-64 bg-white border-r border-slate-200 p-5 flex flex-col justify-between shrink-0 shadow-xs">
+        <div className="flex flex-col gap-6">
+          {/* Orange Rounded Pill "Trang chủ" Button from Image 1 */}
+          <button
+            type="button"
+            onClick={onExitLiveRoom}
+            className="w-full flex items-center gap-3 px-5 py-3.5 rounded-full bg-gradient-to-r from-orange-400 to-orange-500 hover:from-orange-500 hover:to-orange-600 text-white font-bold text-sm shadow-md transition-all cursor-pointer"
+            title="Quay lại Trang chủ học sinh"
+          >
+            <span className="material-symbols-outlined text-[22px]">dashboard</span>
+            <span>Trang chủ</span>
+          </button>
+
+          {/* 4 Activities Menu matching Image 1 */}
+          <div className="flex flex-col gap-1.5">
+            <span className="px-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Tiến trình bài học Live
+            </span>
+            <nav className="flex flex-col gap-2">
+              {navItems.map((item) => {
+                const unlocked = isStageUnlocked(item.id);
+                const isActive = activeStage === item.id;
+                const isTeacherBroadcastingThis = teacherCurrentStage === item.id;
+                const isDone = Boolean(completedStages[item.id]);
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      if (!unlocked) {
+                        onShowToast(
+                          `🔒 Hoạt động ${item.id} (${item.label}) đang chờ Giáo viên phát hoặc mở khóa!`
+                        );
+                        return;
+                      }
+                      setActiveStage(item.id);
+                    }}
+                    className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl text-left font-bold text-sm transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-orange-50 text-orange-900 border-2 border-orange-300 shadow-xs'
+                        : unlocked
+                        ? 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-100 hover:border-slate-200'
+                        : 'text-slate-400 bg-slate-50/70 border border-slate-100 opacity-60 cursor-not-allowed'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span
+                        className={`material-symbols-outlined text-[22px] ${
+                          isActive
+                            ? 'text-orange-600'
+                            : unlocked
+                            ? 'text-slate-600'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        {item.icon}
+                      </span>
+                      <div className="flex flex-col min-w-0">
+                        <span className="truncate">{item.label}</span>
+                        {isTeacherBroadcastingThis && (
+                          <span className="text-[10px] font-extrabold text-red-600 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-ping" />
+                            GV đang phát
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {!unlocked ? (
+                        <span className="material-symbols-outlined text-[16px] text-slate-400">
+                          lock
+                        </span>
+                      ) : isDone ? (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-black">
+                          ✓ Xong
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-bold text-slate-500">
+                          {item.points}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Guide notice that students can go back to earlier stages */}
+          <div className="p-3.5 rounded-2xl bg-sky-50/80 border border-sky-100 text-xs text-sky-900 flex flex-col gap-1">
+            <div className="font-bold flex items-center gap-1.5 text-sky-800">
+              <span className="material-symbols-outlined text-[16px]">sync</span>
+              <span>Đồng bộ tự động &amp; Quay lại</span>
+            </div>
+            <p className="text-[11px] text-sky-700 leading-relaxed">
+              Màn hình tự động chuyển khi Giáo viên phát hoạt động mới. Em có thể bấm vào các hoạt động trước để hoàn thiện bài!
+            </p>
+          </div>
+        </div>
+
+        {/* Live Status & Companion Mini Card at bottom of sidebar */}
+        <div className="flex flex-col gap-2.5 p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+            <span className="flex items-center gap-1.5 text-red-600">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+              <span>Phòng Học Live</span>
+            </span>
+            <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600 text-[11px]">
+              Tiết {periodSpec.period}
+            </span>
+          </div>
+
+          <div className="text-xs text-slate-600 truncate">
+            {partnerStudent ? (
+              <>
+                Bạn cùng máy: <strong className="text-sky-700">{partnerStudent.name}</strong>
+              </>
+            ) : (
+              <>
+                Hình thức: <strong className="text-indigo-700">Học cá nhân (1 mình)</strong>
+              </>
+            )}
+          </div>
+
+          {partnerStudent && (
+            <button
+              type="button"
+              onClick={() => setShowPeerReviewModal(true)}
+              className="w-full py-2 px-3 rounded-full bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors shadow-2xs"
+            >
+              <span className="material-symbols-outlined text-[15px]">rate_review</span>
+              <span>Đánh giá bạn cùng cặp</span>
+            </button>
+          )}
+        </div>
+      </aside>
+
+      {/* 2. MAIN LIVE ROOM CONTENT AREA - BRIGHT WHITE STUDENT-FRIENDLY */}
+      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-slate-50/40">
+        {/* Top Header of Live Room */}
+        <header className="h-16 px-6 bg-white border-b border-slate-200 flex items-center justify-between gap-4 sticky top-0 z-20 shadow-2xs">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="px-3 py-1 rounded-full bg-red-50 text-red-600 border border-red-200 text-xs font-black flex items-center gap-1.5 shrink-0">
+              <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
+              <span>ĐANG HỌC LIVE (HĐ {teacherCurrentStage})</span>
+            </div>
+            <h1 className="text-base sm:text-lg font-black text-slate-900 truncate">
+              Khối {periodSpec.grade} • Tiết {periodSpec.period}: {periodSpec.lessonTitle}
+            </h1>
+          </div>
+
+          <div className="flex items-center gap-2.5 shrink-0">
+            <div className="hidden md:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-100 border border-slate-200/80 text-xs font-bold text-slate-700">
+              <span>HS:</span>
+              <strong className="text-orange-600">{currentStudent.name}</strong>
+              <span className="text-slate-300">|</span>
+              {partnerStudent ? (
+                <>
+                  <span>Cùng máy:</span>
+                  <strong className="text-sky-700">{partnerStudent.name}</strong>
+                </>
+              ) : (
+                <strong className="text-indigo-700">Học cá nhân (1 mình)</strong>
+              )}
+            </div>
+
+            <div className="px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-xs font-black flex items-center gap-1">
+              <span>✪</span>
+              <span>{currentStudent.xp.toLocaleString()} XP</span>
+            </div>
+
+            {partnerStudent && (
+              <button
+                type="button"
+                onClick={() => setShowPeerReviewModal(true)}
+                className="px-3.5 py-1.5 rounded-full bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+              >
+                <span className="material-symbols-outlined text-[16px]">stars</span>
+                <span className="hidden sm:inline">Đánh giá bạn</span>
+              </button>
+            )}
+          </div>
+        </header>
+
+        {/* Content of the active stage */}
+        <div className="p-6 sm:p-8 max-w-5xl mx-auto w-full flex flex-col gap-5">
+          {/* Banner when viewing a previous activity while Teacher is broadcasting a newer activity */}
+          {activeStage !== teacherCurrentStage && (
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-50 via-orange-50 to-sky-50 border border-amber-200 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+              <div className="flex items-center gap-2.5">
+                <span className="material-symbols-outlined text-orange-600 text-[22px]">
+                  history_edu
+                </span>
+                <div className="text-xs sm:text-sm text-slate-800">
+                  Em đang xem lại <strong>Hoạt động {activeStage}</strong> để hoàn thiện bài. Giáo viên hiện đang phát{' '}
+                  <strong className="text-red-600">Hoạt động {teacherCurrentStage}</strong>.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveStage(teacherCurrentStage)}
+                className="px-4 py-2 rounded-full bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5 transition-all"
+              >
+                <span className="material-symbols-outlined text-[16px]">sensors</span>
+                <span>Chuyển tới Hoạt động {teacherCurrentStage} cùng Giáo viên →</span>
+              </button>
+            </div>
+          )}
+
+          {/* Quick Previous / Next Activity Navigation Bar for Student */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white px-5 py-3.5 rounded-2xl border border-slate-200/80 shadow-2xs">
+            <div className="flex items-center gap-2">
+              {activeStage > 1 ? (
+                <button
+                  type="button"
+                  onClick={() => setActiveStage((activeStage - 1) as 1 | 2 | 3 | 4)}
+                  className="px-4 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                  <span>
+                    Quay lại Hoạt động {activeStage - 1} ({navItems[activeStage - 2].label}) để hoàn thiện
+                  </span>
+                </button>
+              ) : (
+                <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px] text-orange-500">
+                    flag
+                  </span>
+                  <span>Bắt đầu từ Hoạt động 1: Khởi động</span>
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {activeStage < 4 && isStageUnlocked((activeStage + 1) as 1 | 2 | 3 | 4) && (
+                <button
+                  type="button"
+                  onClick={() => setActiveStage((activeStage + 1) as 1 | 2 | 3 | 4)}
+                  className="px-4 py-2 rounded-full bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
+                >
+                  <span>
+                    Sang Hoạt động {activeStage + 1} ({navItems[activeStage].label})
+                  </span>
+                  <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {!isStageUnlocked(activeStage) ? (
+            /* LOCKED STAGE NOTICE */
+            <div className="p-12 rounded-3xl bg-white border-2 border-dashed border-slate-200 text-center flex flex-col items-center gap-4 shadow-xs">
+              <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">
+                <span className="material-symbols-outlined text-[32px]">lock_clock</span>
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  Hoạt động {activeStage}: {navItems.find((n) => n.id === activeStage)?.label} đang chờ Giáo viên mở khóa
+                </h2>
+                <p className="text-sm text-slate-500 max-w-md mt-1">
+                  Thầy/Cô đang điều khiển tiến trình lớp học trực tiếp. Khi thầy/cô chuyển sang hoạt động này, màn hình của em sẽ tự động mở khóa và hiển thị ngay!
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveStage(teacherCurrentStage)}
+                className="px-5 py-2.5 rounded-full bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-sm cursor-pointer"
+              >
+                Quay về Hoạt động {teacherCurrentStage} đang mở
+              </button>
+            </div>
+          ) : (
+            /* UNLOCKED STAGE CONTENT */
+            <div className="flex flex-col gap-6">
+              {/* STAGE 1: KHỞI ĐỘNG */}
+              {activeStage === 1 && (
+                <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-5">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center font-black">
+                        1
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-bold text-slate-900">Hoạt động 1: Khởi động</h2>
+                        <p className="text-xs text-slate-500">
+                          Tình huống dẫn nhập &amp; khám phá bài học mới
+                        </p>
+                      </div>
+                    </div>
+                    <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold">
+                      1.0 điểm
+                    </span>
+                  </div>
+
+                  <WarmupEssayActivity
+                    title="Tình huống mở đầu bài học"
+                    scenario={`Trong bài học "${periodSpec.lessonTitle}", em hãy quan sát tình huống thực tế và thảo luận câu trả lời.`}
+                    question={
+                      periodSpec.yccd || 'Nêu những hiểu biết ban đầu của em về chủ đề này.'
+                    }
+                    sampleAnswer="Gợi ý: Dữ liệu là các con số, hình ảnh, văn bản; thông tin là ý nghĩa rút ra từ dữ liệu."
+                    points={1.0}
+                    studentAnswer={warmupAnswer}
+                    onAnswerChange={(val) => setWarmupAnswer(val)}
+                    onSubmitAnswer={() => {
+                      markStageCompleted(
+                        1,
+                        30,
+                        '🎵✓ Đã hoàn thành Hoạt động 1: Khởi động (+30 XP)!'
+                      );
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* STAGE 2: KHÁM PHÁ (WORKSHEET) */}
+              {activeStage === 2 && (
+                <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-sky-100 text-sky-800 flex items-center justify-center font-black">
+                        2
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-bold text-slate-900">Hoạt động 2: Khám phá</h2>
+                        <p className="text-xs text-slate-500">
+                          Phiếu học tập tương tác chuẩn GDPT 2018 (4.0 điểm)
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Sub-tabs for Stage 2 */}
+                    <div className="flex items-center gap-1.5 p-1 rounded-full bg-slate-100">
+                      {[
+                        { id: 'drag', label: '1. Kéo thả' },
+                        { id: 'fill', label: '2. Điền khuyết' },
+                        { id: 'match', label: '3. Nối cột' },
+                        { id: 'short', label: '4. Trả lời ngắn' },
+                      ].map((st) => (
+                        <button
+                          key={st.id}
+                          type="button"
+                          onClick={() => setStage2SubTab(st.id as any)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                            stage2SubTab === st.id
+                              ? 'bg-sky-600 text-white shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {st.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {stage2SubTab === 'drag' && (
+                    <DragDropActivity
+                      title="Kéo thả thuật ngữ & phân loại"
+                      instruction="Kéo các từ ngữ vào đúng ô phân loại phù hợp."
+                      wordBank={['Thông tin', 'Dữ liệu', 'Vật mang tin', 'Xử lý thông tin']}
+                      slots={dragSlots}
+                      onSlotChange={(s, val) =>
+                        setDragSlots((prev) => ({ ...prev, [s]: val }))
+                      }
+                    />
+                  )}
+
+                  {stage2SubTab === 'fill' && (
+                    <FillBlankActivity
+                      title="Điền từ thích hợp vào chỗ trống"
+                      answers={fillBlankAnswers}
+                      onChange={(k, val) =>
+                        setFillBlankAnswers((prev) => ({ ...prev, [k]: val }))
+                      }
+                    />
+                  )}
+
+                  {stage2SubTab === 'match' && (
+                    <MatchingActivity
+                      title="Nối cột Khái niệm với Diễn giải tương ứng"
+                      connections={matchingConnections}
+                      onConnect={(a: string, b: string) =>
+                        setMatchingConnections((prev) => ({ ...prev, [a]: b }))
+                      }
+                      onDisconnect={(a: string) =>
+                        setMatchingConnections((prev) => {
+                          const copy = { ...prev };
+                          delete copy[a];
+                          return copy;
+                        })
+                      }
+                    />
+                  )}
+
+                  {stage2SubTab === 'short' && (
+                    <ShortAnswerActivity
+                      answers={shortAnswers}
+                      onChange={(k, val) =>
+                        setShortAnswers((prev) => ({ ...prev, [k]: val }))
+                      }
+                    />
+                  )}
+
+                  <div className="pt-4 border-t border-slate-100 flex items-center justify-between flex-wrap gap-3">
+                    <span className="text-xs text-slate-500">
+                      💡 Em có thể chuyển qua lại giữa 4 phần hoặc quay lại Hoạt động 1 bất cứ lúc nào.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        markStageCompleted(
+                          2,
+                          40,
+                          '🎵🎉 Đã nộp Phiếu học tập Hoạt động 2: Khám phá (+40 XP)!'
+                        )
+                      }
+                      className="px-6 py-2.5 rounded-full bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-700 hover:to-blue-700 text-white text-xs font-bold shadow-md cursor-pointer flex items-center gap-1.5"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                      <span>Hoàn thành &amp; Nộp Phiếu Khám Phá (+40 XP)</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STAGE 3: LUYỆN TẬP (ARENA 25S & DRIVE PRACTICAL) */}
+              {activeStage === 3 && (
+                <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-6">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-purple-100 text-purple-800 flex items-center justify-center font-black">
+                        3
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-bold text-slate-900">Hoạt động 3: Luyện tập</h2>
+                        <p className="text-xs text-slate-500">
+                          Đấu trường trắc nghiệm 25s &amp; Nộp sản phẩm thực hành
+                        </p>
+                      </div>
+                    </div>
+                    <span className="px-3 py-1 rounded-full bg-purple-100 text-purple-800 text-xs font-bold">
+                      3.0 điểm
+                    </span>
+                  </div>
+
+                  <QuizArena25sActivity
+                    questions={INITIAL_MINIGAME_QUESTIONS.map((q) => ({
+                      id: q.id,
+                      level: q.status || 'Nhận biết',
+                      question: q.question,
+                      points: 0.5,
+                      options: q.options,
+                      explanation:
+                        q.options.find((o) => o.isCorrect)?.explanation ||
+                        'Đáp án chính xác theo sách giáo khoa.',
+                    }))}
+                    lessonContext={`Tiết ${periodSpec.period}: ${periodSpec.lessonTitle}`}
+                    onShowToast={onShowToast}
+                    onFinish={(earned) => {
+                      const bonus = Math.max(20, Math.round(earned * 20));
+                      markStageCompleted(
+                        3,
+                        bonus,
+                        `🎵🎉 Hoàn thành Đấu trường 25s! Em nhận được +${bonus} XP!`
+                      );
+                    }}
+                  />
+
+                  {periodSpec.lessonType === 'practice' && (
+                    <div className="mt-4 pt-4 border-t border-slate-100">
+                      <GoogleDrivePracticalActivity
+                        classId={currentStudent.classId}
+                        studentName={currentStudent.name}
+                        studentId={currentStudent.id}
+                        studentUsername={currentStudent.username || currentStudent.id}
+                        grade={periodSpec.grade}
+                        period={periodSpec.period}
+                        lessonTitle={periodSpec.lessonTitle}
+                        folderName={`Thư mục Tiết ${periodSpec.period}`}
+                        drivePath={`Google Drive / Lớp ${currentStudent.classId}`}
+                        existingSubmissions={[]}
+                        onSubmitProduct={() =>
+                          markStageCompleted(
+                            3,
+                            50,
+                            '🎵☁️ Đã nộp sản phẩm thực hành lên Google Drive thành công (+50 XP)!'
+                          )
+                        }
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* STAGE 4: VẬN DỤNG */}
+              {activeStage === 4 && (
+                <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-6">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-black">
+                        4
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-bold text-slate-900">Hoạt động 4: Vận dụng</h2>
+                        <p className="text-xs text-slate-500">
+                          Giải quyết vấn đề thực tiễn &amp; ứng dụng số
+                        </p>
+                      </div>
+                    </div>
+                    <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
+                      2.0 điểm
+                    </span>
+                  </div>
+
+                  <ApplicationThreeTasksActivity
+                    title="Vận dụng kiến thức vào đời sống"
+                    deepAnalysis={{
+                      title: '1. Phân tích thực tế',
+                      prompt:
+                        'Em hãy nêu một ví dụ về dữ liệu số trong đời sống hàng ngày của gia đình em.',
+                    }}
+                    practicalTask={{
+                      title: '2. Nhiệm vụ thực hành',
+                      prompt:
+                        'Thiết kế một bảng danh mục thông tin để ghi chép các công việc trong tuần.',
+                    }}
+                    extendedTask={{
+                      title: '3. Mở rộng sáng tạo',
+                      prompt:
+                        'Đề xuất cách bảo vệ thông tin cá nhân khi sử dụng mạng xã hội.',
+                    }}
+                    answers={appAnswers}
+                    onAnswerChange={(field, val) =>
+                      setAppAnswers((prev) => ({ ...prev, [field]: val }))
+                    }
+                    onSubmit={() => {
+                      markStageCompleted(
+                        4,
+                        50,
+                        '🎵🎉 Đã nộp bài Vận dụng thành công! (+50 XP)'
+                      );
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* Peer Review Modal */}
+      <PeerReviewModal
+        isOpen={showPeerReviewModal}
+        onClose={() => setShowPeerReviewModal(false)}
+        currentStudent={currentStudent}
+        onShowToast={onShowToast}
+      />
+    </div>
+  );
+};

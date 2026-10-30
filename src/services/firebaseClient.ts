@@ -7,11 +7,13 @@ import {
   onAuthStateChanged,
   type User,
 } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { sanitizeId, sanitizeString } from '../utils/pedagogyEngine';
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+export const firestoreDb = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const googleAuthProvider = new GoogleAuthProvider();
 
 // Keep Firebase Auth ID token strictly in memory (never in localStorage)

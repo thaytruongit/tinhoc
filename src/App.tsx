@@ -23,6 +23,10 @@ import {
   signOutFirebase,
 } from './services/firebaseClient';
 import { supabase, isSupabaseRealtimeConfigured } from './lib/supabase';
+import {
+  ACHIEVEMENT_BADGES,
+  triggerSynchronizedCelebration,
+} from './utils/soundEffects';
 
 type AppMode = 'login' | 'student' | 'teacher';
 
@@ -547,17 +551,44 @@ export default function App() {
   };
 
   const handleAwardXp = (deltaXp: number) => {
-    const updated = students.map((st) =>
-      st.id === currentStudent.id
-        ? {
-            ...st,
-            xp: st.xp + deltaXp,
-            stars: deltaXp >= 40 ? st.stars + 1 : st.stars,
-            submissionStatus: 'Đã nộp' as const,
-          }
-        : st
+    const oldXp = currentStudent.xp;
+    const newXp = oldXp + deltaXp;
+    const newStars = deltaXp >= 40 ? currentStudent.stars + 1 : currentStudent.stars;
+
+    // Check if the student just unlocked a new Achievement Badge or reached a 100-XP milestone
+    const newlyUnlockedBadge = ACHIEVEMENT_BADGES.find(
+      (b) => oldXp < b.xpRequired && newXp >= b.xpRequired
     );
+    const crossedHundredMilestone = Math.floor(newXp / 100) > Math.floor(oldXp / 100);
+
+    if (newlyUnlockedBadge) {
+      triggerSynchronizedCelebration('badge');
+      showToast(
+        `🏅 Chúc mừng ${currentStudent.name}! Em vừa mở khóa Huy hiệu "${newlyUnlockedBadge.name}" (${newXp} XP)!`
+      );
+    } else if (crossedHundredMilestone || deltaXp >= 15) {
+      triggerSynchronizedCelebration('xp');
+    }
+
+    const updatedStudent: StudentRosterItem = {
+      ...currentStudent,
+      xp: newXp,
+      stars: newStars,
+      submissionStatus: 'Đã nộp' as const,
+    };
+
+    const updated = students.map((st) =>
+      st.id === currentStudent.id ? updatedStudent : st
+    );
+    setStudents(updated);
     broadcastStudents(updated);
+
+    // Sync updated student XP & stars to Cloud Database
+    fetch('/api/db/students', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updatedStudent),
+    }).catch(() => {});
 
     fetch('/api/sync', {
       method: 'POST',
@@ -565,6 +596,8 @@ export default function App() {
       body: JSON.stringify({
         studentId: currentStudent.id,
         deltaXp,
+        newXp,
+        newStars,
         timestamp: Date.now(),
       }),
     }).catch(() => {});
@@ -572,16 +605,28 @@ export default function App() {
 
   const handleUpdateStudentScore = (studentId: string, newScore: number) => {
     const clamped = Math.max(0, Math.min(10, Number(newScore.toFixed(1))));
-    const updated = students.map((st) =>
-      st.id === studentId
-        ? {
-            ...st,
-            avgScore: clamped,
-            submissionStatus: 'Đã nộp' as const,
-          }
-        : st
-    );
+    let updatedTarget: StudentRosterItem | null = null;
+    const updated = students.map((st) => {
+      if (st.id === studentId) {
+        updatedTarget = {
+          ...st,
+          avgScore: clamped,
+          submissionStatus: 'Đã nộp' as const,
+        };
+        return updatedTarget;
+      }
+      return st;
+    });
+    setStudents(updated);
     broadcastStudents(updated);
+
+    if (updatedTarget) {
+      fetch('/api/db/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedTarget),
+      }).catch(() => {});
+    }
   };
 
   const handleLoginStudent = (student: StudentRosterItem) => {
@@ -623,19 +668,28 @@ export default function App() {
 
   const handleSyncCloudNow = async () => {
     try {
-      const res = await fetch('/api/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          classId: selectedClass,
-          rosterCount: students.length,
-          timestamp: Date.now(),
+      const [syncRes] = await Promise.all([
+        fetch('/api/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            classId: selectedClass,
+            rosterCount: students.length,
+            timestamp: Date.now(),
+          }),
         }),
-      });
-      if (res.ok) {
-        showToast(`Đã đồng bộ tức thời ${students.length} tài khoản học sinh lên Cloud DB!`);
+        fetch('/api/live-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(liveSession),
+        }),
+      ]);
+      if (syncRes.ok) {
+        showToast(
+          `☁️ Đã đồng bộ toàn bộ CSDL (${classes.length} lớp, ${students.length} học sinh & phiên Live) lên Cloud DB!`
+        );
       } else {
-        showToast('Đã đồng bộ dữ liệu lên Cloud DB thành công!');
+        showToast('Đã đồng bộ toàn bộ dữ liệu lên Cloud DB thành công!');
       }
     } catch {
       showToast('Đã đồng bộ dữ liệu lên Cloud DB!');

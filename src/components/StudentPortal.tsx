@@ -38,8 +38,14 @@ import { evaluateAnswerBySuggestedPercentage } from '../utils/essayPercentageGra
 import { StudentNotificationBannerModal } from './StudentNotificationBannerModal';
 import { StudentWorksheetScanner, type ExtractedWorksheetData } from './StudentWorksheetScanner';
 import { DataBoundary } from './DataBoundary';
+import { PeerReviewModal } from './PeerReviewModal';
+import confetti from 'canvas-confetti';
+import { StudentCompanionSelector, type CompanionSelectionMode } from './StudentCompanionSelector';
+import { StudentLiveRoom } from './StudentLiveRoom';
+import { StudentMetricsDashboard } from './StudentMetricsDashboard';
+import { StudentActivityFeed } from './StudentActivityFeed';
 
-export type StudentView = 'trang-chu' | 'tro-ly-ai-cu-vang';
+export type StudentView = 'trang-chu' | 'tro-ly-ai-cu-vang' | 'huy-hieu' | 'bang-xep-hang' | 'nhat-ky-hoat-dong';
 
 interface StudentPortalProps {
   currentStudent: StudentRosterItem;
@@ -93,10 +99,87 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   // Active stage rendered directly below the serpentine roadmap on the Lesson Learning Roadmap page
   const [activeInlineStage, setActiveInlineStage] = useState<1 | 2 | 3 | 4>(1);
   const [examFilter, setExamFilter] = useState<'ALL' | 'GK1' | 'CK1' | 'GK2' | 'CK2'>('ALL');
+  const [lessonDisplayMode, setLessonDisplayMode] = useState<'grid' | 'list'>('grid');
 
   // Always in Focus Mode (Chế độ tập trung) for students to eliminate distractions
   const [isFocusMode] = useState<boolean>(true);
   const [stage2SubTab, setStage2SubTab] = useState<'drag' | 'fill' | 'match' | 'short'>('drag');
+
+  // 2 Tabs for Student Homepage per user request:
+  // Tab 1: 'hoc-live' (only displays the single active live session period)
+  // Tab 2: 'toan-bo-tiet-hoc' (displays all 29 periods with self-study lock restriction)
+  const [homeTab, setHomeTab] = useState<'hoc-live' | 'toan-bo-tiet-hoc'>('hoc-live');
+  const [isInLiveRoom, setIsInLiveRoom] = useState<boolean>(false);
+
+  // Mandatory Companion Selection Gate before entering Live Room:
+  // Student must explicitly confirm a companion ('paired') or no companion ('solo') first
+  const [companionMode, setCompanionMode] = useState<CompanionSelectionMode>('unselected');
+  const [forceCompanionModal, setForceCompanionModal] = useState<boolean>(false);
+  const [pendingLiveTarget, setPendingLiveTarget] = useState<{
+    period: number;
+    stage: 1 | 2 | 3 | 4;
+  } | null>(null);
+
+  // Class and Grade Rankings
+  const classMatesList = students.filter((s) => s.classId === currentStudent.classId);
+  const sortedClass = [...classMatesList].sort((a, b) => b.xp - a.xp);
+  const classRank = Math.max(1, sortedClass.findIndex((s) => s.id === currentStudent.id) + 1);
+
+  const gradeStudentsList = students.filter(
+    (s) => s.grade === selectedGrade || Number(s.classId?.charAt(0)) === selectedGrade
+  );
+  const sortedGrade = [...gradeStudentsList].sort((a, b) => b.xp - a.xp);
+  const gradeRank = Math.max(1, sortedGrade.findIndex((s) => s.id === currentStudent.id) + 1);
+
+  const handleUpdatePartner = (partner: StudentRosterItem | null) => {
+    const nextPartnerName = partner ? partner.name : 'Học cá nhân (1 mình)';
+    const nextPartnerId = partner ? partner.id : '';
+    currentStudent.partnerName = nextPartnerName;
+    currentStudent.partnerId = nextPartnerId;
+    setCompanionMode(partner ? 'paired' : 'solo');
+
+    try {
+      const saved = localStorage.getItem('cloudplay_students_roster_v4');
+      if (saved) {
+        const list = JSON.parse(saved);
+        const updated = list.map((s: any) =>
+          s.id === currentStudent.id
+            ? { ...s, partnerName: nextPartnerName, partnerId: nextPartnerId }
+            : s
+        );
+        localStorage.setItem('cloudplay_students_roster_v4', JSON.stringify(updated));
+      }
+    } catch {}
+
+    // Sync updated student partner info to Cloud Database
+    fetch('/api/db/students', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        students: [{ ...currentStudent, partnerName: nextPartnerName, partnerId: nextPartnerId }],
+      }),
+    }).catch(() => {});
+
+    if (partner) {
+      onShowToast(`Đã chọn bạn ${partner.name} ngồi cùng máy thành công!`);
+    } else {
+      onShowToast('Đã xác nhận chế độ Học cá nhân (Không có bạn đồng hành ngồi cùng máy)!');
+    }
+  };
+
+  const handleRequestEnterLiveRoom = (periodNum: number, stageNum: 1 | 2 | 3 | 4) => {
+    if (companionMode === 'unselected') {
+      setPendingLiveTarget({ period: periodNum, stage: stageNum });
+      setForceCompanionModal(true);
+      onShowToast(
+        '👥 Vui lòng chọn Bạn đồng hành ngồi cùng máy hoặc chọn "Không có bạn đồng hành (1 mình)" trước khi vào Phòng Live!'
+      );
+      return;
+    }
+    setOpenedPeriodNumber(periodNum);
+    setActiveInlineStage(stageNum);
+    setIsInLiveRoom(true);
+  };
 
   // Check if Teacher is currently broadcasting Live specifically to this student's Grade AND Class
   const isLiveForStudentClass = Boolean(
@@ -164,6 +247,28 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   };
 
   const gradePeriods = getPeriodsForGrade(selectedGrade);
+
+  // Student Profile Metrics
+  const profileMetrics = (
+    <div className="grid grid-cols-3 gap-4 mb-8">
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-outline-variant/20 flex flex-col items-center">
+            <span className="text-secondary font-bold">Điểm XP</span>
+            <span className="text-2xl font-black text-primary">{currentStudent.xp}</span>
+            <span className="text-xs text-on-surface-variant">Còn {1000 - (currentStudent.xp % 1000)} XP nữa lên cấp</span>
+        </div>
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-outline-variant/20 flex flex-col items-center">
+            <span className="text-secondary font-bold">Ngôi sao</span>
+            <span className="text-2xl font-black text-amber-500">{currentStudent.stars}</span>
+            <span className="text-xs text-on-surface-variant">Hạng #{currentStudent.groupNumber} trong Lớp</span>
+        </div>
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-outline-variant/20 flex flex-col items-center">
+            <span className="text-secondary font-bold">Thành tích</span>
+            <span className="text-2xl font-black text-emerald-600">Top {currentStudent.groupNumber}</span>
+            <span className="text-xs text-on-surface-variant">Khối {selectedGrade}</span>
+        </div>
+    </div>
+  );
+
   const filteredPeriods =
     examFilter === 'ALL'
       ? gradePeriods
@@ -344,6 +449,16 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
   const [worksheetSubmitted, setWorksheetSubmitted] = useState(false);
   const [worksheetScore, setWorksheetScore] = useState<number | null>(null);
+  
+  // Achievement Toast Notification
+  const [achievementToast, setAchievementToast] = useState<{title: string, stars: number} | null>(null);
+  useEffect(() => {
+    if (achievementToast) {
+      const timer = setTimeout(() => setAchievementToast(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [achievementToast]);
+
 
   // ================= HOẠT ĐỘNG 4: VẬN DỤNG =================
   const [stage4Submitted, setStage4Submitted] = useState(false);
@@ -355,6 +470,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
   // ================= SCANNER COMPONENT (AI GEMINI VISION OCR) =================
   const [showWorksheetScannerModal, setShowWorksheetScannerModal] = useState<boolean>(false);
+  const [showPeerReviewModal, setShowPeerReviewModal] = useState<boolean>(false);
+
 
   const handleApplyExtractedScannerData = (data: ExtractedWorksheetData) => {
     if (data.dragSlots && Object.keys(data.dragSlots).length > 0) {
@@ -971,6 +1088,26 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     sendGeminiChatMessage(tutorInput);
   };
 
+  // DEDICATED STUDENT LIVE ROOM (BRIGHT WHITE THEME, AUTO-FOLLOWS TEACHER BROADCAST STAGE)
+  if (isInLiveRoom && openedPeriodNumber !== null) {
+    return (
+      <StudentLiveRoom
+        currentStudent={currentStudent}
+        students={students}
+        periodSpec={currentPeriodSpec}
+        liveSession={liveSession}
+        unlockedStages={currentPeriodUnlocked}
+        companionMode={companionMode}
+        onExitLiveRoom={() => {
+          setIsInLiveRoom(false);
+          setOpenedPeriodNumber(null);
+        }}
+        onAwardXp={onAwardXp}
+        onShowToast={onShowToast}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background text-on-surface antialiased">
       {/* LEFT SIDEBAR — HIDDEN IN FOCUS MODE FOR ZERO DISTRACTION */}
@@ -1031,6 +1168,86 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   <span className="font-label-lg text-label-lg truncate">Trợ lý AI Cú Vàng</span>
                   <span className="font-body-sm text-body-sm text-on-surface-variant truncate">
                     Gemini Chatbot Sư Phạm
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeView('huy-hieu')}
+                className={`flex items-center gap-space-sm px-space-md py-3 rounded-lg transition-all group text-left cursor-pointer ${
+                  activeView === 'huy-hieu'
+                    ? 'bg-primary-fixed text-on-primary-fixed-variant shadow-[0_4px_12px_rgba(149,74,5,0.12)] font-bold'
+                    : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
+                }`}
+              >
+                <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-600 flex items-center justify-center group-hover:scale-105 transition-transform shrink-0">
+                  <span className="material-symbols-outlined text-[22px]">military_tech</span>
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="font-label-lg text-label-lg truncate">Huy hiệu thành tựu</span>
+                  <span className="font-body-sm text-body-sm text-on-surface-variant truncate">
+                    {currentStudent.stars} Sao • Hồ sơ huy hiệu
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeView('nhat-ky-hoat-dong')}
+                className={`flex items-center gap-space-sm px-space-md py-3 rounded-lg transition-all group text-left cursor-pointer ${
+                  activeView === 'nhat-ky-hoat-dong'
+                    ? 'bg-primary-fixed text-on-primary-fixed-variant shadow-[0_4px_12px_rgba(149,74,5,0.12)] font-bold'
+                    : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
+                }`}
+              >
+                <div className="w-10 h-10 rounded-full bg-blue-500/20 text-blue-600 flex items-center justify-center group-hover:scale-105 transition-transform shrink-0">
+                  <span className="material-symbols-outlined text-[22px]">history</span>
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="font-label-lg text-label-lg truncate">Nhật ký hoạt động</span>
+                  <span className="font-body-sm text-body-sm text-on-surface-variant truncate">
+                    Lịch sử học tập & Thành tựu
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeView('bang-xep-hang')}
+                className={`flex items-center gap-space-sm px-space-md py-3 rounded-lg transition-all group text-left cursor-pointer ${
+                  activeView === 'bang-xep-hang'
+                    ? 'bg-primary-fixed text-on-primary-fixed-variant shadow-[0_4px_12px_rgba(149,74,5,0.12)] font-bold'
+                    : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
+                }`}
+              >
+                <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-600 flex items-center justify-center group-hover:scale-105 transition-transform shrink-0">
+                  <span className="material-symbols-outlined text-[22px]">leaderboard</span>
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="font-label-lg text-label-lg truncate">Bảng xếp hạng</span>
+                  <span className="font-body-sm text-body-sm text-on-surface-variant truncate">
+                    Theo lớp &amp; Theo khối
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeView('nhat-ky-hoat-dong')}
+                className={`flex items-center gap-space-sm px-space-md py-3 rounded-lg transition-all group text-left cursor-pointer ${
+                  activeView === 'nhat-ky-hoat-dong'
+                    ? 'bg-primary-fixed text-on-primary-fixed-variant shadow-[0_4px_12px_rgba(149,74,5,0.12)] font-bold'
+                    : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
+                }`}
+              >
+                <div className="w-10 h-10 rounded-full bg-violet-500/20 text-violet-600 flex items-center justify-center group-hover:scale-105 transition-transform shrink-0">
+                  <span className="material-symbols-outlined text-[22px]">history</span>
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="font-label-lg text-label-lg truncate">Nhật ký hoạt động</span>
+                  <span className="font-body-sm text-body-sm text-on-surface-variant truncate">
+                    Lịch sử học tập &amp; thành tựu
                   </span>
                 </div>
               </button>
@@ -1289,199 +1506,345 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               {/* CASE A: 29-PERIOD CURRICULUM ROADMAP OVERVIEW */}
               {openedPeriodNumber === null ? (
                 <>
-                  {/* Top Filter Bar & Live Broadcast Highlight (Compact & Clean) */}
-                  <section className="relative w-full rounded-2xl bg-surface-container-lowest p-4 shadow-xs border border-outline-variant/20">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {[
-                          { id: 'ALL', label: 'Tất cả (29)' },
-                          { id: 'GK1', label: 'GK1 (T1–T7)' },
-                          { id: 'CK1', label: 'CK1 (T8–T15)' },
-                          { id: 'GK2', label: 'GK2 (T16–T22)' },
-                          { id: 'CK2', label: 'CK2 (T23–T27)' },
-                        ].map((f) => (
-                          <button
-                            key={f.id}
-                            type="button"
-                            onClick={() =>
-                              setExamFilter(f.id as 'ALL' | 'GK1' | 'CK1' | 'GK2' | 'CK2')
-                            }
-                            className={`px-3 py-1 rounded-full font-label-sm text-xs transition-all cursor-pointer ${
-                              examFilter === f.id
-                                ? 'bg-secondary text-on-secondary font-bold shadow-2xs'
-                                : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container'
-                            }`}
-                          >
-                            {f.label}
-                          </button>
-                        ))}
-                      </div>
+                  {/* 1. STUDENT COMPANION SELECTOR (MATCHES IMAGE 2 WITH GREETING, XP PROGRESS BAR & COMPANION CARDS) */}
+                  <StudentCompanionSelector
+                    currentStudent={currentStudent}
+                    students={students}
+                    classRank={classRank}
+                    totalClassStudents={classMatesList.length || 40}
+                    gradeRank={gradeRank}
+                    totalGradeStudents={gradeStudentsList.length || 80}
+                    companionMode={companionMode}
+                    onConfirmCompanionMode={(mode) => setCompanionMode(mode)}
+                    onUpdatePartner={handleUpdatePartner}
+                    onShowToast={onShowToast}
+                    forceOpenModal={forceCompanionModal}
+                    onCloseForcedModal={() => setForceCompanionModal(false)}
+                    onProceedToLiveAfterSelect={() => {
+                      const targetPeriod =
+                        pendingLiveTarget?.period || liveSession?.activePeriod || 1;
+                      const targetStage =
+                        pendingLiveTarget?.stage || liveSession?.activeStage || 1;
+                      setPendingLiveTarget(null);
+                      setOpenedPeriodNumber(targetPeriod);
+                      setActiveInlineStage(targetStage);
+                      setIsInLiveRoom(true);
+                    }}
+                  />
 
-                      {isLiveForStudentClass && liveSession && (
-                        <button
-                          type="button"
-                          onClick={handleJoinTeacherLiveLesson}
-                          className="py-1.5 px-3.5 rounded-full bg-error text-on-error font-label-sm text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer animate-pulse"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">sensors</span>
-                          <span>Đang học Live Tiết {liveSession.activePeriod} — Vào ngay</span>
-                        </button>
+                  {/* 2. DUAL TAB SWITCHER: TAB 1 (HỌC LIVE) & TAB 2 (TOÀN BỘ TIẾT HỌC) */}
+                  <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-100 border border-slate-200/80 w-fit">
+                    <button
+                      type="button"
+                      onClick={() => setHomeTab('hoc-live')}
+                      className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+                        homeTab === 'hoc-live'
+                          ? 'bg-white text-orange-600 shadow-xs border border-orange-200'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+                      <span>Tab 1: Học Live</span>
+                      {isLiveForStudentClass && (
+                        <span className="px-2 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-black">
+                          ĐANG PHÁT
+                        </span>
                       )}
-                    </div>
-                  </section>
+                    </button>
 
-                  {/* Compact Icon ListView of 29 Periods wrapped in DataBoundary */}
-                  <DataBoundary
-                    data={filteredPeriods}
-                    isLoading={false}
-                    emptyTitle={`Chưa có tiết học nào thuộc đợt ${examFilter}`}
-                    emptyDescription="Vui lòng chọn 'Tất cả (29)' để xem đầy đủ chương trình."
-                  >
-                    {(periodsList) => (
-                      <section
-                        data-testid="student-periods-listview"
-                        className="bg-surface-container-lowest rounded-2xl border border-outline-variant/25 divide-y divide-outline-variant/15 overflow-hidden shadow-xs"
-                      >
-                        {periodsList.map((spec) => {
-                          const unlockedMap = getUnlockedStagesForPeriod(selectedGrade, spec.period);
-                          const isLiveLesson =
-                            isLiveForStudentClass && liveSession?.activePeriod === spec.period;
-                          const isLockedByLive =
-                            isLiveForStudentClass && liveSession?.activePeriod !== spec.period;
-                          const taughtByTeacher = isPeriodTaughtByTeacher(spec.period);
-                          const learnedByStudent = isPeriodLearnedByStudent(spec.period);
-                          const selfStudyReady = taughtByTeacher || learnedByStudent;
-                          const unlockedCount = [1, 2, 3, 4].filter(
-                            (s) => unlockedMap[s as 1 | 2 | 3 | 4]
-                          ).length;
+                    <button
+                      type="button"
+                      onClick={() => setHomeTab('toan-bo-tiet-hoc')}
+                      className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+                        homeTab === 'toan-bo-tiet-hoc'
+                          ? 'bg-white text-sky-700 shadow-xs border border-sky-200'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[18px]">calendar_view_month</span>
+                      <span>Tab 2: Toàn bộ tiết học (29 tiết)</span>
+                    </button>
+                  </div>
 
-                          return (
-                            <div
-                              key={spec.id}
-                              onClick={() => {
-                                if (isLockedByLive) {
-                                  onShowToast(
-                                    `🔴 Lớp đang học Live Tiết ${liveSession?.activePeriod}, không thể chuyển sang tiết khác!`
-                                  );
-                                  return;
-                                }
-                                setOpenedPeriodNumber(spec.period);
-                                setActiveInlineStage(
-                                  isLiveLesson && liveSession?.activeStage
-                                    ? liveSession.activeStage
-                                    : 1
-                                );
-                              }}
-                              className={`px-3.5 py-2.5 flex items-center justify-between gap-3 transition-all ${
-                                isLockedByLive
-                                  ? 'opacity-45 cursor-not-allowed bg-surface-container-low/40'
-                                  : isLiveLesson
-                                  ? 'bg-primary-fixed/25 cursor-pointer hover:bg-primary-fixed/35'
-                                  : 'hover:bg-surface-container-low/80 cursor-pointer'
-                              }`}
-                            >
-                              {/* Left: Compact Icon + Period Number + Title */}
-                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                                <span
-                                  className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
-                                    isLiveLesson
-                                      ? 'bg-error text-on-error'
-                                      : selfStudyReady
-                                      ? 'bg-tertiary text-on-tertiary'
-                                      : 'bg-secondary-fixed text-on-secondary-fixed-variant'
-                                  }`}
-                                >
-                                  {spec.period}
-                                </span>
-                                <span
-                                  className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${
-                                    spec.lessonType === 'practice'
-                                      ? 'bg-tertiary-fixed/70 text-on-tertiary-container'
-                                      : 'bg-surface-container text-secondary'
-                                  }`}
-                                  title={spec.lessonType === 'practice' ? 'Thực hành' : 'Lý thuyết'}
-                                >
-                                  <span className="material-symbols-outlined text-[15px]">
-                                    {spec.lessonType === 'practice' ? 'terminal' : 'menu_book'}
-                                  </span>
-                                </span>
-                                <div className="min-w-0 flex-1 flex items-center gap-2">
-                                  <span className="text-sm font-bold text-on-surface truncate">
-                                    {spec.lessonTitle}
-                                  </span>
-                                  <span className="hidden sm:inline-block px-2 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px] font-bold shrink-0">
-                                    {spec.examMilestone === 'TONG_KET' ? 'TK' : spec.examMilestone}
-                                  </span>
-                                </div>
-                              </div>
+                  {/* TAB 1: HỌC LIVE (HIỂN THỊ DUY NHẤT TIẾT LIVE) */}
+                  {homeTab === 'hoc-live' ? (
+                    <div className="w-full rounded-3xl bg-white p-6 sm:p-8 border border-slate-100 shadow-xs flex flex-col gap-5">
+                      {isLiveForStudentClass && liveSession ? (
+                        <div className="flex flex-col gap-6">
+                          <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100">
+                            <div className="flex items-center gap-2.5">
+                              <span className="px-3.5 py-1.5 rounded-full bg-red-500 text-white text-xs font-black flex items-center gap-1.5 animate-pulse">
+                                <span className="w-2 h-2 rounded-full bg-white" />
+                                <span>TIẾT HỌC ĐANG PHÁT TRỰC TIẾP</span>
+                              </span>
+                              <span className="text-xs text-slate-500 font-semibold">
+                                Lớp {liveSession.activeClassId} • Khối {liveSession.activeGrade}
+                              </span>
+                            </div>
 
-                              {/* Right: Compact Stage Icons & Enter Action */}
-                              <div className="flex items-center gap-2 shrink-0">
-                                <div className="hidden md:flex items-center gap-1">
-                                  {([1, 2, 3, 4] as const).map((stNum) => {
-                                    const isOpen = unlockedMap[stNum];
-                                    return (
-                                      <span
-                                        key={stNum}
-                                        title={`Hoạt động ${stNum}: ${isOpen ? 'Đã mở' : 'Khóa'}`}
-                                        className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold ${
-                                          isOpen
-                                            ? 'bg-tertiary-fixed text-on-tertiary-container'
-                                            : 'bg-surface-container text-on-surface-variant opacity-50'
-                                        }`}
-                                      >
-                                        {stNum}
-                                      </span>
-                                    );
-                                  })}
-                                </div>
+                            <div className="flex items-center gap-2 text-xs text-slate-600 font-medium">
+                              <span>Trạng thái ghép cặp:</span>
+                              {companionMode === 'paired' ? (
+                                <strong className="px-2.5 py-1 rounded-full bg-sky-50 border border-sky-200 text-sky-700 font-bold">
+                                  👥 Học cùng: {currentStudent.partnerName}
+                                </strong>
+                              ) : companionMode === 'solo' ? (
+                                <strong className="px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold">
+                                  👤 Học cá nhân (1 mình)
+                                </strong>
+                              ) : (
+                                <strong className="px-2.5 py-1 rounded-full bg-amber-50 border border-amber-300 text-amber-800 font-bold">
+                                  ⚠️ Chưa xác nhận bạn đồng hành
+                                </strong>
+                              )}
+                            </div>
+                          </div>
 
-                                {!isLockedByLive && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => handleToggleStudentLearnedPeriod(spec.period, e)}
-                                    title={
-                                      learnedByStudent
-                                        ? 'Đã đánh dấu đã học (Mở tự luyện)'
-                                        : 'Đánh dấu đã học để tự luyện'
-                                    }
-                                    className={`w-7 h-7 rounded-lg flex items-center justify-center cursor-pointer transition-all ${
-                                      learnedByStudent
-                                        ? 'bg-tertiary text-on-tertiary'
-                                        : 'bg-surface-container text-on-surface-variant hover:bg-secondary-fixed'
-                                    }`}
-                                  >
-                                    <span className="material-symbols-outlined text-[15px]">
-                                      {learnedByStudent ? 'task_alt' : 'check'}
-                                    </span>
-                                  </button>
-                                )}
-
-                                {isLiveLesson ? (
-                                  <span className="px-2.5 py-1 rounded-lg bg-error text-on-error text-[11px] font-bold flex items-center gap-1">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-on-error animate-ping" />
-                                    LIVE
-                                  </span>
-                                ) : isLockedByLive ? (
-                                  <span className="px-2 py-1 rounded-lg bg-surface-container text-on-surface-variant text-[11px] font-semibold flex items-center gap-1">
-                                    <span className="material-symbols-outlined text-[13px]">lock</span>
-                                    Khóa Live
+                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-gradient-to-r from-red-50 via-orange-50/50 to-amber-50 p-6 rounded-2xl border border-red-100">
+                            <div className="flex flex-col gap-2">
+                              <span className="text-xs uppercase tracking-wider font-bold text-red-600">
+                                Tiết {liveSession.activePeriod} • Chương trình GDPT 2018
+                              </span>
+                              <h2 className="text-xl sm:text-2xl font-black text-slate-900">
+                                {gradePeriods.find((p) => p.period === liveSession.activePeriod)
+                                  ?.lessonTitle || 'Thông tin và dữ liệu'}
+                              </h2>
+                              <p className="text-xs sm:text-sm text-slate-600">
+                                Giáo viên đang phát <strong>Hoạt động {liveSession.activeStage || 1}</strong>.{' '}
+                                {companionMode === 'unselected' ? (
+                                  <span className="text-amber-700 font-bold">
+                                    (Hãy xác nhận bạn đồng hành hoặc học 1 mình để mở khóa vào Phòng Live)
                                   </span>
                                 ) : (
-                                  <span className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-xs font-bold flex items-center gap-1">
-                                    <span>{unlockedCount}/4</span>
-                                    <span className="material-symbols-outlined text-[14px]">
-                                      chevron_right
-                                    </span>
+                                  <span className="text-emerald-700 font-bold">
+                                    ✓ Đã xác nhận chế độ đồng hành — Sẵn sàng vào Phòng Live!
                                   </span>
                                 )}
-                              </div>
+                              </p>
                             </div>
-                          );
-                        })}
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleRequestEnterLiveRoom(
+                                  liveSession.activePeriod,
+                                  liveSession.activeStage || 1
+                                )
+                              }
+                              className="px-8 py-4 rounded-full bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white font-black text-sm shadow-lg hover:shadow-xl transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0 animate-pulse"
+                            >
+                              <span className="material-symbols-outlined text-[22px]">
+                                {companionMode === 'unselected' ? 'group_add' : 'play_circle'}
+                              </span>
+                              <span>
+                                {companionMode === 'unselected'
+                                  ? 'CHỌN BẠN ĐỒNG HÀNH & VÀO PHÒNG LIVE'
+                                  : 'VÀO PHÒNG HỌC LIVE NGAY'}
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="py-12 flex flex-col items-center justify-center text-center gap-3">
+                          <div className="w-16 h-16 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center">
+                            <span className="material-symbols-outlined text-[32px]">sensors_off</span>
+                          </div>
+                          <h3 className="text-base font-bold text-slate-800">
+                            Chưa có tiết học nào đang phát trực tiếp
+                          </h3>
+                          <p className="text-xs text-slate-500 max-w-md">
+                            Thầy/Cô sẽ kích hoạt tiết live khi bắt đầu buổi học trên lớp. Em hãy chuẩn bị máy và bạn đồng hành, hoặc chuyển sang <strong>Tab 2: Toàn bộ tiết học</strong> để tự luyện bài tập đã học!
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setHomeTab('toan-bo-tiet-hoc')}
+                            className="mt-2 px-5 py-2.5 rounded-full bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-xs cursor-pointer"
+                          >
+                            Xem toàn bộ 29 tiết học
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* TAB 2: TOÀN BỘ TIẾT HỌC (29 TIẾT CÓ KHÓA TỰ LUYỆN CHỈ MỞ SAU KHI ĐÃ HỌC) */
+                    <div className="flex flex-col gap-4">
+                      {/* Filter Bar */}
+                      <section className="relative w-full rounded-2xl bg-white p-4 shadow-xs border border-slate-100">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => setLessonDisplayMode('grid')}
+                              className={`p-1.5 rounded-lg transition-all ${
+                                lessonDisplayMode === 'grid'
+                                  ? 'bg-sky-600 text-white'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}
+                              title="Chế độ lưới icon"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">grid_view</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setLessonDisplayMode('list')}
+                              className={`p-1.5 rounded-lg transition-all ${
+                                lessonDisplayMode === 'list'
+                                  ? 'bg-sky-600 text-white'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}
+                              title="Chế độ danh sách"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">list</span>
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {[
+                              { id: 'ALL', label: 'Tất cả (29)' },
+                              { id: 'GK1', label: 'GK1 (T1–T7)' },
+                              { id: 'CK1', label: 'CK1 (T8–T15)' },
+                              { id: 'GK2', label: 'GK2 (T16–T22)' },
+                              { id: 'CK2', label: 'CK2 (T23–T27)' },
+                            ].map((f) => (
+                              <button
+                                key={f.id}
+                                type="button"
+                                onClick={() =>
+                                  setExamFilter(f.id as 'ALL' | 'GK1' | 'CK1' | 'GK2' | 'CK2')
+                                }
+                                className={`px-3 py-1 rounded-full font-label-sm text-xs transition-all cursor-pointer ${
+                                  examFilter === f.id
+                                    ? 'bg-sky-700 text-white font-bold shadow-2xs'
+                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                }`}
+                              >
+                                {f.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </section>
-                    )}
-                  </DataBoundary>
+
+                      {/* 29 Periods Icon Grid View */}
+                      <DataBoundary
+                        data={filteredPeriods}
+                        isLoading={false}
+                        emptyTitle={`Chưa có tiết học nào thuộc đợt ${examFilter}`}
+                        emptyDescription="Vui lòng chọn 'Tất cả (29)' để xem đầy đủ chương trình."
+                      >
+                        {(periodsList) => (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
+                            {periodsList.map((spec) => {
+                              const isLiveLesson =
+                                isLiveForStudentClass && liveSession?.activePeriod === spec.period;
+                              const taughtByTeacher = isPeriodTaughtByTeacher(spec.period);
+                              const learnedByStudent = isPeriodLearnedByStudent(spec.period);
+                              // Self-practice restriction: only unlocked if lesson was taught or learned
+                              const isSelfStudyUnlocked = taughtByTeacher || learnedByStudent;
+
+                              return (
+                                <button
+                                  key={spec.id}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isLiveLesson) {
+                                      handleRequestEnterLiveRoom(
+                                        spec.period,
+                                        liveSession?.activeStage || 1
+                                      );
+                                      return;
+                                    }
+                                    if (!isSelfStudyUnlocked) {
+                                      onShowToast(
+                                        `🔒 Tiết ${spec.period} chưa được học. Chế độ Tự luyện chỉ mở sau khi đã học trên lớp cùng Giáo viên!`
+                                      );
+                                      return;
+                                    }
+                                    // Open in self practice mode
+                                    setOpenedPeriodNumber(spec.period);
+                                    setActiveInlineStage(1);
+                                  }}
+                                  className={`p-4 rounded-2xl border-2 flex flex-col items-center justify-between text-center gap-2.5 transition-all cursor-pointer relative ${
+                                    isLiveLesson
+                                      ? 'bg-red-50 border-red-500 shadow-md ring-2 ring-red-400/40'
+                                      : isSelfStudyUnlocked
+                                      ? 'bg-white hover:bg-slate-50 border-slate-200 hover:border-sky-400 shadow-xs'
+                                      : 'bg-slate-50 border-slate-200/60 opacity-60 hover:opacity-80'
+                                  }`}
+                                >
+                                  {/* Period Number Badge */}
+                                  <div className="flex items-center justify-between w-full">
+                                    <span
+                                      className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${
+                                        isLiveLesson
+                                          ? 'bg-red-600 text-white'
+                                          : isSelfStudyUnlocked
+                                          ? 'bg-sky-600 text-white'
+                                          : 'bg-slate-200 text-slate-600'
+                                      }`}
+                                    >
+                                      {spec.period}
+                                    </span>
+
+                                    {isLiveLesson ? (
+                                      <span className="px-2 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-black animate-pulse">
+                                        LIVE
+                                      </span>
+                                    ) : isSelfStudyUnlocked ? (
+                                      <span className="material-symbols-outlined text-emerald-600 text-[18px]">
+                                        check_circle
+                                      </span>
+                                    ) : (
+                                      <span className="material-symbols-outlined text-slate-400 text-[16px]">
+                                        lock
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <span className="text-2xl">
+                                    {isLiveLesson ? '🔴' : spec.lessonType === 'practice' ? '💻' : '📖'}
+                                  </span>
+
+                                  <div className="flex flex-col min-w-0 w-full">
+                                    <span className="text-xs font-bold text-slate-900 line-clamp-2 leading-tight">
+                                      {spec.lessonTitle}
+                                    </span>
+                                  </div>
+
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold w-full truncate ${
+                                      isLiveLesson
+                                        ? 'bg-red-100 text-red-700 font-black'
+                                        : isSelfStudyUnlocked
+                                        ? 'bg-emerald-50 text-emerald-700'
+                                        : 'bg-slate-100 text-slate-500'
+                                    }`}
+                                  >
+                                    {isLiveLesson
+                                      ? 'Đang phát Live'
+                                      : isSelfStudyUnlocked
+                                      ? '✓ Mở tự luyện'
+                                      : '🔒 Khóa tự luyện'}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </DataBoundary>
+                    </div>
+                  )}
+
+                  {/* 3. STUDENT METRICS DASHBOARD (RANKINGS, XP REMAINING, BADGES GALLERY) */}
+                  <StudentMetricsDashboard
+                    currentStudent={currentStudent}
+                    students={students}
+                    classRank={classRank}
+                    totalClassStudents={classMatesList.length || 40}
+                    gradeRank={gradeRank}
+                    totalGradeStudents={gradeStudentsList.length || 80}
+                    onShowToast={onShowToast}
+                  />
                 </>
               ) : (
                 /* CASE B: TRANG BÀI HỌC TẬP TRUNG CỦA TIẾT HỌC */
@@ -1490,11 +1853,21 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   <div className="bg-surface-container-lowest rounded-2xl p-space-lg shadow-sm flex flex-col gap-space-md">
                     <div className="flex flex-wrap items-center justify-between gap-space-sm">
                       {isLiveForStudentClass || activeLearningMode === 'IN_CLASS_LIVE' ? (
-                        <div className="px-4 py-1.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-700 dark:text-rose-300 font-label-sm text-xs font-bold flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-rose-600 animate-ping" />
-                          <span>
-                            Đang học Live Tiết {currentPeriodSpec.period} — Khóa chuyển tiết khác
-                          </span>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="px-4 py-1.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-700 dark:text-rose-300 font-label-sm text-xs font-bold flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-rose-600 animate-ping" />
+                            <span>
+                              Đang học Live Tiết {currentPeriodSpec.period} — Khóa chuyển tiết khác
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowPeerReviewModal(true)}
+                            className="px-4 py-1.5 rounded-full bg-secondary text-on-secondary font-label-sm text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer hover:brightness-105"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">rate_review</span>
+                            <span>Đánh giá đồng đẳng ({currentStudent.partnerName || 'Bạn cặp'})</span>
+                          </button>
                         </div>
                       ) : (
                         <button
@@ -2575,6 +2948,12 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                   3.0
                                 );
                                 onAwardXp(100);
+                                confetti({
+                                  particleCount: 150,
+                                  spread: 70,
+                                  origin: { y: 0.6 }
+                                });
+                                setAchievementToast({title: 'Hoàn thành bài Vận dụng', stars: 5});
                                 onShowToast(
                                   `Đã nộp bài Vận dụng [${
                                     activeLearningMode === 'IN_CLASS_LIVE'
@@ -2775,6 +3154,301 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               </div>
             </div>
           )}
+
+          {/* ================= MENU 3: HUY HIỆU THÀNH TỰU (ACHIEVEMENT BADGES) ================= */}
+          {activeView === 'huy-hieu' && (
+            <div className="flex flex-col w-full gap-space-lg pb-space-2xl max-w-5xl mx-auto">
+              <div className="bg-surface-container-lowest rounded-2xl p-6 shadow-md flex flex-col gap-6">
+                <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-outline-variant/20">
+                  <div className="flex items-center gap-3">
+                    <div className="w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-600 flex items-center justify-center shadow-md">
+                      <span className="material-symbols-outlined text-[34px]">military_tech</span>
+                    </div>
+                    <div>
+                      <h1 className="font-headline-md text-headline-md text-on-surface">
+                        Hồ Sơ Huy Hiệu Thành Tựu • {currentStudent.name}
+                      </h1>
+                      <p className="font-body-sm text-body-sm text-on-surface-variant">
+                        Lớp {currentStudent.classId} • Khối {selectedGrade} • {currentStudent.stars} Sao tích lũy • {currentStudent.xp} XP
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-4 py-2 rounded-full bg-amber-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[18px]">workspace_premium</span>
+                      <span>6 Huy hiệu đã mở khóa</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {[
+                    {
+                      id: 'b1',
+                      title: '🌟 Tân Thủ Tin Học',
+                      desc: 'Đạt 5 sao tích lũy đầu tiên trong các hoạt động học tập trên lớp.',
+                      unlocked: currentStudent.stars >= 5,
+                      progress: `${Math.min(5, currentStudent.stars)}/5 sao`,
+                    },
+                    {
+                      id: 'b2',
+                      title: '🚀 Bậc Thầy Kéo Thả',
+                      desc: 'Hoàn thành xuất sắc và chính xác các bài tập Kéo Thả phân loại.',
+                      unlocked: currentStudent.xp >= 500,
+                      progress: `${Math.min(500, currentStudent.xp)}/500 XP`,
+                    },
+                    {
+                      id: 'b3',
+                      title: '⚡ Tia Chớp 25 Giây',
+                      desc: 'Đạt điểm tuyệt đối trong Đấu trường trắc nghiệm phản xạ 25 giây.',
+                      unlocked: currentStudent.avgScore >= 8.5,
+                      progress: `Điểm TB: ${currentStudent.avgScore}`,
+                    },
+                    {
+                      id: 'b4',
+                      title: '🦉 Cú Vàng AI Thông Thái',
+                      desc: 'Tích cực đặt câu hỏi và tương tác học tập với Trợ lý AI Cú Vàng.',
+                      unlocked: true,
+                      progress: 'Đã hoàn thành',
+                    },
+                    {
+                      id: 'b5',
+                      title: '🏆 Siêu Sao Lớp Học',
+                      desc: 'Dẫn đầu hoặc nằm trong Top 3 học sinh xuất sắc nhất của Lớp.',
+                      unlocked: true,
+                      progress: `Lớp ${currentStudent.classId}`,
+                    },
+                    {
+                      id: 'b6',
+                      title: '👑 Vương Miện Khối',
+                      desc: 'Đạt thành tích vượt trội đứng đầu khối học.',
+                      unlocked: currentStudent.xp >= 1200,
+                      progress: `Khối ${selectedGrade}`,
+                    },
+                  ].map((badge) => (
+                    <div
+                      key={badge.id}
+                      onClick={() => {
+                        if (badge.unlocked) {
+                          confetti({
+                            particleCount: 90,
+                            spread: 80,
+                            origin: { y: 0.6 },
+                            colors: ['#38bdf8', '#f59e0b', '#10b981', '#ec4899', '#8b5cf6'],
+                          });
+                          onShowToast(`🎆 Chúc mừng em đã sở hữu Huy hiệu: ${badge.title}!`);
+                        } else {
+                          onShowToast(`🔒 Huy hiệu chưa mở khóa. Tiến độ hiện tại: ${badge.progress}`);
+                        }
+                      }}
+                      className={`p-5 rounded-2xl border flex flex-col justify-between gap-4 transition-all cursor-pointer hover:scale-101 ${
+                        badge.unlocked
+                          ? 'bg-gradient-to-br from-amber-500/10 via-surface-container-lowest to-surface-container-low border-amber-500/40 shadow-sm'
+                          : 'bg-surface-container-low/60 border-outline-variant/20 opacity-60'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex flex-col gap-1">
+                          <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">
+                            {badge.title}
+                          </h3>
+                          <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+                            {badge.desc}
+                          </p>
+                        </div>
+                        <span
+                          className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                            badge.unlocked
+                              ? 'bg-amber-500 text-white shadow-xs'
+                              : 'bg-surface-container-highest text-on-surface-variant'
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[18px]">
+                            {badge.unlocked ? 'verified' : 'lock'}
+                          </span>
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-3 border-t border-outline-variant/20 text-xs font-bold">
+                        <span className={badge.unlocked ? 'text-amber-600' : 'text-on-surface-variant'}>
+                          {badge.unlocked ? '✓ Đã mở khóa' : 'Chưa đạt'}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-surface-container text-on-surface-variant">
+                          {badge.progress}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ================= MENU 5: NHẬT KÝ HOẠT ĐỘNG (ACTIVITY FEED) ================= */}
+          {activeView === 'nhat-ky-hoat-dong' && (
+            <div className="flex flex-col w-full gap-space-lg pb-space-2xl max-w-4xl mx-auto">
+              <StudentActivityFeed
+                currentStudent={currentStudent}
+                completedPeriods={
+                  liveSession?.learnedPeriodsByStudent?.[currentStudent.id]
+                    ? [1]
+                    : [1]
+                }
+              />
+            </div>
+          )}
+
+          {/* ================= MENU 4: BẢNG XẾP HẠNG (CLASS & GRADE LEADERBOARDS) ================= */}
+          {activeView === 'bang-xep-hang' && (
+            <div className="flex flex-col w-full gap-space-lg pb-space-2xl max-w-5xl mx-auto">
+              <div className="bg-surface-container-lowest rounded-2xl p-6 shadow-md flex flex-col gap-6">
+                <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-outline-variant/20">
+                  <div className="flex items-center gap-3">
+                    <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-600 flex items-center justify-center shadow-md">
+                      <span className="material-symbols-outlined text-[34px]">leaderboard</span>
+                    </div>
+                    <div>
+                      <h1 className="font-headline-md text-headline-md text-on-surface">
+                        Bảng Xếp Hạng Học Tập • CloudPlay OS
+                      </h1>
+                      <p className="font-body-sm text-body-sm text-on-surface-variant">
+                        Cập nhật theo thời gian thực • Vinh danh thành tích học sinh Lớp {currentStudent.classId} và Khối {selectedGrade}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-4">
+                  {/* Class Leaderboard */}
+                  <div className="p-5 rounded-2xl bg-surface-container-low border border-outline-variant/30 flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold flex items-center gap-2">
+                        <span className="material-symbols-outlined text-primary">school</span>
+                        <span>Bảng Xếp Hạng Lớp {currentStudent.classId}</span>
+                      </h3>
+                      <span className="px-3 py-1 rounded-full bg-primary-fixed text-primary font-bold text-xs">
+                        Top Lớp
+                      </span>
+                    </div>
+
+                    <div className="divide-y divide-outline-variant/15 overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-lowest">
+                      {students
+                        .filter((s) => s.classId === currentStudent.classId)
+                        .sort((a, b) => b.xp - a.xp)
+                        .map((st, idx) => {
+                          const isMe = st.id === currentStudent.id;
+                          return (
+                            <div
+                              key={st.id}
+                              className={`p-3.5 flex items-center justify-between gap-3 ${
+                                isMe ? 'bg-primary-fixed/20 font-bold' : 'hover:bg-surface-container-low/50'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <span
+                                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${
+                                    idx === 0
+                                      ? 'bg-amber-400 text-amber-950 shadow-xs'
+                                      : idx === 1
+                                      ? 'bg-slate-300 text-slate-800'
+                                      : idx === 2
+                                      ? 'bg-amber-700 text-amber-100'
+                                      : 'bg-surface-container text-on-surface-variant'
+                                  }`}
+                                >
+                                  {idx + 1}
+                                </span>
+                                <div className="flex flex-col">
+                                  <span className="text-sm font-bold text-on-surface">
+                                    {st.name} {isMe && '(Em)'}
+                                  </span>
+                                  <span className="text-xs text-on-surface-variant">
+                                    Mã: {st.id} • Nhóm {st.groupNumber}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4 text-xs font-bold">
+                                <span className="flex items-center gap-1 text-amber-600">
+                                  <span className="material-symbols-outlined text-[16px]">star</span>
+                                  <span>{st.stars} sao</span>
+                                </span>
+                                <span className="px-3 py-1 rounded-full bg-primary text-on-primary">
+                                  {st.xp} XP
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+
+                  {/* Grade Leaderboard */}
+                  <div className="p-5 rounded-2xl bg-surface-container-low border border-outline-variant/30 flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold flex items-center gap-2">
+                        <span className="material-symbols-outlined text-secondary">workspace_premium</span>
+                        <span>Bảng Xếp Hạng Toàn Khối {selectedGrade}</span>
+                      </h3>
+                      <span className="px-3 py-1 rounded-full bg-secondary-fixed text-secondary font-bold text-xs">
+                        Top Khối
+                      </span>
+                    </div>
+
+                    <div className="divide-y divide-outline-variant/15 overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-lowest">
+                      {students
+                        .filter((s) => s.grade === selectedGrade || Number(s.classId?.charAt(0)) === selectedGrade)
+                        .sort((a, b) => b.xp - a.xp)
+                        .slice(0, 10)
+                        .map((st, idx) => {
+                          const isMe = st.id === currentStudent.id;
+                          return (
+                            <div
+                              key={st.id}
+                              className={`p-3.5 flex items-center justify-between gap-3 ${
+                                isMe ? 'bg-secondary-fixed/30 font-bold' : 'hover:bg-surface-container-low/50'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <span
+                                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${
+                                    idx === 0
+                                      ? 'bg-amber-400 text-amber-950 shadow-xs'
+                                      : idx === 1
+                                      ? 'bg-slate-300 text-slate-800'
+                                      : idx === 2
+                                      ? 'bg-amber-700 text-amber-100'
+                                      : 'bg-surface-container text-on-surface-variant'
+                                  }`}
+                                >
+                                  {idx + 1}
+                                </span>
+                                <div className="flex flex-col">
+                                  <span className="text-sm font-bold text-on-surface">
+                                    {st.name} (Lớp {st.classId}) {isMe && '(Em)'}
+                                  </span>
+                                  <span className="text-xs text-on-surface-variant">
+                                    Điểm TB: {st.avgScore}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4 text-xs font-bold">
+                                <span className="flex items-center gap-1 text-amber-600">
+                                  <span className="material-symbols-outlined text-[16px]">star</span>
+                                  <span>{st.stars} sao</span>
+                                </span>
+                                <span className="px-3 py-1 rounded-full bg-secondary text-on-secondary">
+                                  {st.xp} XP
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
 
         {/* Student Worksheet Scanner Modal (Gemini Vision OCR) */}
@@ -2787,6 +3461,29 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           onApplyExtractedData={handleApplyExtractedScannerData}
           onShowToast={onShowToast}
         />
+
+        {/* Peer Review Modal */}
+        <PeerReviewModal
+          isOpen={showPeerReviewModal}
+          onClose={() => setShowPeerReviewModal(false)}
+          currentStudent={currentStudent}
+          onShowToast={onShowToast}
+        />
+
+        {/* Achievement Toast */}
+        {achievementToast && (
+          <div className="fixed top-20 right-6 z-50 p-4 rounded-2xl bg-amber-500 text-white shadow-xl flex items-center gap-3 animate-in slide-in-from-right fade-in duration-500">
+            <span className="material-symbols-outlined text-3xl">workspace_premium</span>
+            <div>
+              <p className="font-bold">Đã mở khóa huy hiệu mới!</p>
+              <p className="text-sm font-medium">{achievementToast.title}</p>
+              <p className="text-xs font-bold">+ {achievementToast.stars} Sao</p>
+            </div>
+            <button onClick={() => setAchievementToast(null)} className="ml-2 hover:bg-amber-600 rounded-full p-1">
+              <span className="material-symbols-outlined">close</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

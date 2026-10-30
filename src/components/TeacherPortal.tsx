@@ -32,13 +32,12 @@ import {
 } from '../utils/pedagogyEngine';
 import { WorksheetBatchPrintModal } from './WorksheetBatchPrintModal';
 import { ClassProgressionTrackerModal } from './ClassProgressionTrackerModal';
-import { ClassCompletionRechartsPanel } from './ClassCompletionRechartsPanel';
 import { BulkImportForm } from './BulkImportForm';
 import { ClassQRCodeModal } from './ClassQRCodeModal';
-import { NotebookLMPromptModal } from './NotebookLMPromptModal';
 import { QuestionMasterInspectorModal } from './QuestionMasterInspectorModal';
-import { DatabaseDiagnosticModal } from './DatabaseDiagnosticModal';
 import { DataBoundary } from './DataBoundary';
+import { SlidePresenterManager } from './SlidePresenterManager';
+import { TeacherLivePresenterRoom } from './TeacherLivePresenterRoom';
 
 export type TeacherTab =
   | 'trang-chu'
@@ -117,6 +116,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const [homeExamFilter, setHomeExamFilter] = useState<
     'ALL' | 'GK1' | 'CK1' | 'GK2' | 'CK2'
   >('ALL');
+  const [isLivePresenterOpen, setIsLivePresenterOpen] = useState(false);
 
   const gradePeriods = getPeriodsForGrade(selectedNotebookGrade);
   const selectedPeriodSpec: CurriculumPeriodSpec =
@@ -571,8 +571,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const [showQRCodeModal, setShowQRCodeModal] = useState<boolean>(false);
   // State to control Master Question Inspector ListView modal
   const [showQuestionInspectorModal, setShowQuestionInspectorModal] = useState<boolean>(false);
-  // State to control Database Diagnostic CRUD test modal
-  const [showDbDiagnosticModal, setShowDbDiagnosticModal] = useState<boolean>(false);
 
   const handleBulkImportWorksheets = async (importedWorksheets: CustomLessonWorksheet[]) => {
     if (importedWorksheets.length === 0) return;
@@ -626,9 +624,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     onShowToast(`Đã đồng bộ thành công ${importedWorksheets.length} tiết học vào hệ thống!`);
     setShowBulkImportModal(false);
   };
-
-  // State to control NotebookLMPromptModal (Mẫu prompt tối ưu cho Google NotebookLM)
-  const [showNotebookLMPromptModal, setShowNotebookLMPromptModal] = useState<boolean>(false);
 
   const handleQuickPingSupabaseKeepAlive = async () => {
     try {
@@ -1072,6 +1067,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         };
       });
     }
+    setIsLivePresenterOpen(true);
     onShowToast(
       `🔴 Đã phát Live trực tiếp Khối ${grade} • Tiết ${periodNum} cho đúng Lớp ${targetClass}!`
     );
@@ -1343,6 +1339,22 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     students.length + 1
   );
 
+  if (isLivePresenterOpen) {
+    return (
+      <TeacherLivePresenterRoom
+        grade={liveSession?.activeGrade || selectedNotebookGrade}
+        period={liveSession?.activePeriod || selectedNotebookPeriod}
+        classId={liveSession?.activeClassId || selectedClass}
+        periodSpec={selectedPeriodSpec}
+        liveSession={liveSession}
+        students={students}
+        onExit={() => setIsLivePresenterOpen(false)}
+        onUpdateLiveSession={onUpdateLiveSession || (() => {})}
+        onShowToast={onShowToast}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background text-on-surface flex">
       {/* Left Sidebar (Strictly Teacher & Admin Only — No Student Preview Link) */}
@@ -1442,44 +1454,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               <span className="hidden xl:inline">Cron Keep-Alive Supabase 24/7</span>
             </button>
 
-            {/* NotebookLM 29-Period Master Prompt Button */}
-            <button
-              type="button"
-              onClick={() => setShowNotebookLMPromptModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-purple-500/15 text-purple-700 dark:text-purple-300 font-label-md text-xs font-bold hover:bg-purple-500/25 transition-all shadow-xs cursor-pointer border border-purple-500/30"
-              title="Mở mẫu prompt tối ưu cho Google NotebookLM để tạo đầy đủ 29 tiết học"
-            >
-              <span className="material-symbols-outlined text-[17px]">psychology</span>
-              <span className="hidden sm:inline">Mẫu Prompt NotebookLM (4 Khối)</span>
-            </button>
-
-            {/* Clean Reset Database Button */}
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  const res = await fetch('/api/db/clean-reset', { method: 'POST' });
-                  const data = await res.json();
-                  if (data.ok) {
-                    onShowToast('✨ ' + data.message);
-                    if (onUpdateLiveSession) {
-                      onUpdateLiveSession((prev) => ({
-                        ...prev,
-                        customWorksheetsByLesson: {},
-                      }));
-                    }
-                  }
-                } catch {
-                  onShowToast('Đã làm sạch dữ liệu tùy chỉnh và khôi phục dữ liệu chuẩn SGK!');
-                }
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-500/15 text-slate-700 dark:text-slate-300 font-label-md text-xs font-bold hover:bg-slate-500/25 transition-all shadow-xs cursor-pointer border border-slate-500/30"
-              title="Xóa toàn bộ dữ liệu tùy chỉnh từ tiết 1 đến 29 và thiết lập lại dữ liệu sạch"
-            >
-              <span className="material-symbols-outlined text-[17px]">cleaning_services</span>
-              <span className="hidden sm:inline">Reset CSDL Sạch</span>
-            </button>
-
             {/* Master Question Inspector ListView Button */}
             <button
               type="button"
@@ -1489,17 +1463,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             >
               <span className="material-symbols-outlined text-[17px]">checklist_rtl</span>
               <span className="hidden sm:inline">ListView Câu Hỏi (Inspector)</span>
-            </button>
-
-            {/* Database Sync & CRUD Diagnostic Utility Button */}
-            <button
-              type="button"
-              onClick={() => setShowDbDiagnosticModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-300 font-label-md text-xs font-bold hover:bg-rose-500/25 transition-all shadow-xs cursor-pointer border border-rose-500/30"
-              title="Chẩn đoán kết nối Supabase/PostgreSQL & Kiểm thử CRUD dữ liệu Lớp học"
-            >
-              <span className="material-symbols-outlined text-[17px]">database</span>
-              <span className="hidden sm:inline">Chẩn đoán CRUD CSDL</span>
             </button>
 
             {/* Real-Time 29-Period Progression Counter Badge/Button */}
@@ -1577,6 +1540,16 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                         {liveSession?.activeClassId || selectedClass} • Tiết{' '}
                         {liveSession?.activePeriod || selectedNotebookPeriod}
                       </span>
+                      {liveSession?.isBroadcasting && (
+                        <button
+                          type="button"
+                          onClick={() => setIsLivePresenterOpen(true)}
+                          className="px-3.5 py-1 rounded-full bg-red-600 hover:bg-red-700 text-white font-label-sm text-xs font-black shadow-sm flex items-center gap-1.5 cursor-pointer animate-pulse"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">slideshow</span>
+                          <span>VÀO PHÒNG LIVE GIẢNG DẠY (TRÌNH CHIẾU)</span>
+                        </button>
+                      )}
                     </div>
                     <p className="font-body-md text-body-sm sm:text-body-md text-on-surface-variant mt-0.5">
                       Lộ trình 29 tiết học chuẩn GDPT 2018 (Khối 6, 7, 8, 9) • Chọn Khối &amp; Lớp trước khi phát Live hoặc mở khóa Chế độ Tự luyện
@@ -1661,6 +1634,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     <span className="material-symbols-outlined text-[15px]">qr_code_scanner</span>
                     <span>Hiện Mã QR</span>
                   </button>
+                  <SlidePresenterManager liveSession={liveSession} onUpdateLiveSession={onUpdateLiveSession} />
                 </div>
               </div>
 
@@ -1685,16 +1659,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => setShowNotebookLMPromptModal(true)}
-                      className="px-4 py-2 rounded-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-label-md text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5 transition-all"
-                      title="Mở mẫu prompt Google NotebookLM tạo chuẩn 29 tiết học cho 4 Khối 6, 7, 8, 9"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">psychology</span>
-                      <span>Mẫu Prompt NotebookLM (4 Khối)</span>
-                    </button>
-
                     <button
                       type="button"
                       onClick={() => setShowBulkImportModal(true)}
@@ -1883,25 +1847,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       </div>
                     </div>
                   </div>
-
-                  {/* Biểu đồ Recharts thống kê mức độ hoàn thành bài tập của cả lớp theo từng tiết học */}
-                  <ClassCompletionRechartsPanel
-                    classes={classes}
-                    students={students}
-                    selectedGrade={selectedNotebookGrade}
-                    selectedClassId={selectedClass}
-                    onChangeGrade={(g) => {
-                      handleSelectGradeAndPeriod(g, 1);
-                      const firstCls = classes.find((c) => c.grade === g);
-                      if (firstCls) onChangeClass(firstCls.id);
-                    }}
-                    onChangeClass={onChangeClass}
-                    onSelectPeriod={(g, pNum) => {
-                      handleSelectGradeAndPeriod(g, pNum);
-                      setOpenedHomePeriod(pNum);
-                    }}
-                    liveSession={liveSession}
-                  />
 
                   {/* 29-Period Cards Grid wrapped in unified DataBoundary */}
                   <DataBoundary
@@ -4826,27 +4771,9 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             </div>
           )}
 
-          {/* TAB 7: SỔ ĐIỂM ĐIỆN TỬ & THỐNG KÊ RECHARTS + GẮN THẺ KẾT QUẢ HỌC TẬP KÉP */}
+          {/* TAB 7: SỔ ĐIỂM ĐIỆN TỬ & THỐNG KÊ + GẮN THẺ KẾT QUẢ HỌC TẬP KÉP */}
           {activeTab === 'so-diem-thong-ke' && (
             <div className="flex flex-col gap-space-lg">
-              <ClassCompletionRechartsPanel
-                classes={classes}
-                students={students}
-                selectedGrade={selectedNotebookGrade}
-                selectedClassId={selectedClass}
-                onChangeGrade={(g) => {
-                  handleSelectGradeAndPeriod(g, 1);
-                  const firstCls = classes.find((c) => c.grade === g);
-                  if (firstCls) onChangeClass(firstCls.id);
-                }}
-                onChangeClass={onChangeClass}
-                onSelectPeriod={(g, pNum) => {
-                  handleSelectGradeAndPeriod(g, pNum);
-                  onChangeTab('bien-soan-stage-2');
-                }}
-                liveSession={liveSession}
-              />
-
               {/* BẢNG TỔNG HỢP ĐIỂM GẮN THẺ KẾT QUẢ KÉP: [TRÊN LỚP] & [TỰ LUYỆN Ở NHÀ] */}
               {(() => {
                 const allTagged: TaggedLessonSubmission[] =
@@ -5399,28 +5326,12 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         onShowToast={onShowToast}
       />
 
-      {/* NotebookLM 29-Period Master Prompt Modal */}
-      <NotebookLMPromptModal
-        isOpen={showNotebookLMPromptModal}
-        onClose={() => setShowNotebookLMPromptModal(false)}
-        onShowToast={onShowToast}
-        defaultGrade={selectedNotebookGrade}
-      />
-
       {/* Question Master Inspector ListView Modal */}
       <QuestionMasterInspectorModal
         isOpen={showQuestionInspectorModal}
         onClose={() => setShowQuestionInspectorModal(false)}
         liveSession={liveSession}
         onUpdateLiveSession={onUpdateLiveSession}
-        onShowToast={onShowToast}
-      />
-
-      {/* Supabase / PostgreSQL Database CRUD Diagnostic Modal */}
-      <DatabaseDiagnosticModal
-        isOpen={showDbDiagnosticModal}
-        onClose={() => setShowDbDiagnosticModal(false)}
-        activeClassId={selectedClass}
         onShowToast={onShowToast}
       />
     </div>
