@@ -73,9 +73,9 @@ function getGenAIClient(customApiKey?: string): GoogleGenAI | null {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json({ limit: '15mb' }));
+  app.use(express.json({ limit: '25mb' }));
 
   // Startup Database Connection Health Check via pg Pool
   console.log('[CloudPlay DB Startup]: Validating PostgreSQL / Supabase connection via pg pool...');
@@ -1921,39 +1921,68 @@ Chỉ trả về JSON hợp lệ.`;
     });
   });
 
-  // 2.8f. Extract & Download Knowledge Slides using Gemini AI (Core Concepts Only)
+  // 2.8f. Extract & Download Knowledge Slides using Gemini AI (Core Concepts Only - 3 to 5 Slide Images)
   app.post('/api/lecture-slides/ai-extract', async (req, res) => {
     try {
-      const { grade = 6, period = 1, rawContent = '', topic = '', lessonTitle = '' } = req.body || {};
+      const {
+        grade = 6,
+        period = 1,
+        rawContent = '',
+        topic = '',
+        lessonTitle = '',
+        pageImages = [],
+      } = req.body || {};
+      const validPageImages: string[] = Array.isArray(pageImages)
+        ? pageImages.filter((img) => typeof img === 'string' && img.startsWith('data:image/'))
+        : [];
       const ai = getGenAIClient();
       let knowledgeSlides: any[] | null = null;
 
       if (ai) {
         try {
-          const prompt = `Bạn là chuyên gia sư phạm Tin học theo Chương trình GDPT 2018. 
-Hãy trích xuất DUY NHẤT CÁC SLIDE KIẾN THỨC TRỌNG TÂM của bài học sau:
+          const promptText = `Bạn là chuyên gia sư phạm Tin học theo Chương trình GDPT 2018.
+Hãy phân tích tài liệu bài giảng (PDF/PPTX) và trích xuất DUY NHẤT CÁC SLIDE KIẾN THỨC CỐT LÕI (từ 3 đến 5 slide) của bài học sau:
 Khối: ${grade} - Tiết: ${period}
 Tên bài học: ${lessonTitle || `Tiết ${period}`}
 Chủ đề: ${topic || 'Tin học ứng dụng'}
+${validPageImages.length > 0 ? `Tài liệu gốc gồm ${validPageImages.length} trang ảnh slide (đánh chỉ số originalPageIndex từ 0 đến ${validPageImages.length - 1}). Hãy chọn ra 3 đến 5 trang ảnh slide chứa KIẾN THỨC TRỌNG TÂM NHẤT.` : ''}
 Nội dung nguồn:
 ${rawContent ? String(rawContent).slice(0, 4000) : `Bài học Tin học Khối ${grade} Tiết ${period}: ${lessonTitle}`}
 
 YÊU CẦU QUAN TRỌNG:
-1. CHỈ TẠO CÁC SLIDE KIẾN THỨC CỐT LÕI (Từ 3 đến 5 slide).
-2. TUYỆT ĐỐI KHÔNG tạo slide mở đầu chào hỏi, slide kết thúc cảm ơn hay slide bài tập về nhà.
-3. Mỗi slide phải chứa:
-   - slideNumber: số nguyên từ 1 đến N
+1. CHỈ CHỌN & TRÍCH XUẤT CÁC SLIDE KIẾN THỨC CỐT LÕI (Từ 3 đến 5 slide).
+2. TUYỆT ĐỐI BỎ QUA slide bìa mở đầu chào hỏi, slide mục lục, slide trò chơi khởi động, hoặc slide kết thúc cảm ơn.
+3. Mỗi slide trả về gồm:
+   - slideNumber: số thứ tự 1 đến N (3..5)
+   - originalPageIndex: số nguyên chỉ số trang gốc trong mảng ảnh (0 đến ${Math.max(0, validPageImages.length - 1)}) tương ứng với ảnh slide kiến thức được chọn
    - title: Tiêu đề mục kiến thức trọng tâm (ngắn gọn, chuẩn thuật ngữ GDPT 2018)
    - subtitle: Khái niệm hoặc phân mục cụ thể
-   - bulletPoints: mảng 3-4 ý kiến thức cốt lõi, định nghĩa, quy tắc hoặc các bước thực hiện
+   - bulletPoints: mảng 3-4 ý kiến thức cốt lõi trích xuất từ slide đó
    - highlightNote: Chú thích trọng tâm hoặc điểm then chốt cần nhớ
    - illustrationKey: 'diagram' | 'steps' | 'code' | 'table' | 'concept'
 
 Trả về DUY NHẤT một mảng JSON hợp lệ.`;
 
+          const contentsParts: any[] = [];
+          // Attach up to 8 slide images for multimodal vision inspection
+          const maxVisionPages = Math.min(validPageImages.length, 8);
+          for (let i = 0; i < maxVisionPages; i++) {
+            const dataUrl = validPageImages[i];
+            const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+            if (match) {
+              contentsParts.push({
+                inlineData: {
+                  mimeType: match[1],
+                  data: match[2],
+                },
+              });
+            }
+          }
+          contentsParts.push({ text: promptText });
+
           const response = await ai.models.generateContent({
             model: 'gemini-3.8-flash',
-            contents: prompt,
+            contents: contentsParts.length > 1 ? { parts: contentsParts } : promptText,
             config: {
               responseMimeType: 'application/json',
               responseSchema: {
@@ -1962,6 +1991,7 @@ Trả về DUY NHẤT một mảng JSON hợp lệ.`;
                   type: Type.OBJECT,
                   properties: {
                     slideNumber: { type: Type.INTEGER },
+                    originalPageIndex: { type: Type.INTEGER },
                     title: { type: Type.STRING },
                     subtitle: { type: Type.STRING },
                     bulletPoints: {
@@ -1978,7 +2008,10 @@ Trả về DUY NHẤT một mảng JSON hợp lệ.`;
           });
 
           if (response.text) {
-            knowledgeSlides = JSON.parse(response.text.trim());
+            const parsed = JSON.parse(response.text.trim());
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              knowledgeSlides = parsed.slice(0, 5);
+            }
           }
         } catch (aiErr) {
           console.warn('[Gemini Slide Extraction Warning - Using High Quality Fallback]:', aiErr);
@@ -1989,6 +2022,7 @@ Trả về DUY NHẤT một mảng JSON hợp lệ.`;
         knowledgeSlides = [
           {
             slideNumber: 1,
+            originalPageIndex: 0,
             title: `1. Bản chất & Khái niệm Cốt lõi`,
             subtitle: `${lessonTitle || `Tiết ${period}`} • Chuẩn kiến thức GDPT 2018`,
             bulletPoints: [
@@ -2001,6 +2035,7 @@ Trả về DUY NHẤT một mảng JSON hợp lệ.`;
           },
           {
             slideNumber: 2,
+            originalPageIndex: 1,
             title: `2. Quy trình & Các bước Thao tác Kỹ thuật`,
             subtitle: `Phương pháp thực hiện bài bản trên máy tính`,
             bulletPoints: [
@@ -2013,6 +2048,7 @@ Trả về DUY NHẤT một mảng JSON hợp lệ.`;
           },
           {
             slideNumber: 3,
+            originalPageIndex: 2,
             title: `3. Nguyên tắc An toàn & Ứng dụng Thực tiễn`,
             subtitle: `Phát triển năng lực số & AI có trách nhiệm`,
             bulletPoints: [
@@ -2026,6 +2062,24 @@ Trả về DUY NHẤT một mảng JSON hợp lệ.`;
         ];
       }
 
+      // Attach original slide image (from PDF/PPTX pageImages) to each extracted knowledge slide
+      knowledgeSlides = knowledgeSlides.slice(0, 5).map((sl: any, idx: number) => {
+        const rawPageIdx =
+          typeof sl.originalPageIndex === 'number' &&
+          sl.originalPageIndex >= 0 &&
+          sl.originalPageIndex < validPageImages.length
+            ? sl.originalPageIndex
+            : Math.min(idx, Math.max(0, validPageImages.length - 1));
+        const attachedImageUrl =
+          validPageImages.length > 0 ? validPageImages[rawPageIdx] : sl.imageUrl;
+        return {
+          ...sl,
+          slideNumber: idx + 1,
+          originalPageIndex: rawPageIdx,
+          imageUrl: attachedImageUrl,
+        };
+      });
+
       const htmlPresentation = `<!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -2033,23 +2087,25 @@ Trả về DUY NHẤT một mảng JSON hợp lệ.`;
   <title>Slide Kiến Thức: ${lessonTitle || `Tiết ${period}`}</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #fff; margin: 0; padding: 24px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; justify-content: center; }
-    .slide-deck { width: 100%; max-width: 900px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 1px solid rgba(255,255,255,0.15); border-radius: 24px; padding: 40px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); }
+    .slide-deck { width: 100%; max-width: 960px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 1px solid rgba(255,255,255,0.15); border-radius: 24px; padding: 40px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); }
     .slide-meta { font-size: 13px; font-weight: bold; color: #38bdf8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
     h1 { font-size: 26px; margin: 0 0 8px 0; color: #fff; }
-    .sub { font-size: 15px; color: #94a3b8; margin-bottom: 24px; }
+    .sub { font-size: 15px; color: #94a3b8; margin-bottom: 18px; }
+    .slide-img { width: 100%; border-radius: 16px; border: 1px solid rgba(255,255,255,0.2); margin-bottom: 18px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); }
     ul { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 14px; }
     li { font-size: 17px; line-height: 1.6; display: flex; align-items: flex-start; gap: 12px; }
     li span.num { background: #0284c7; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; flex-shrink: 0; margin-top: 3px; }
-    .highlight { margin-top: 24px; padding: 12px 16px; border-radius: 12px; background: rgba(56,189,248,0.1); border-left: 4px solid #38bdf8; font-size: 14px; color: #e2e8f0; }
+    .highlight { margin-top: 20px; padding: 12px 16px; border-radius: 12px; background: rgba(56,189,248,0.1); border-left: 4px solid #38bdf8; font-size: 14px; color: #e2e8f0; }
   </style>
 </head>
 <body>
   <div class="slide-deck">
-    <div class="slide-meta">Slide Kiến Thức Trọng Tâm • GDPT 2018 (Khối ${grade} - Tiết ${period})</div>
+    <div class="slide-meta">Slide Kiến Thức Trọng Tâm (Gemini 3.8 Flash) • GDPT 2018 (Khối ${grade} - Tiết ${period})</div>
     ${knowledgeSlides.map((s: any) => `
-      <div style="margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px dashed rgba(255,255,255,0.2);">
+      <div style="margin-bottom: 36px; padding-bottom: 28px; border-bottom: 1px dashed rgba(255,255,255,0.2);">
         <h1>Slide ${s.slideNumber}: ${s.title}</h1>
         <div class="sub">${s.subtitle || ''}</div>
+        ${s.imageUrl ? `<img class="slide-img" src="${s.imageUrl}" alt="Slide ${s.slideNumber}" />` : ''}
         <ul>
           ${(s.bulletPoints || []).map((bp: string, i: number) => `<li><span class="num">${i + 1}</span><span>${bp}</span></li>`).join('')}
         </ul>
@@ -2062,12 +2118,12 @@ Trả về DUY NHẤT một mảng JSON hợp lệ.`;
 
       res.json({
         ok: true,
-        model: ai ? 'gemini-3.8-flash' : 'Standard-Pedagogy-Knowledge-Extractor',
+        model: 'gemini-3.8-flash',
         aiGenerated: Boolean(ai),
         slides: knowledgeSlides,
         count: knowledgeSlides.length,
         htmlPresentation,
-        message: `✨ Đã sử dụng Gemini AI trích xuất chuẩn ${knowledgeSlides.length} Slide Kiến Thức Trọng Tâm cho Tiết ${period}!`,
+        message: `✨ Gemini 3.8 Flash đã trích xuất ${knowledgeSlides.length} Ảnh Slide Kiến Thức Trọng Tâm (Khối ${grade} • Tiết ${period})!`,
       });
     } catch (err: any) {
       console.error('[AI Knowledge Slides Extraction Error]:', err);

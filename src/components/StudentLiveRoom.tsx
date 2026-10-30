@@ -581,7 +581,52 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     </div>
                   </div>
 
-                  {deckPdfDataUrl ? (
+                  {activeSlide?.imageUrl ? (
+                    <div className="flex flex-col gap-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs">
+                        <span className="px-3 py-1 rounded-full bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 font-black uppercase tracking-wider">
+                          Khối {periodSpec.grade} • Tiết {periodSpec.period} • Ảnh Slide {safeSlideIdx + 1}/{slidesList.length}
+                        </span>
+                        <span className="text-emerald-300 font-bold">
+                          {activeSlide.title}
+                        </span>
+                      </div>
+                      <div className="w-full rounded-3xl overflow-hidden border-2 border-slate-200 shadow-xl bg-slate-950 flex items-center justify-center">
+                        <img
+                          src={activeSlide.imageUrl}
+                          alt={`Slide ${safeSlideIdx + 1}: ${activeSlide.title}`}
+                          className="w-full max-h-[520px] object-contain"
+                        />
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                        <span className="text-xs text-slate-600 font-medium">
+                          💡 {activeSlide.highlightNote || 'Theo dõi bài giảng đồng bộ của Giáo viên trên lớp'}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={safeSlideIdx === 0}
+                            onClick={() => setStudentSlideIndex(Math.max(0, safeSlideIdx - 1))}
+                            className="px-3.5 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-800 text-xs font-bold cursor-pointer flex items-center gap-1"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                            <span>Trang trước</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={safeSlideIdx >= slidesList.length - 1}
+                            onClick={() =>
+                              setStudentSlideIndex(Math.min(slidesList.length - 1, safeSlideIdx + 1))
+                            }
+                            className="px-3.5 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-xs font-bold cursor-pointer flex items-center gap-1"
+                          >
+                            <span>Trang tiếp</span>
+                            <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : deckPdfDataUrl ? (
                     <div className="w-full h-[540px] rounded-2xl overflow-hidden border border-slate-200 bg-slate-900">
                       <iframe
                         src={deckPdfDataUrl}

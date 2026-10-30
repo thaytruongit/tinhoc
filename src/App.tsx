@@ -57,7 +57,7 @@ export default function App() {
       const saved = localStorage.getItem('cloudplay_students_roster_v4');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed;
         }
       }
@@ -198,7 +198,7 @@ export default function App() {
         if (clsRes?.ok && Array.isArray(clsRes.classes) && clsRes.classes.length > 0) {
           setClasses(clsRes.classes);
         }
-        if (stRes?.ok && Array.isArray(stRes.students)) {
+        if (stRes?.ok && Array.isArray(stRes.students) && stRes.students.length > 0) {
           setStudents(stRes.students);
         }
         if (liveRes && typeof liveRes === 'object' && liveRes.unlockedStagesByLesson) {
@@ -383,6 +383,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!auth) return;
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user && user.emailVerified) {
         const isTeacherEmail = user.email === 'manhtruongdo1984@gmail.com';
@@ -656,7 +657,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      if (auth.currentUser) {
+      if (auth?.currentUser) {
         await signOutFirebase();
       }
     } catch {
@@ -664,6 +665,58 @@ export default function App() {
     }
     setAppMode('login');
     showToast('Đã đăng xuất khỏi phiên trực tuyến CloudPlay OS.');
+  };
+
+  const handleResetAcademicYear = async () => {
+    try {
+      const res = await fetch('/api/db/reset-academic-year', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json().catch(() => null);
+      if (data?.ok && Array.isArray(data.students) && data.students.length > 0) {
+        setStudents(data.students);
+        broadcastStudents(data.students);
+      } else {
+        setStudents((prev) => {
+          const cleaned = prev.map((st) => ({
+            ...st,
+            xp: 0,
+            stars: 0,
+            streakDays: 0,
+            avgScore: 0,
+            submissionStatus: 'Chưa nộp' as const,
+          }));
+          broadcastStudents(cleaned);
+          return cleaned;
+        });
+      }
+
+      updateAndBroadcastLiveSession((prev) => ({
+        ...prev,
+        isBroadcasting: false,
+        taughtPeriodsByClass: {},
+        learnedPeriodsByStudent: {},
+      }));
+
+      showToast(
+        '🎉 Đã làm sạch toàn bộ XP, Điểm số, Sao và Bài nộp về 0 cho toàn trường — Sẵn sàng Khai giảng năm học mới!'
+      );
+    } catch {
+      setStudents((prev) => {
+        const cleaned = prev.map((st) => ({
+          ...st,
+          xp: 0,
+          stars: 0,
+          streakDays: 0,
+          avgScore: 0,
+          submissionStatus: 'Chưa nộp' as const,
+        }));
+        broadcastStudents(cleaned);
+        return cleaned;
+      });
+      showToast('🎉 Đã làm sạch toàn bộ XP & Điểm số về 0 — Sẵn sàng Khai giảng năm học mới!');
+    }
   };
 
   const handleSyncCloudNow = async () => {
@@ -748,6 +801,7 @@ export default function App() {
           liveSession={liveSession}
           onUpdateLiveSession={updateAndBroadcastLiveSession}
           onSwitchToStudentPreview={() => setAppMode('student')}
+          onResetAcademicYear={handleResetAcademicYear}
           isLoading={isLoading}
         />
       )}

@@ -102,6 +102,9 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
   } | null>(null);
   const lastLeaderIdRef = useRef<string | null>(null);
 
+  const currentTopLeaderId = rankedStudents[0]?.id || null;
+  const currentTopLeaderXp = rankedStudents[0]?.xp || 0;
+
   useEffect(() => {
     if (rankedStudents.length > 0) {
       const currentLeader = rankedStudents[0];
@@ -124,20 +127,49 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
         const timer = setTimeout(() => {
           setTopPerformerAlert(null);
         }, 8000);
+        lastLeaderIdRef.current = currentLeader.id;
         return () => clearTimeout(timer);
       }
       lastLeaderIdRef.current = currentLeader.id;
     }
-  }, [rankedStudents, onShowToast]);
+  }, [currentTopLeaderId, currentTopLeaderXp]);
 
   // Simulate #2 student overtaking #1 to demonstrate real-time Top Performer flashing effect
   const handleSimulateTopPerformerTakeover = () => {
     if (rankedStudents.length < 2) return;
     const secondStudent = rankedStudents[1];
     const topXp = rankedStudents[0].xp;
-    const boost = topXp - secondStudent.xp + 150;
+    const boost = Math.max(150, topXp - secondStudent.xp + 150);
     secondStudent.xp += boost;
     secondStudent.stars = (secondStudent.stars || 0) + 2;
+
+    lastLeaderIdRef.current = secondStudent.id;
+    setTopPerformerAlert({
+      id: secondStudent.id,
+      name: secondStudent.name,
+      partnerName: secondStudent.partnerName,
+      xp: secondStudent.xp,
+    });
+    triggerSynchronizedCelebration();
+    onShowToast(
+      `👑 TOP 1 BỨT PHÁ DẪN ĐẦU: ${secondStudent.name}${
+        secondStudent.partnerName && secondStudent.partnerName !== 'Học cá nhân (1 mình)'
+          ? ` & ${secondStudent.partnerName}`
+          : ''
+      } vừa vươn lên dẫn đầu bảng xếp hạng (${secondStudent.xp.toLocaleString()} XP)!`
+    );
+
+    try {
+      localStorage.setItem('cloudplay_students_roster_v4', JSON.stringify(students));
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('cloudplay_realtime_sync');
+        ch.postMessage({ type: 'ROSTER_UPDATED', students: [...students] });
+        ch.close();
+      }
+    } catch {
+      // ignore
+    }
+
     onUpdateLiveSession((prev) => ({
       ...prev,
       updatedAt: new Date().toISOString(),
@@ -1215,7 +1247,28 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 </div>
               </div>
 
-              {existingSlideDeck?.pdfDataUrl ? (
+              {activeSlidePage?.imageUrl ? (
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs">
+                    <span className="px-3 py-1 rounded-full bg-orange-500/25 border border-orange-400/40 text-orange-300 font-bold">
+                      Ảnh Slide Kiến Thức #{activeSlidePage.slideNumber} / {slidePages.length}: {activeSlidePage.title}
+                    </span>
+                    <span className="text-emerald-300 font-bold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                      {isSlideUnlocked
+                        ? `Học sinh Lớp ${classId} đang xem đồng bộ Ảnh Slide này`
+                        : `Đang khóa Slide trên màn hình học sinh`}
+                    </span>
+                  </div>
+                  <div className="w-full rounded-3xl overflow-hidden border-2 border-slate-200 shadow-xl bg-slate-950 flex items-center justify-center">
+                    <img
+                      src={activeSlidePage.imageUrl}
+                      alt={`Slide ${activeSlidePage.slideNumber}: ${activeSlidePage.title}`}
+                      className="w-full max-h-[520px] object-contain"
+                    />
+                  </div>
+                </div>
+              ) : existingSlideDeck?.pdfDataUrl ? (
                 <iframe
                   src={existingSlideDeck.pdfDataUrl}
                   title={existingSlideDeck.fileName}

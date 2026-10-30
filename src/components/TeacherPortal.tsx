@@ -80,6 +80,7 @@ interface TeacherPortalProps {
     updater: (prev: LiveClassroomSession) => LiveClassroomSession
   ) => void;
   onSwitchToStudentPreview?: () => void;
+  onResetAcademicYear?: () => Promise<void>;
   isLoading?: boolean;
 }
 
@@ -104,7 +105,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   onUnlockStage,
   liveSession,
   onUpdateLiveSession,
-  onSwitchToStudentPreview,
+  onResetAcademicYear,
   isLoading = false,
 }) => {
   // Active Grade (6, 7, 8, 9) & Period (1 -> 29) Selection
@@ -121,6 +122,8 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   >('ALL');
   const [isLivePresenterOpen, setIsLivePresenterOpen] = useState(false);
   const [showLectureSlideModal, setShowLectureSlideModal] = useState(false);
+  const [showResetAcademicYearModal, setShowResetAcademicYearModal] = useState(false);
+  const [isResettingAcademicYear, setIsResettingAcademicYear] = useState(false);
 
   const gradePeriods = getPeriodsForGrade(selectedNotebookGrade);
   const selectedPeriodSpec: CurriculumPeriodSpec =
@@ -1567,18 +1570,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               >
                 <span className="material-symbols-outlined text-[16px]">slideshow</span>
                 <span>Phòng Live ({liveSession.activeClassId || selectedClass})</span>
-              </button>
-            )}
-
-            {onSwitchToStudentPreview && (
-              <button
-                type="button"
-                onClick={onSwitchToStudentPreview}
-                className="px-3 py-1.5 rounded-full bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
-                title="Mở giao diện Cổng Học Sinh để xem kết quả học tập cá nhân, lớp, khối"
-              >
-                <span className="material-symbols-outlined text-[16px]">visibility</span>
-                <span className="hidden sm:inline">Vào trang Học sinh</span>
               </button>
             )}
 
@@ -4653,6 +4644,16 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
                       type="button"
+                      onClick={() => setShowResetAcademicYearModal(true)}
+                      className="px-4 py-2 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-label-sm text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+                      title="Đưa toàn bộ XP, điểm số, sao và bài nộp về 0 cho toàn trường trước khi bắt đầu năm học mới"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">cleaning_services</span>
+                      <span>Làm sạch XP &amp; Điểm Khai Giảng Năm Học Mới</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => {
                         const targetList = students.filter((st) => {
                           const stGrade = st.grade || Number(st.classId?.charAt(0)) || 6;
@@ -4680,6 +4681,70 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {/* MODAL XÁC NHẬN LÀM SẠCH DỮ LIỆU KHAI GIẢNG NĂM HỌC MỚI */}
+                {showResetAcademicYearModal && (
+                  <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+                    <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border border-rose-200 dark:border-rose-800 flex flex-col gap-5">
+                      <div className="flex items-start gap-3.5">
+                        <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                          <span className="material-symbols-outlined text-[28px]">cleaning_services</span>
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                            Làm sạch XP &amp; Điểm Khai Giảng Năm Học Mới
+                          </h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                            Thao tác này sẽ đưa toàn bộ <strong>Điểm XP, Ngôi sao, Điểm trung bình (ĐTB), Chuỗi ngày học và Lịch sử bài nộp</strong> của tất cả học sinh toàn trường (Khối 6, 7, 8, 9) về <strong>0</strong> để bắt đầu năm học mới. Danh sách học sinh và các lớp học vẫn được giữ nguyên.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-200 font-semibold">
+                        ⚠️ Lưu ý: Hệ thống sẽ đồng bộ lệnh làm sạch trực tiếp lên CSDL Cloud (`/api/db/reset-academic-year`) và tất cả thiết bị học sinh.
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <button
+                          type="button"
+                          disabled={isResettingAcademicYear}
+                          onClick={() => setShowResetAcademicYearModal(false)}
+                          className="px-4 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+                        >
+                          Huỷ bỏ
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isResettingAcademicYear}
+                          onClick={async () => {
+                            setIsResettingAcademicYear(true);
+                            try {
+                              if (onResetAcademicYear) {
+                                await onResetAcademicYear();
+                              } else {
+                                await fetch('/api/db/reset-academic-year', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                });
+                              }
+                              setShowResetAcademicYearModal(false);
+                            } finally {
+                              setIsResettingAcademicYear(false);
+                            }
+                          }}
+                          className="px-5 py-2 rounded-full bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow-md cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">restart_alt</span>
+                          <span>
+                            {isResettingAcademicYear
+                              ? 'Đang làm sạch toàn trường...'
+                              : 'Xác nhận Làm sạch Khai Giảng'}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* FILTER CONTROLS: CHỌN KHỐI, CHỌN LỚP, CHỌN ĐỢT ĐÁNH GIÁ */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 bg-surface-container-low rounded-xl">
