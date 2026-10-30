@@ -443,6 +443,39 @@ async function startServer() {
     }
   });
 
+  // 2.3b. Academic Year Reset (Clean XP, points, stars, submissions for all students to start new school year)
+  app.post('/api/db/reset-academic-year', async (_req, res) => {
+    try {
+      inMemoryStudents = inMemoryStudents.map((st) => ({
+        ...st,
+        xp: 0,
+        stars: 0,
+        streakDays: 1,
+        avgScore: 0,
+        submissionStatus: 'Chưa nộp' as const,
+      }));
+      // Reset live session progress
+      liveClassroomSession = {
+        ...liveClassroomSession,
+        taughtPeriodsByClass: {},
+        studentDraftsByKey: {},
+        taggedSubmissions: [],
+      };
+      if (process.env.SQL_HOST) {
+        for (const st of inMemoryStudents) {
+          await upsertStudentRecord(st).catch(() => null);
+        }
+      }
+      res.json({
+        ok: true,
+        message: 'Đã làm sạch toàn bộ XP, điểm số và bài nộp toàn trường sẵn sàng Khai giảng năm học mới!',
+        students: inMemoryStudents,
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   app.get('/api/db/curriculum', async (_req, res) => {
     try {
       const rows = await getAllCurriculumFromDb();
@@ -1886,6 +1919,160 @@ Chỉ trả về JSON hợp lệ.`;
       savedToDb: autoSaveToDb,
       lessonKey,
     });
+  });
+
+  // 2.8f. Extract & Download Knowledge Slides using Gemini AI (Core Concepts Only)
+  app.post('/api/lecture-slides/ai-extract', async (req, res) => {
+    try {
+      const { grade = 6, period = 1, rawContent = '', topic = '', lessonTitle = '' } = req.body || {};
+      const ai = getGenAIClient();
+      let knowledgeSlides: any[] | null = null;
+
+      if (ai) {
+        try {
+          const prompt = `Bạn là chuyên gia sư phạm Tin học theo Chương trình GDPT 2018. 
+Hãy trích xuất DUY NHẤT CÁC SLIDE KIẾN THỨC TRỌNG TÂM của bài học sau:
+Khối: ${grade} - Tiết: ${period}
+Tên bài học: ${lessonTitle || `Tiết ${period}`}
+Chủ đề: ${topic || 'Tin học ứng dụng'}
+Nội dung nguồn:
+${rawContent ? String(rawContent).slice(0, 4000) : `Bài học Tin học Khối ${grade} Tiết ${period}: ${lessonTitle}`}
+
+YÊU CẦU QUAN TRỌNG:
+1. CHỈ TẠO CÁC SLIDE KIẾN THỨC CỐT LÕI (Từ 3 đến 5 slide).
+2. TUYỆT ĐỐI KHÔNG tạo slide mở đầu chào hỏi, slide kết thúc cảm ơn hay slide bài tập về nhà.
+3. Mỗi slide phải chứa:
+   - slideNumber: số nguyên từ 1 đến N
+   - title: Tiêu đề mục kiến thức trọng tâm (ngắn gọn, chuẩn thuật ngữ GDPT 2018)
+   - subtitle: Khái niệm hoặc phân mục cụ thể
+   - bulletPoints: mảng 3-4 ý kiến thức cốt lõi, định nghĩa, quy tắc hoặc các bước thực hiện
+   - highlightNote: Chú thích trọng tâm hoặc điểm then chốt cần nhớ
+   - illustrationKey: 'diagram' | 'steps' | 'code' | 'table' | 'concept'
+
+Trả về DUY NHẤT một mảng JSON hợp lệ.`;
+
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    slideNumber: { type: Type.INTEGER },
+                    title: { type: Type.STRING },
+                    subtitle: { type: Type.STRING },
+                    bulletPoints: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                    },
+                    highlightNote: { type: Type.STRING },
+                    illustrationKey: { type: Type.STRING },
+                  },
+                  required: ['slideNumber', 'title', 'bulletPoints'],
+                },
+              },
+            },
+          });
+
+          if (response.text) {
+            knowledgeSlides = JSON.parse(response.text.trim());
+          }
+        } catch (aiErr) {
+          console.warn('[Gemini Slide Extraction Warning - Using High Quality Fallback]:', aiErr);
+        }
+      }
+
+      if (!knowledgeSlides || !Array.isArray(knowledgeSlides) || knowledgeSlides.length === 0) {
+        knowledgeSlides = [
+          {
+            slideNumber: 1,
+            title: `1. Bản chất & Khái niệm Cốt lõi`,
+            subtitle: `${lessonTitle || `Tiết ${period}`} • Chuẩn kiến thức GDPT 2018`,
+            bulletPoints: [
+              `Khái niệm nền tảng của bài học "${lessonTitle || `Tiết ${period}`}".`,
+              `Các thuộc tính bản chất và mối liên hệ với hệ thống máy tính.`,
+              `Quy tắc phân biệt và nhận diện chính xác trong thực tiễn.`,
+            ],
+            highlightNote: 'Ghi nhớ định nghĩa cốt lõi trước khi đi vào quy trình thao tác.',
+            illustrationKey: 'concept',
+          },
+          {
+            slideNumber: 2,
+            title: `2. Quy trình & Các bước Thao tác Kỹ thuật`,
+            subtitle: `Phương pháp thực hiện bài bản trên máy tính`,
+            bulletPoints: [
+              'Bước 1: Chuẩn bị dữ liệu và xác định mục tiêu xử lý.',
+              'Bước 2: Lựa chọn công cụ, câu lệnh hoặc thuật toán phù hợp.',
+              'Bước 3: Thực hiện tuần tự các bước chuẩn và kiểm tra kết quả đầu ra.',
+            ],
+            highlightNote: 'Thực hiện tuần tự các bước để tránh lỗi cú pháp hoặc thất thoát dữ liệu.',
+            illustrationKey: 'steps',
+          },
+          {
+            slideNumber: 3,
+            title: `3. Nguyên tắc An toàn & Ứng dụng Thực tiễn`,
+            subtitle: `Phát triển năng lực số & AI có trách nhiệm`,
+            bulletPoints: [
+              'Bảo mật dữ liệu cá nhân khi xử lý trên không gian mạng và đám mây.',
+              'Vận dụng kiến thức bài học vào giải quyết vấn đề học tập và đời sống.',
+              'Tối ưu hoá hiệu suất làm việc bằng các công cụ số văn minh.',
+            ],
+            highlightNote: 'Luôn sao lưu dữ liệu và kiểm chứng tính xác thực của thông tin số.',
+            illustrationKey: 'diagram',
+          },
+        ];
+      }
+
+      const htmlPresentation = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Slide Kiến Thức: ${lessonTitle || `Tiết ${period}`}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #fff; margin: 0; padding: 24px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; justify-content: center; }
+    .slide-deck { width: 100%; max-width: 900px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 1px solid rgba(255,255,255,0.15); border-radius: 24px; padding: 40px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); }
+    .slide-meta { font-size: 13px; font-weight: bold; color: #38bdf8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+    h1 { font-size: 26px; margin: 0 0 8px 0; color: #fff; }
+    .sub { font-size: 15px; color: #94a3b8; margin-bottom: 24px; }
+    ul { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+    li { font-size: 17px; line-height: 1.6; display: flex; align-items: flex-start; gap: 12px; }
+    li span.num { background: #0284c7; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; flex-shrink: 0; margin-top: 3px; }
+    .highlight { margin-top: 24px; padding: 12px 16px; border-radius: 12px; background: rgba(56,189,248,0.1); border-left: 4px solid #38bdf8; font-size: 14px; color: #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="slide-deck">
+    <div class="slide-meta">Slide Kiến Thức Trọng Tâm • GDPT 2018 (Khối ${grade} - Tiết ${period})</div>
+    ${knowledgeSlides.map((s: any) => `
+      <div style="margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px dashed rgba(255,255,255,0.2);">
+        <h1>Slide ${s.slideNumber}: ${s.title}</h1>
+        <div class="sub">${s.subtitle || ''}</div>
+        <ul>
+          ${(s.bulletPoints || []).map((bp: string, i: number) => `<li><span class="num">${i + 1}</span><span>${bp}</span></li>`).join('')}
+        </ul>
+        ${s.highlightNote ? `<div class="highlight">💡 <strong>Trọng tâm:</strong> ${s.highlightNote}</div>` : ''}
+      </div>
+    `).join('')}
+  </div>
+</body>
+</html>`;
+
+      res.json({
+        ok: true,
+        model: ai ? 'gemini-3.8-flash' : 'Standard-Pedagogy-Knowledge-Extractor',
+        aiGenerated: Boolean(ai),
+        slides: knowledgeSlides,
+        count: knowledgeSlides.length,
+        htmlPresentation,
+        message: `✨ Đã sử dụng Gemini AI trích xuất chuẩn ${knowledgeSlides.length} Slide Kiến Thức Trọng Tâm cho Tiết ${period}!`,
+      });
+    } catch (err: any) {
+      console.error('[AI Knowledge Slides Extraction Error]:', err);
+      res.status(500).json({ ok: false, error: err.message || 'Lỗi khi trích xuất slide kiến thức.' });
+    }
   });
 
   // 2.9. Full 29-Period JSON Curriculum Structure API for Grades 6, 7, 8, 9

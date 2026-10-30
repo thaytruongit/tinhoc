@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   type CurriculumPeriodSpec,
   type LiveClassroomSession,
@@ -92,6 +92,57 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
   ].sort((a, b) => b.xp - a.xp);
 
   const maxXpInList = Math.max(100, ...(rankedStudents.map((s) => s.xp) || [1000]));
+
+  // Real-time Top Performers automatic glowing & flashing effect detection
+  const [topPerformerAlert, setTopPerformerAlert] = useState<{
+    id: string;
+    name: string;
+    partnerName?: string;
+    xp: number;
+  } | null>(null);
+  const lastLeaderIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (rankedStudents.length > 0) {
+      const currentLeader = rankedStudents[0];
+      if (lastLeaderIdRef.current && lastLeaderIdRef.current !== currentLeader.id) {
+        // Leader changed! Trigger Top Performer flashing alert & celebration
+        setTopPerformerAlert({
+          id: currentLeader.id,
+          name: currentLeader.name,
+          partnerName: currentLeader.partnerName,
+          xp: currentLeader.xp,
+        });
+        triggerSynchronizedCelebration();
+        onShowToast(
+          `👑 TOP 1 BỨT PHÁ DẪN ĐẦU: ${currentLeader.name}${
+            currentLeader.partnerName && currentLeader.partnerName !== 'Học cá nhân (1 mình)'
+              ? ` & ${currentLeader.partnerName}`
+              : ''
+          } vừa vươn lên dẫn đầu bảng xếp hạng (${currentLeader.xp.toLocaleString()} XP)!`
+        );
+        const timer = setTimeout(() => {
+          setTopPerformerAlert(null);
+        }, 8000);
+        return () => clearTimeout(timer);
+      }
+      lastLeaderIdRef.current = currentLeader.id;
+    }
+  }, [rankedStudents, onShowToast]);
+
+  // Simulate #2 student overtaking #1 to demonstrate real-time Top Performer flashing effect
+  const handleSimulateTopPerformerTakeover = () => {
+    if (rankedStudents.length < 2) return;
+    const secondStudent = rankedStudents[1];
+    const topXp = rankedStudents[0].xp;
+    const boost = topXp - secondStudent.xp + 150;
+    secondStudent.xp += boost;
+    secondStudent.stars = (secondStudent.stars || 0) + 2;
+    onUpdateLiveSession((prev) => ({
+      ...prev,
+      updatedAt: new Date().toISOString(),
+    }));
+  };
 
   // Toggle Slide Bài Giảng lock/unlock synchronized with Student Live Room
   const handleToggleSlideLock = () => {
@@ -457,12 +508,48 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Left 7 cols: Horizontal Bar Chart */}
           <div className="lg:col-span-7 flex flex-col gap-3 bg-slate-50/70 p-5 rounded-2xl border border-slate-200/80">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-700 mb-1">
+            {/* Top Performer Real-time Notification Banner */}
+            {topPerformerAlert && (
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white font-black text-xs sm:text-sm flex items-center justify-between shadow-lg animate-bounce border-2 border-yellow-200">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-2xl animate-spin">👑</span>
+                  <div>
+                    <span className="uppercase tracking-wider text-[11px] block text-amber-100">
+                      ⚡ TOP PERFORMER BỨT PHÁ DẪN ĐẦU THỜI GIAN THỰC!
+                    </span>
+                    <span className="text-sm sm:text-base text-white">
+                      {topPerformerAlert.name}
+                      {topPerformerAlert.partnerName &&
+                      topPerformerAlert.partnerName !== 'Học cá nhân (1 mình)'
+                        ? ` & ${topPerformerAlert.partnerName}`
+                        : ''}{' '}
+                      — {topPerformerAlert.xp.toLocaleString()} XP
+                    </span>
+                  </div>
+                </div>
+                <span className="px-3 py-1 rounded-full bg-white text-amber-800 text-xs font-black shadow-xs shrink-0">
+                  VỊ TRÍ #1
+                </span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between text-xs font-bold text-slate-700 mb-1 flex-wrap gap-2">
               <span className="flex items-center gap-1.5">
                 <span className="material-symbols-outlined text-sky-600 text-[18px]">bar_chart</span>
                 <span>Biểu đồ Top Điểm XP ({rankingScope === 'class' ? `Lớp ${classId}` : `Khối ${grade}`})</span>
               </span>
-              <span className="text-slate-400">Đơn vị: Điểm XP &amp; Sao</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSimulateTopPerformerTakeover}
+                  className="px-2.5 py-1 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                  title="Cộng điểm bứt phá cho HS hạng #2 vượt lên #1 để kiểm tra hiệu ứng Top Performer chớp sáng"
+                >
+                  <span className="material-symbols-outlined text-[14px] text-amber-700">bolt</span>
+                  <span>Mô phỏng HS vượt lên #1</span>
+                </button>
+                <span className="text-slate-400">Đơn vị: Điểm XP &amp; Sao</span>
+              </div>
             </div>
 
             <div className="flex flex-col gap-3">
@@ -480,13 +567,20 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     : 'from-slate-400 to-slate-500';
 
                 return (
-                  <div key={st.id} className="flex flex-col gap-1">
+                  <div
+                    key={st.id}
+                    className={`flex flex-col gap-1 transition-all rounded-xl p-1.5 ${
+                      idx === 0
+                        ? 'bg-gradient-to-r from-amber-100/90 via-yellow-50/90 to-amber-100/90 border-2 border-amber-400 shadow-md ring-2 ring-amber-300/80 animate-pulse'
+                        : ''
+                    }`}
+                  >
                     <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-center gap-2 min-w-0 flex-wrap">
                         <span
                           className={`px-2 py-0.5 rounded-md font-black text-[11px] shrink-0 ${
                             idx === 0
-                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              ? 'bg-amber-500 text-white shadow-xs'
                               : idx === 1
                               ? 'bg-sky-100 text-sky-800 border border-sky-300'
                               : idx === 2
@@ -496,6 +590,13 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                         >
                           {rankBadge}
                         </span>
+                        {idx === 0 && (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white font-black text-[10px] uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                            <span>✨</span>
+                            <span>TOP PERFORMER</span>
+                            <span>👑</span>
+                          </span>
+                        )}
                         <span className="font-bold text-slate-900 truncate">{st.name}</span>
                         <span className="text-[11px] text-slate-500 truncate">
                           ({st.partnerName && st.partnerName !== 'Học cá nhân (1 mình)' ? `+ ${st.partnerName}` : 'Cá nhân'})
@@ -526,17 +627,22 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
               {rankedStudents.slice(0, 3).map((st, idx) => (
                 <div
                   key={st.id}
-                  className={`p-3.5 rounded-2xl border text-center flex flex-col items-center gap-1.5 ${
+                  className={`p-3.5 rounded-2xl border text-center flex flex-col items-center gap-1.5 transition-all ${
                     idx === 0
-                      ? 'bg-amber-50/90 border-amber-300 shadow-xs'
+                      ? 'bg-gradient-to-b from-amber-100/90 to-yellow-50 border-2 border-amber-400 shadow-md ring-2 ring-amber-300/80 animate-pulse'
                       : idx === 1
                       ? 'bg-sky-50/90 border-sky-200'
                       : 'bg-emerald-50/90 border-emerald-200'
                   }`}
                 >
-                  <span className="text-xl">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xl">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</span>
+                    {idx === 0 && (
+                      <span className="text-xs animate-bounce" title="Top Performer">👑</span>
+                    )}
+                  </div>
                   <span className="text-xs font-black text-slate-900 line-clamp-1">{st.name}</span>
-                  <span className="text-[11px] font-bold text-sky-700">{st.xp} XP</span>
+                  <span className="text-[11px] font-bold text-sky-700">{st.xp.toLocaleString()} XP</span>
                   <span className="px-2 py-0.5 rounded-full bg-white text-slate-600 text-[10px] font-bold border border-slate-200">
                     TB: {st.avgScore.toFixed(1)}đ
                   </span>

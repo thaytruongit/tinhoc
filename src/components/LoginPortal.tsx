@@ -606,19 +606,6 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                     </span>
                     <span className="material-symbols-outlined text-[24px]">rocket_launch</span>
                   </button>
-
-                  <div className="flex items-center justify-center gap-3 pt-2 border-t border-outline-variant/30">
-                    <button
-                      type="button"
-                      onClick={() => onGoogleLogin(activeRole)}
-                      className="py-2.5 px-5 rounded-full bg-surface-container-low hover:bg-surface-container text-on-surface font-label-md text-label-md flex items-center gap-2 transition-all cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[18px] text-secondary">
-                        school
-                      </span>
-                      <span>Đăng nhập bằng Google Classroom (Firebase Auth)</span>
-                    </button>
-                  </div>
                 </form>
               </div>
             </div>

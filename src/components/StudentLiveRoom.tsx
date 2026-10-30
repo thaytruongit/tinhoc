@@ -95,6 +95,41 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     liveSession?.unlockedPracticeStage3ByLesson?.[lessonKey]
   );
 
+  // Track real-time Top Performers in Class
+  const rankedLiveStudents = [...students]
+    .filter((s) => s.classId === currentStudent.classId)
+    .sort((a, b) => b.xp - a.xp);
+
+  const [liveTopPerformerAlert, setLiveTopPerformerAlert] = useState<{
+    id: string;
+    name: string;
+    xp: number;
+  } | null>(null);
+  const [showLiveLeaderboardDrawer, setShowLiveLeaderboardDrawer] = useState(false);
+  const lastStudentLeaderIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (rankedLiveStudents.length > 0) {
+      const topOne = rankedLiveStudents[0];
+      if (lastStudentLeaderIdRef.current && lastStudentLeaderIdRef.current !== topOne.id) {
+        setLiveTopPerformerAlert({
+          id: topOne.id,
+          name: topOne.name,
+          xp: topOne.xp,
+        });
+        triggerSynchronizedCelebration();
+        onShowToast(
+          `👑 TOP PERFORMER MỚI: Bạn ${topOne.name} vừa bứt phá dẫn đầu Lớp (${topOne.xp} XP)! ✨`
+        );
+        const timer = setTimeout(() => {
+          setLiveTopPerformerAlert(null);
+        }, 7000);
+        return () => clearTimeout(timer);
+      }
+      lastStudentLeaderIdRef.current = topOne.id;
+    }
+  }, [rankedLiveStudents, onShowToast]);
+
   // Track last teacher broadcast view/stage so whenever Teacher switches activity, Student automatically follows
   const lastTeacherStageRef = useRef<number>(teacherCurrentStage);
   const lastTeacherViewRef = useRef<string | undefined>(teacherActiveView);
@@ -443,6 +478,16 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
               <span>{currentStudent.xp.toLocaleString()} XP</span>
             </div>
 
+            <button
+              type="button"
+              onClick={() => setShowLiveLeaderboardDrawer((v) => !v)}
+              className="px-3 py-1.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+              title="Xem bảng xếp hạng trực tiếp của Lớp"
+            >
+              <span>🏆</span>
+              <span className="hidden sm:inline">Top Lớp</span>
+            </button>
+
             {partnerStudent && (
               <button
                 type="button"
@@ -458,6 +503,25 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
 
         {/* Content of the active view */}
         <div className="p-6 sm:p-8 max-w-5xl mx-auto w-full flex flex-col gap-5">
+          {/* Top Performer Flash Alert */}
+          {liveTopPerformerAlert && (
+            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white font-black text-xs sm:text-sm flex items-center justify-between shadow-lg animate-bounce border-2 border-yellow-200">
+              <div className="flex items-center gap-2.5">
+                <span className="text-2xl animate-spin">👑</span>
+                <div>
+                  <span className="uppercase tracking-wider text-[11px] block text-amber-100">
+                    ⚡ TOP PERFORMER MỚI DẪN ĐẦU LỚP {currentStudent.classId}!
+                  </span>
+                  <span className="text-sm sm:text-base text-white">
+                    {liveTopPerformerAlert.name} vừa bứt phá lên vị trí #1 với {liveTopPerformerAlert.xp.toLocaleString()} XP!
+                  </span>
+                </div>
+              </div>
+              <span className="px-3 py-1 rounded-full bg-white text-amber-800 text-xs font-black shadow-xs shrink-0">
+                #1 LỚP ✨
+              </span>
+            </div>
+          )}
           {!isViewUnlocked(activeView) ? (
             /* LOCKED ITEM NOTICE */
             <div className="p-12 rounded-3xl bg-white border-2 border-dashed border-slate-200 text-center flex flex-col items-center gap-4 shadow-xs">
@@ -942,6 +1006,92 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
         currentStudent={currentStudent}
         onShowToast={onShowToast}
       />
+
+      {/* Live Leaderboard Drawer Modal for Students */}
+      {showLiveLeaderboardDrawer && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex justify-end">
+          <div className="bg-white w-full max-w-md h-full p-6 shadow-2xl flex flex-col gap-5 overflow-y-auto animate-in slide-in-from-right duration-300">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center font-black text-lg">
+                  🏆
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-base">
+                    Bảng Xếp Hạng Trực Tiếp (Lớp {currentStudent.classId})
+                  </h3>
+                  <p className="text-xs text-slate-500">Thành tích thời gian thực trong phiên học Live</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowLiveLeaderboardDrawer(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2.5 divide-y divide-slate-100">
+              {rankedLiveStudents.map((st, idx) => {
+                const isMe = st.id === currentStudent.id;
+                return (
+                  <div
+                    key={st.id}
+                    className={`pt-2.5 pb-1 flex items-center justify-between gap-3 ${
+                      idx === 0
+                        ? 'p-3 rounded-2xl bg-gradient-to-r from-amber-100/90 to-yellow-50 border-2 border-amber-400 shadow-sm animate-pulse'
+                        : isMe
+                        ? 'p-3 rounded-2xl bg-sky-50 border border-sky-200 font-bold'
+                        : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span
+                        className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${
+                          idx === 0
+                            ? 'bg-amber-500 text-white shadow-xs'
+                            : idx === 1
+                            ? 'bg-sky-200 text-sky-900'
+                            : idx === 2
+                            ? 'bg-emerald-200 text-emerald-900'
+                            : 'bg-slate-200 text-slate-700'
+                        }`}
+                      >
+                        {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-bold text-slate-900 truncate">{st.name}</span>
+                          {isMe && (
+                            <span className="px-1.5 py-0.5 rounded bg-sky-600 text-white text-[9px] font-black uppercase">
+                              Bạn
+                            </span>
+                          )}
+                          {idx === 0 && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-500 text-white text-[9px] font-black uppercase">
+                              Top 1 ✨
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {st.partnerName && st.partnerName !== 'Học cá nhân (1 mình)'
+                            ? `Cùng máy: ${st.partnerName}`
+                            : 'Cá nhân'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs font-black text-sky-700">{st.xp.toLocaleString()} XP</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
