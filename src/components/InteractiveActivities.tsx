@@ -96,16 +96,6 @@ export const WarmupEssayActivity: React.FC<WarmupEssayProps> = ({
         <div className="flex items-center justify-between text-xs text-on-surface-variant flex-wrap gap-2">
           <span>{currentAnswer?.trim() ? `${currentAnswer.trim().split(/\s+/).length} từ` : 'Chưa nhập câu trả lời'}</span>
           <div className="flex items-center gap-2">
-            {sampleAnswer && (
-              <button
-                type="button"
-                onClick={() => setShowGuide((v) => !v)}
-                className="text-primary font-bold hover:underline cursor-pointer flex items-center gap-1"
-              >
-                <span className="material-symbols-outlined text-[16px]">visibility</span>
-                <span>{showGuide ? 'Ẩn đáp án gợi ý' : 'Đáp án gợi ý'}</span>
-              </button>
-            )}
             {(onSubmitAnswer || onSubmit) && !isReadOnly && (
               <button
                 type="button"
@@ -118,17 +108,6 @@ export const WarmupEssayActivity: React.FC<WarmupEssayProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Định hướng trả lời sư phạm */}
-      {showGuide && sampleAnswer && (
-        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex flex-col gap-1">
-          <span className="font-bold flex items-center gap-1">
-            <span className="material-symbols-outlined text-[16px]">verified</span>
-            Định hướng trả lời &amp; Gợi ý sư phạm:
-          </span>
-          <p className="leading-relaxed whitespace-pre-line">{sampleAnswer}</p>
-        </div>
-      )}
     </div>
   );
 };
@@ -139,6 +118,9 @@ export const WarmupEssayActivity: React.FC<WarmupEssayProps> = ({
 interface DragDropProps {
   title?: string;
   instruction?: string;
+  bucketA?: string;
+  bucketB?: string;
+  dragItems?: { id: string; text: string; correctBox: 'data' | 'info' }[];
   wordBank: string[];
   slots: Record<number, string | null>;
   onSlotChange: (slotNum: number, value: string | null) => void;
@@ -159,6 +141,9 @@ interface DragDropProps {
 export const DragDropActivity: React.FC<DragDropProps> = ({
   title,
   instruction,
+  bucketA,
+  bucketB,
+  dragItems,
   wordBank,
   slots,
   onSlotChange,
@@ -168,184 +153,363 @@ export const DragDropActivity: React.FC<DragDropProps> = ({
   customQuestions,
   sentenceLines,
 }) => {
-  const [draggedWord, setDraggedWord] = useState<string | null>(null);
-  const [selectedWord, setSelectedWord] = useState<string | null>(null);
+  const [draggedSlotNum, setDraggedSlotNum] = useState<number | null>(null);
+  const [selectedSlotNum, setSelectedSlotNum] = useState<number | null>(null);
 
-  const correctAnswers: Record<number, string> =
-    customQuestions !== undefined
-      ? customQuestions.reduce((acc, q) => {
-          acc[q.slotNum] = q.correctWord;
-          return acc;
-        }, {} as Record<number, string>)
-      : {
-          1: 'Dữ liệu',
-          2: 'Thông tin',
-          3: 'Hiểu biết',
-          4: 'Vật mang tin',
-        };
+  // Build normalized 4 statements from CSDL (customQuestions + dragItems)
+  const rawQuestions =
+    customQuestions && customQuestions.length > 0
+      ? customQuestions
+      : dragItems && dragItems.length > 0
+      ? dragItems.map((it, idx) => ({
+          slotNum: idx + 1,
+          promptFragment: it.text,
+          correctWord: it.correctBox === 'data' ? 'A' : 'B',
+          points: 0.25,
+        }))
+      : [
+          {
+            slotNum: 1,
+            promptFragment: 'Máy tính Pascaline (1642) hoạt động nhờ hệ thống bánh răng',
+            correctWord: 'A',
+            points: 0.25,
+          },
+          {
+            slotNum: 2,
+            promptFragment: 'Dự án máy tính Analytical Engine của Charles Babbage (1833)',
+            correctWord: 'A',
+            points: 0.25,
+          },
+          {
+            slotNum: 3,
+            promptFragment: 'Máy tính ENIAC sử dụng hàng vạn đèn điện tử chân không',
+            correctWord: 'B',
+            points: 0.25,
+          },
+          {
+            slotNum: 4,
+            promptFragment: 'Máy tính cá nhân sử dụng bộ vi xử lí mật độ tích hợp rất cao (VLSI)',
+            correctWord: 'B',
+            points: 0.25,
+          },
+        ];
+
+  const statements = rawQuestions.map((q, idx) => {
+    const slotNum = q.slotNum || idx + 1;
+    const dragItemMatch = dragItems?.[idx];
+    // Clean any legacy leading numbering "1. " or inline blank "(1)..." so statement is crisp
+    const rawText = (q.promptFragment || dragItemMatch?.text || `Nhận định ${slotNum}`)
+      .replace(/^\s*\d+[.)]\s*/, '')
+      .replace(/\s*\(\d+\)\.{0,4}\s*/g, ' ')
+      .replace(/\s*\[[^\]]+\]\s*/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const cwUpper = String(q.correctWord || '').trim().toUpperCase();
+    const targetBox: 'A' | 'B' =
+      cwUpper === 'A' || cwUpper === 'DATA' || cwUpper === 'HỘP A'
+        ? 'A'
+        : cwUpper === 'B' || cwUpper === 'INFO' || cwUpper === 'HỘP B'
+        ? 'B'
+        : dragItemMatch?.correctBox === 'data'
+        ? 'A'
+        : dragItemMatch?.correctBox === 'info'
+        ? 'B'
+        : idx < Math.ceil(rawQuestions.length / 2)
+        ? 'A'
+        : 'B';
+
+    return {
+      slotNum,
+      text: rawText,
+      targetBox,
+      legacyWord: q.correctWord,
+      points: Number(q.points) || 0.25,
+    };
+  });
+
+  const getAssignedBox = (item: (typeof statements)[number]): 'A' | 'B' | null => {
+    const rawVal = slots[item.slotNum];
+    if (!rawVal) return null;
+    const norm = String(rawVal).trim().toUpperCase();
+    if (norm === 'A' || norm === 'DATA' || norm === 'HỘP A') return 'A';
+    if (norm === 'B' || norm === 'INFO' || norm === 'HỘP B') return 'B';
+    if (item.legacyWord && String(rawVal).trim() === String(item.legacyWord).trim()) {
+      return item.targetBox;
+    }
+    return null;
+  };
 
   const totalPoints =
-    customQuestions !== undefined
-      ? customQuestions.reduce((acc, q) => acc + (Number(q.points) || 0.2), 0)
-      : 1.0;
+    Math.round(statements.reduce((acc, s) => acc + s.points, 0) * 100) / 100 || 1.0;
 
-  const handleDragStart = (e: React.DragEvent, word: string) => {
+  const earnedPoints =
+    Math.round(
+      statements.reduce((acc, s) => {
+        const assigned = getAssignedBox(s);
+        return acc + (assigned === s.targetBox ? s.points : 0);
+      }, 0) * 100
+    ) / 100;
+
+  const unassignedItems = statements.filter((s) => getAssignedBox(s) === null);
+  const boxAItems = statements.filter((s) => getAssignedBox(s) === 'A');
+  const boxBItems = statements.filter((s) => getAssignedBox(s) === 'B');
+
+  const boxALabel =
+    bucketA && bucketA.trim() ? bucketA.trim() : 'Hộp A: Giai đoạn máy tính cơ học';
+  const boxBLabel =
+    bucketB && bucketB.trim() ? bucketB.trim() : 'Hộp B: Giai đoạn máy tính điện tử';
+
+  const handleDragStart = (e: React.DragEvent, slotNum: number) => {
     if (isReadOnly) return;
-    e.dataTransfer.setData('text/plain', word);
-    setDraggedWord(word);
+    e.dataTransfer.setData('text/plain', String(slotNum));
+    setDraggedSlotNum(slotNum);
   };
 
-  const handleDrop = (e: React.DragEvent, slotNum: number) => {
+  const handleDropToBox = (e: React.DragEvent, targetBox: 'A' | 'B' | null) => {
     if (isReadOnly) return;
     e.preventDefault();
-    const word = e.dataTransfer.getData('text/plain') || draggedWord || selectedWord;
-    if (word) {
-      onSlotChange(slotNum, word);
-      setSelectedWord(null);
-      setDraggedWord(null);
+    const raw = e.dataTransfer.getData('text/plain');
+    const num = Number(raw) || draggedSlotNum || selectedSlotNum;
+    if (num) {
+      onSlotChange(num, targetBox);
+      setDraggedSlotNum(null);
+      setSelectedSlotNum(null);
     }
   };
 
-  const handleSlotClick = (slotNum: number) => {
+  const handleClickBox = (targetBox: 'A' | 'B') => {
     if (isReadOnly) return;
-    if (selectedWord) {
-      onSlotChange(slotNum, selectedWord);
-      setSelectedWord(null);
-    } else if (slots[slotNum]) {
-      onSlotChange(slotNum, null);
+    if (selectedSlotNum !== null) {
+      onSlotChange(selectedSlotNum, targetBox);
+      setSelectedSlotNum(null);
     }
   };
 
-  const renderSlot = (num: number) => {
-    const val = slots[num];
-    const isCorrect = val === correctAnswers[num];
+  if (
+    (!wordBank || wordBank.length === 0) &&
+    (!customQuestions || customQuestions.length === 0) &&
+    (!dragItems || dragItems.length === 0) &&
+    (!sentenceLines || sentenceLines.length === 0) &&
+    !paragraph
+  ) {
+    return (
+      <div className="flex flex-col gap-2 p-5 rounded-2xl bg-surface-container-low border border-dashed border-outline-variant text-center text-sm text-on-surface-variant">
+        <span className="font-bold">⚠️ Trống dữ liệu Kéo - Thả</span>
+        <span className="text-xs">Tiết học này chưa có dữ liệu bài tập Kéo - Thả trong CSDL.</span>
+      </div>
+    );
+  }
+
+  const displayTitle =
+    title && !/từ khóa|điền vào/i.test(title)
+      ? title.toUpperCase()
+      : 'DẠNG 1: KÉO THẢ PHÂN LOẠI ỨNG DỤNG & CÔNG NGHỆ';
+
+  const displayInstruction =
+    instruction && !/từ gợi ý|ô trống/i.test(instruction)
+      ? instruction
+      : 'Phân loại các thiết bị/dự án vào đúng giai đoạn phát triển (1.0đ - 0.25đ/ý)';
+
+  const renderStatementCard = (
+    item: (typeof statements)[number],
+    inBox: 'A' | 'B' | null
+  ) => {
+    const isSelected = selectedSlotNum === item.slotNum;
+    const isCorrect = inBox !== null && inBox === item.targetBox;
+    const badgeColor =
+      item.slotNum <= 2
+        ? 'bg-indigo-100 text-indigo-700'
+        : 'bg-amber-100 text-amber-800';
 
     return (
-      <span
-        onDragOver={(e) => {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
+      <div
+        key={item.slotNum}
+        data-testid={
+          inBox === null
+            ? `word-bank-item-${item.slotNum - 1}`
+            : `drag-slot-${item.slotNum}`
+        }
+        draggable={!isReadOnly}
+        onDragStart={(e) => handleDragStart(e, item.slotNum)}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (isReadOnly) return;
+          if (inBox !== null) {
+            // Return card back to Kho nhận định when clicked inside a box
+            onSlotChange(item.slotNum, null);
+            setSelectedSlotNum(null);
+          } else {
+            setSelectedSlotNum(isSelected ? null : item.slotNum);
+          }
         }}
-        onDrop={(e) => handleDrop(e, num)}
-        onClick={() => handleSlotClick(num)}
-        className={`inline-flex items-center gap-1.5 px-3 py-1.5 mx-1.5 rounded-lg border-2 border-dashed transition-all cursor-pointer font-bold select-none text-sm ${
-          val
-            ? showAnswers
-              ? isCorrect
-                ? 'bg-emerald-100 text-emerald-800 border-emerald-500'
-                : 'bg-rose-100 text-rose-800 border-rose-500'
-              : 'bg-primary-container text-on-primary-container border-primary shadow-xs'
-            : selectedWord
-            ? 'bg-primary-fixed/30 border-primary animate-pulse text-primary'
-            : 'bg-surface-container border-outline text-on-surface-variant hover:border-primary'
+        className={`p-3.5 rounded-2xl border bg-white flex items-start justify-between gap-3 transition-all select-none ${
+          isReadOnly ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
+        } ${
+          showAnswers && inBox !== null
+            ? isCorrect
+              ? 'border-emerald-400 bg-emerald-50/40'
+              : 'border-rose-400 bg-rose-50/40'
+            : isSelected
+            ? 'border-indigo-600 ring-2 ring-indigo-500/20 shadow-md'
+            : 'border-slate-200/90 hover:border-indigo-300 shadow-2xs'
         }`}
-        title={val ? 'Bấm để xóa từ này' : 'Kéo từ gợi ý thả vào hoặc bấm chọn từ rồi bấm vào đây'}
+        title={
+          inBox !== null
+            ? 'Bấm để đưa nhận định này về Kho nhận định'
+            : 'Kéo thả vào Hộp A / Hộp B hoặc bấm chọn rồi bấm vào hộp'
+        }
       >
-        <span>
-          ({num}) {val || '...kéo từ thả vào đây...'}
-        </span>
-        {val && !isReadOnly && (
-          <span className="material-symbols-outlined text-[15px] opacity-70 hover:opacity-100 text-error">
-            cancel
+        <div className="flex items-start gap-3">
+          <span
+            className={`w-7 h-7 rounded-full flex items-center justify-center font-extrabold text-xs shrink-0 mt-0.5 ${badgeColor}`}
+          >
+            {item.slotNum}
+          </span>
+          <span className="text-sm font-medium text-slate-700 leading-relaxed">
+            {item.text}
+          </span>
+        </div>
+
+        {inBox !== null && !isReadOnly && (
+          <span className="material-symbols-outlined text-[16px] text-slate-400 hover:text-rose-600 shrink-0 mt-1">
+            close
           </span>
         )}
-        {showAnswers && (
-          <span className="text-[11px] font-normal block ml-1">
-            {isCorrect ? '✓' : `(ĐA: ${correctAnswers[num]})`}
-          </span>
-        )}
-      </span>
+      </div>
     );
   };
 
-  const isDefaultPassage =
-    (!sentenceLines || sentenceLines.length === 0) &&
-    customQuestions === undefined;
-
   return (
-    <div className="flex flex-col gap-4 p-5 rounded-2xl bg-surface-container-low border border-outline-variant/30">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <span className="text-xs uppercase font-bold tracking-wider text-secondary flex items-center gap-1.5">
-          <span className="material-symbols-outlined text-[18px]">pan_tool</span>
-          {title || 'Kéo - Thả'}
-        </span>
-        <span className="px-2.5 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed font-bold text-xs">
-          {totalPoints.toFixed(1)} điểm
+    <div
+      data-testid="drag-drop-activity"
+      className="flex flex-col gap-5 p-6 rounded-3xl bg-white border border-slate-200 shadow-xs"
+    >
+      {/* Header matching screenshot */}
+      <div className="flex items-start sm:items-center justify-between flex-wrap gap-3 pb-4 border-b border-slate-100">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 font-black text-sm flex items-center justify-center shrink-0">
+              1
+            </span>
+            <h4 className="text-base sm:text-lg font-black tracking-tight text-slate-800 uppercase">
+              {displayTitle}
+            </h4>
+          </div>
+          <p className="text-xs sm:text-sm text-slate-500 font-medium">
+            {displayInstruction}
+          </p>
+        </div>
+
+        <span className="px-4 py-1.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 font-extrabold text-xs sm:text-sm shrink-0">
+          Điểm phần 1: {earnedPoints.toFixed(1)} / {totalPoints.toFixed(1)}đ
         </span>
       </div>
 
-      {/* Word bank */}
-      <div className="p-3 rounded-xl bg-surface-container-lowest border border-outline-variant/40 flex flex-wrap items-center gap-2">
-        <span className="text-xs font-bold text-on-surface-variant mr-1">HỘP TỪ GỢI Ý:</span>
-        {wordBank.map((word) => {
-          const isSelected = selectedWord === word;
-          return (
-            <button
-              key={word}
-              type="button"
-              draggable={!isReadOnly}
-              onDragStart={(e) => handleDragStart(e, word)}
-              onClick={() => setSelectedWord(isSelected ? null : word)}
-              disabled={isReadOnly}
-              className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all select-none cursor-grab active:cursor-grabbing border ${
-                isSelected
-                  ? 'bg-primary text-on-primary border-primary ring-2 ring-primary-fixed shadow-md'
-                  : 'bg-surface-container text-on-surface border-outline-variant/60 hover:bg-surface-container-high'
-              }`}
-            >
-              [ {word} ]
-            </button>
-          );
-        })}
-      </div>
+      {/* Main 2-column Minigame Layout: Left = KHO NHẬN ĐỊNH, Right = Hộp A & Hộp B */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: KHO NHẬN ĐỊNH */}
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+          }}
+          onDrop={(e) => handleDropToBox(e, null)}
+          className="lg:col-span-5 p-4 rounded-2xl bg-slate-50/80 border border-slate-200/80 flex flex-col gap-3"
+        >
+          <div className="flex items-center justify-between gap-2 px-1">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
+              KHO NHẬN ĐỊNH
+            </span>
+            <span className="px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-extrabold">
+              {unassignedItems.length} chưa xếp
+            </span>
+          </div>
 
-      {/* Reading passage, sentence lines, or dynamic period items */}
-      {paragraph ? (
-        <div className="p-4 rounded-xl bg-surface-container-lowest border border-outline-variant/30 leading-loose text-base text-on-surface">
-          {paragraph.split(/(\(\d+\)|\{\d+\})/g).map((part, i) => {
-            const match = part.match(/\(?\{?(\d+)\}?\)?/);
-            if (match && match[1]) {
-              const slotIdx = Number(match[1]);
-              return <React.Fragment key={i}>{renderSlot(slotIdx)}</React.Fragment>;
-            }
-            return <span key={i}>{part}</span>;
-          })}
+          <div className="flex flex-col gap-3">
+            {unassignedItems.length > 0 ? (
+              unassignedItems.map((item) => renderStatementCard(item, null))
+            ) : (
+              <div className="py-8 px-4 rounded-xl border border-dashed border-slate-200 bg-white/70 text-center text-xs text-slate-400 italic">
+                Đã xếp hết cả {statements.length} nhận định vào Hộp A và Hộp B.
+              </div>
+            )}
+          </div>
         </div>
-      ) : sentenceLines && sentenceLines.length > 0 ? (
-        <div className="flex flex-col gap-3 p-4 rounded-xl bg-surface-container-lowest border border-outline-variant/30 text-sm text-on-surface">
-          {sentenceLines.map((line, idx) => (
-            <div
-              key={idx}
-              className="leading-loose flex flex-wrap items-center py-1.5 border-b border-outline-variant/15 last:border-none"
-            >
-              {line.textBefore && <span className="font-medium mr-1">{line.textBefore}</span>}
-              {line.slotNum !== undefined && renderSlot(line.slotNum)}
-              {line.textMid && <span className="font-medium mx-1">{line.textMid}</span>}
-              {line.slotNum2 !== undefined && renderSlot(line.slotNum2)}
-              {line.textAfter && <span className="font-medium ml-1">{line.textAfter}</span>}
+
+        {/* Right Column: Hộp A & Hộp B stacked vertically */}
+        <div className="lg:col-span-7 flex flex-col gap-4">
+          {/* Hộp A */}
+          <div
+            data-testid="drag-drop-box-a"
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+            }}
+            onDrop={(e) => handleDropToBox(e, 'A')}
+            onClick={() => handleClickBox('A')}
+            className={`p-4 rounded-2xl border-2 border-dashed transition-all flex flex-col gap-3 ${
+              selectedSlotNum !== null
+                ? 'border-indigo-400 bg-indigo-50/40 cursor-pointer ring-2 ring-indigo-300/40'
+                : 'border-indigo-200 bg-indigo-50/15'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 pb-2 border-b border-indigo-100">
+              <span className="text-sm font-extrabold text-indigo-700">
+                {boxALabel}
+              </span>
+              <span className="text-sm font-extrabold text-indigo-700">
+                (0.5đ)
+              </span>
             </div>
-          ))}
-        </div>
-      ) : isDefaultPassage ? (
-        <div className="p-4 rounded-xl bg-surface-container-lowest border border-outline-variant/30 leading-loose text-base text-on-surface">
-          &ldquo;Khi quan sát bản tin dự báo thời tiết trên truyền hình, những thông số nhiệt độ 32°C và biểu tượng hình mặt trời là{' '}
-          {renderSlot(1)}. Qua đó, em biết được &lsquo;Hôm nay trời nắng nóng&rsquo;, đây chính là{' '}
-          {renderSlot(2)} mang lại {renderSlot(3)} giúp em quyết định mang theo mũ nón khi ra ngoài. Chiếc tivi hay màn hình điện thoại chiếu bản tin đó đóng vai trò là{' '}
-          {renderSlot(4)}.&rdquo;
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2.5 p-4 rounded-xl bg-surface-container-lowest border border-outline-variant/30">
-          {customQuestions?.map((q) => (
-            <div
-              key={q.slotNum}
-              className="flex flex-wrap items-center justify-between gap-2 py-1.5 border-b border-outline-variant/15 last:border-none text-sm text-on-surface"
-            >
-              <span>• {q.promptFragment}:</span>
-              {renderSlot(q.slotNum)}
+
+            <div className="min-h-[88px] rounded-xl border border-dashed border-indigo-200/70 bg-white/80 p-3 flex flex-col justify-center gap-2.5">
+              {boxAItems.length === 0 ? (
+                <span className="text-center text-xs sm:text-sm italic text-slate-400 select-none">
+                  Kéo hoặc chọn nhận định thả vào đây...
+                </span>
+              ) : (
+                boxAItems.map((item) => renderStatementCard(item, 'A'))
+              )}
             </div>
-          ))}
+          </div>
+
+          {/* Hộp B */}
+          <div
+            data-testid="drag-drop-box-b"
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+            }}
+            onDrop={(e) => handleDropToBox(e, 'B')}
+            onClick={() => handleClickBox('B')}
+            className={`p-4 rounded-2xl border-2 border-dashed transition-all flex flex-col gap-3 ${
+              selectedSlotNum !== null
+                ? 'border-amber-400 bg-amber-50/40 cursor-pointer ring-2 ring-amber-300/40'
+                : 'border-amber-300/80 bg-amber-50/15'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 pb-2 border-b border-amber-200/60">
+              <span className="text-sm font-extrabold text-amber-900">
+                {boxBLabel}
+              </span>
+              <span className="text-sm font-extrabold text-amber-900">
+                (0.5đ)
+              </span>
+            </div>
+
+            <div className="min-h-[88px] rounded-xl border border-dashed border-amber-200/80 bg-white/80 p-3 flex flex-col justify-center gap-2.5">
+              {boxBItems.length === 0 ? (
+                <span className="text-center text-xs sm:text-sm italic text-slate-400 select-none">
+                  Kéo hoặc chọn nhận định thả vào đây...
+                </span>
+              ) : (
+                boxBItems.map((item) => renderStatementCard(item, 'B'))
+              )}
+            </div>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 };
@@ -418,6 +582,15 @@ export const FillBlankActivity: React.FC<FillBlankProps> = ({
 
   const keys: Array<'a' | 'b' | 'c'> = ['a', 'b', 'c'];
 
+  if (itemsToRender.length === 0) {
+    return (
+      <div className="flex flex-col gap-2 p-5 rounded-2xl bg-surface-container-low border border-dashed border-outline-variant text-center text-sm text-on-surface-variant">
+        <span className="font-bold">⚠️ Trống dữ liệu Điền khuyết</span>
+        <span className="text-xs">Tiết học này chưa có câu hỏi Điền khuyết trong CSDL.</span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4 p-5 rounded-2xl bg-surface-container-low border border-outline-variant/30">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -469,11 +642,6 @@ export const FillBlankActivity: React.FC<FillBlankProps> = ({
               <span className="text-[11px] font-bold text-primary bg-primary-fixed/50 px-2 py-0.5 rounded-md shrink-0">
                 {item.points}đ
               </span>
-              {showAnswers && !isOk && (
-                <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md shrink-0">
-                  Đáp án: {item.correctAnswer}
-                </span>
-              )}
             </div>
           );
         })}
@@ -563,6 +731,15 @@ export const MatchingActivity: React.FC<MatchingProps> = ({
   const totalPoints = hasCustom && items
     ? items.reduce((acc, q) => acc + (Number(q.points) || 0.25), 0)
     : 1.0;
+
+  if (hasCustom && items && items.length === 0) {
+    return (
+      <div className="flex flex-col gap-2 p-5 rounded-2xl bg-surface-container-low border border-dashed border-outline-variant text-center text-sm text-on-surface-variant">
+        <span className="font-bold">⚠️ Trống dữ liệu Nối cột</span>
+        <span className="text-xs">Tiết học này chưa có câu hỏi Nối cột trong CSDL.</span>
+      </div>
+    );
+  }
 
   const handleSelectA = (id: string) => {
     if (isReadOnly) return;
@@ -708,12 +885,6 @@ export const MatchingActivity: React.FC<MatchingProps> = ({
             );
           })}
         </div>
-        {showAnswers && (
-          <span className="font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md">
-            Đáp án chuẩn:{' '}
-            {columnA.map((item) => `${item.id} ──► ${correctPairs[item.id]?.toUpperCase()}`).join(' | ')}
-          </span>
-        )}
       </div>
     </div>
   );
@@ -750,159 +921,174 @@ export const ShortAnswerActivity: React.FC<ShortAnswerProps> = ({
 
   const defaultQuestions = [
     {
-      id: 'sa-verbatim-default',
-      label: 'Câu 4 [Dạng Trả lời ngắn - Nguyên bản PDF gốc]:',
-      question:
-        customPrompt ||
-        'Tình huống: Trong giờ học Địa lý, thầy giáo chiếu bản đồ lượng mưa trung bình của Việt Nam lên màn hình. Hãy chỉ ra rõ: Dữ liệu là gì? Thông tin em thu nhận được là gì? Vật mang tin trong tình huống này là gì?',
-      placeholder:
-        'Nhập câu trả lời của em (Hệ thống tự động đối chiếu từ khóa với Đáp án gợi ý để tính % điểm đạt được)...',
+      id: 'k6-p1-sa-1',
+      label: '• Dữ liệu quan sát được:',
+      question: 'Chỉ ra yếu tố Dữ liệu xuất hiện trong tình huống bài học:',
+      placeholder: 'Nhập câu trả lời ngắn...',
       sampleAnswer:
-        'Dữ liệu là các con số đo lượng mưa (mm) và ký hiệu màu sắc trên bản đồ. Thông tin là hiểu biết về sự phân bố lượng mưa giữa các vùng miền ở Việt Nam. Vật mang tin là màn hình máy chiếu hoặc tờ bản đồ giấy.',
-      points: 1.0,
+        'Các con số đo lượng mưa (mm), các đường ranh giới và ký hiệu màu sắc phân vùng trên bản đồ.',
+      points: 0.4,
+    },
+    {
+      id: 'k6-p1-sa-2',
+      label: '• Thông tin thu nhận được:',
+      question: 'Thông tin em hiểu được từ dữ liệu trên là gì?',
+      placeholder: 'Nhập câu trả lời ngắn...',
+      sampleAnswer:
+        'Hiểu biết về sự phân bố lượng mưa giữa các vùng miền ở Việt Nam (nơi nào mưa nhiều, nơi nào ít mưa).',
+      points: 0.3,
+    },
+    {
+      id: 'k6-p1-sa-3',
+      label: '• Vật mang tin:',
+      question: 'Xác định vật mang tin chứa đựng dữ liệu trong tình huống:',
+      placeholder: 'Nhập câu trả lời ngắn...',
+      sampleAnswer:
+        'Màn hình máy chiếu hoặc tờ bản đồ giấy in trong sách giáo khoa Địa lý.',
+      points: 0.3,
     },
   ];
 
-  // Nếu có customQuestions nhưng muốn giữ nguyên 1 câu hỏi gốc từ PDF thì gộp đáp án gợi ý chuẩn xác
   const rawQuestions =
-    customQuestions !== undefined ? customQuestions : defaultQuestions;
+    customQuestions && customQuestions.length > 0 ? customQuestions : defaultQuestions;
 
-  const combinedSuggestedAnswer = rawQuestions
-    .map((q) => q.sampleAnswer)
-    .filter(Boolean)
-    .join(' ');
+  const cleanedCustomPrompt = (customPrompt || '')
+    .replace(/^:\s*/, '')
+    .replace(/^\s*-\s*Trả lời ngắn[^\n:]*:\s*/i, '')
+    .replace(/^(?:---\s*)?(?:DẠNG\s*4\s*:\s*)?CÂU HỎI TRẢ LỜI NGẮN[^\n]*---\s*/i, '')
+    .replace(/^CÂU HỎI TRẢ LỜI NGẮN\s*\([^)]*\)\s*---$/i, '')
+    .trim();
 
   const verbatimQuestionText =
-    customPrompt !== undefined
-      ? customPrompt.replace(/^:\s*/, '').trim() || rawQuestions[0]?.question || ''
-      : rawQuestions[0]?.question || defaultQuestions[0].question;
+    cleanedCustomPrompt ||
+    rawQuestions.map((q) => q.question).filter(Boolean).join(' ') ||
+    'Tình huống: Trong giờ học Địa lý, thầy giáo chiếu bản đồ lượng mưa trung bình của Việt Nam lên màn hình. Hãy chỉ ra rõ: Dữ liệu là gì? Thông tin em thu nhận được là gì? Vật mang tin trong tình huống này là gì?';
 
-  const primaryQuestionId = rawQuestions[0]?.id || 'sa-verbatim-default';
-  const totalPoints = rawQuestions.reduce((acc, q) => acc + (Number(q.points) || 0), 0);
+  const totalPoints =
+    rawQuestions.reduce((acc, q) => acc + (Number(q.points) || 0), 0) || 1.0;
 
-  const studentAnswerText =
-    answers[primaryQuestionId] ??
-    answers['data'] ??
-    Object.values(answers).filter(Boolean).join(' ') ??
-    '';
+  // Evaluate each sub-question individually so every question from CSDL is displayed and graded accurately
+  const perQuestionResults = rawQuestions.map((sq, idx) => {
+    const fallbackKey = idx === 0 ? 'data' : idx === 1 ? 'info' : 'carrier';
+    const val = (
+      answers[sq.id] ??
+      answers[fallbackKey] ??
+      (rawQuestions.length === 1 ? Object.values(answers)[0] : '') ??
+      ''
+    ).trim();
+    const qPts = Number(sq.points) || (rawQuestions.length === 1 ? 1.0 : idx === 0 ? 0.4 : 0.3);
+    const evalRes = evaluateAnswerBySuggestedPercentage(
+      val,
+      sq.sampleAnswer || '',
+      qPts
+    );
+    return {
+      sq,
+      idx,
+      fallbackKey,
+      val,
+      qPts,
+      evalRes,
+    };
+  });
 
-  const gradeResult = evaluateAnswerBySuggestedPercentage(
-    studentAnswerText,
-    combinedSuggestedAnswer,
-    totalPoints
-  );
+  const totalEarnedPoints =
+    Math.round(
+      perQuestionResults.reduce((acc, r) => acc + r.evalRes.earnedPoints, 0) * 100
+    ) / 100;
+  const avgMatchPercentage =
+    perQuestionResults.length > 0
+      ? Math.round(
+          perQuestionResults.reduce((acc, r) => acc + r.evalRes.matchPercentage, 0) /
+            perQuestionResults.length
+        )
+      : 0;
+
+  if (
+    customQuestions !== undefined &&
+    customQuestions.length === 0 &&
+    !cleanedCustomPrompt
+  ) {
+    return (
+      <div className="flex flex-col gap-2 p-5 rounded-2xl bg-surface-container-low border border-dashed border-outline-variant text-center text-sm text-on-surface-variant">
+        <span className="font-bold">⚠️ Trống dữ liệu Trả lời ngắn</span>
+        <span className="text-xs">Tiết học này chưa có câu hỏi Trả lời ngắn trong CSDL.</span>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-4 p-5 rounded-2xl bg-surface-container-low border border-outline-variant/30">
+    <div
+      data-testid="short-answer-activity"
+      className="flex flex-col gap-4 p-5 rounded-2xl bg-surface-container-low border border-outline-variant/30"
+    >
       <div className="flex items-center justify-between flex-wrap gap-2">
         <span className="text-xs uppercase font-bold tracking-wider text-rose-600 flex items-center gap-1.5">
           <span className="material-symbols-outlined text-[18px]">edit_note</span>
-          Trả lời ngắn
+          Dạng 4: Câu hỏi Trả lời ngắn tình huống ({rawQuestions.length} câu hỏi)
         </span>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs">
-            Khớp: {gradeResult.matchPercentage}%
+            Khớp TB: {avgMatchPercentage}%
           </span>
           <span className="px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold text-xs">
-            {gradeResult.earnedPoints.toFixed(2)} / {totalPoints.toFixed(1)} điểm
+            {totalEarnedPoints.toFixed(2)} / {totalPoints.toFixed(1)} điểm
           </span>
         </div>
       </div>
 
-      {/* Câu hỏi */}
+      {/* Tình huống / Câu hỏi chung từ CSDL */}
       <div className="p-4 rounded-xl bg-surface-container-lowest border-l-4 border-rose-500 flex flex-col gap-1.5 shadow-2xs">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-bold text-rose-600">Câu hỏi:</span>
-          <button
-            type="button"
-            onClick={() => setShowSuggestedGuide((v) => !v)}
-            className="text-xs font-bold text-primary hover:underline cursor-pointer flex items-center gap-1"
-          >
-            <span className="material-symbols-outlined text-[15px]">visibility</span>
-            <span>{showSuggestedGuide ? 'Ẩn đáp án gợi ý' : 'Đáp án gợi ý'}</span>
-          </button>
+          <span className="text-xs font-bold text-rose-600">
+            Tình huống &amp; Yêu cầu câu hỏi (Từ CSDL):
+          </span>
         </div>
-        <p className="text-sm text-on-surface font-semibold leading-relaxed whitespace-pre-line">
+        <p
+          data-testid="short-answer-main-prompt"
+          className="text-sm text-on-surface font-semibold leading-relaxed whitespace-pre-line"
+        >
           {verbatimQuestionText}
         </p>
       </div>
 
-      {/* Ô nhập câu trả lời của học sinh */}
-      <div className="p-4 rounded-xl bg-surface-container-lowest border border-outline-variant/30 flex flex-col gap-2.5">
-        <label className="text-xs font-bold text-primary">
-          Câu trả lời của em:
-        </label>
+      {/* Danh sách từng ý hỏi / câu hỏi trả lời ngắn từ CSDL */}
+      <div className="flex flex-col gap-3">
+        {perQuestionResults.map(({ sq, idx, fallbackKey, val, qPts, evalRes }) => (
+          <div
+            key={sq.id || idx}
+            data-testid={`short-answer-item-${idx + 1}`}
+            className="p-4 rounded-xl bg-surface-container-lowest border border-outline-variant/30 flex flex-col gap-2.5 shadow-2xs"
+          >
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1.5">
+                <span className="px-2.5 py-0.5 rounded-md bg-rose-50 text-rose-700 font-bold text-xs border border-rose-200 self-start">
+                  Ý {idx + 1}: {sq.label || `Câu hỏi ${idx + 1}`}
+                </span>
+                <span className="text-sm font-bold text-on-surface">
+                  {sq.question}
+                </span>
+              </div>
+              <span className="text-xs font-bold text-primary shrink-0">
+                {evalRes.earnedPoints.toFixed(2)} / {qPts.toFixed(2)}đ ({evalRes.matchPercentage}%)
+              </span>
+            </div>
 
-        <textarea
-          rows={3}
-          value={studentAnswerText}
-          onChange={(e) => {
-            const val = e.target.value;
-            onChange(primaryQuestionId, val);
-            onChange('data', val);
-          }}
-          disabled={isReadOnly}
-          placeholder="Nhập câu trả lời của em..."
-          className="w-full p-3.5 rounded-xl border border-outline focus:border-primary bg-surface-container text-sm font-normal text-on-surface outline-hidden leading-relaxed"
-        />
-
-        {/* Thanh tiến trình % khớp Đáp án gợi ý */}
-        <div className="flex flex-col gap-1.5 pt-1">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold text-on-surface-variant">
-              Tỷ lệ khớp Đáp án gợi ý:{' '}
-              <strong className="text-emerald-700">{gradeResult.matchPercentage}%</strong>
-            </span>
-            <span className="font-bold text-primary">
-              Điểm quy đổi: {gradeResult.earnedPoints.toFixed(2)} / {totalPoints.toFixed(1)}đ
-            </span>
-          </div>
-          <div className="w-full h-2.5 rounded-full bg-surface-container-high overflow-hidden">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-primary via-secondary to-emerald-500 transition-all duration-300"
-              style={{ width: `${gradeResult.matchPercentage}%` }}
+            <textarea
+              rows={2}
+              value={val}
+              onChange={(e) => {
+                const nextVal = e.target.value;
+                onChange(sq.id, nextVal);
+                onChange(fallbackKey, nextVal);
+              }}
+              disabled={isReadOnly}
+              placeholder={sq.placeholder || 'Nhập câu trả lời ngắn của em...'}
+              className="w-full p-3 rounded-xl border border-outline focus:border-primary bg-surface-container text-sm font-normal text-on-surface outline-hidden leading-relaxed"
             />
           </div>
-          {gradeResult.matchedKeywords.length > 0 && (
-            <div className="flex items-center gap-1.5 flex-wrap pt-1">
-              <span className="text-[11px] font-bold text-emerald-700">Từ khóa đạt điểm:</span>
-              {gradeResult.matchedKeywords.map((kw, i) => (
-                <span
-                  key={i}
-                  className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold"
-                >
-                  ✓ {kw}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+        ))}
       </div>
-
-      {(showAnswers || showSuggestedGuide) && (
-        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex flex-col gap-1.5">
-          <span className="font-bold flex items-center gap-1">
-            <span className="material-symbols-outlined text-[16px]">verified</span>
-            Đáp án gợi ý chuẩn (Dùng để đối chiếu tính % điểm tự động):
-          </span>
-          <p className="leading-relaxed">{combinedSuggestedAnswer}</p>
-          {gradeResult.missingKeywords.length > 0 && (
-            <div className="flex items-center gap-1.5 flex-wrap pt-1">
-              <span className="text-[11px] font-bold text-amber-800">
-                Từ khóa gợi ý bổ sung để đạt 100% điểm:
-              </span>
-              {gradeResult.missingKeywords.map((kw, i) => (
-                <span
-                  key={i}
-                  className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[11px] font-semibold"
-                >
-                  + {kw}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 };
@@ -1128,6 +1314,16 @@ export const QuizArena25sActivity: React.FC<QuizArena25sProps> = ({
     );
   }
 
+  if (questions.length === 0) {
+    return (
+      <div className="flex flex-col gap-2 p-8 rounded-2xl bg-surface-container-low border border-dashed border-outline-variant text-center text-sm text-on-surface-variant">
+        <span className="text-2xl">⚠️</span>
+        <span className="font-bold text-base">Trống dữ liệu Đấu trường Trắc nghiệm</span>
+        <span className="text-xs">Tiết học này chưa có câu hỏi trắc nghiệm trong CSDL.</span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-5 p-6 rounded-2xl bg-surface-container-lowest border border-outline-variant/30 shadow-md">
       {/* Header with 25s Timer and Streak */}
@@ -1344,42 +1540,7 @@ export const PracticalTableActivity: React.FC<PracticalTableProps> = ({
             Bảng thống kê quan sát Vật mang tin, Dữ liệu và Thông tin trong đời sống
           </h3>
         </div>
-
-        <button
-          type="button"
-          onClick={() => setShowGuide((g) => !g)}
-          className="px-3.5 py-1.5 rounded-full bg-secondary-fixed text-secondary font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-        >
-          <span className="material-symbols-outlined text-[16px]">menu_book</span>
-          <span>{showGuide ? 'Ẩn hướng dẫn chấm (3.0đ)' : 'Xem Rubric (3.0đ) & Đáp án mẫu'}</span>
-        </button>
       </div>
-
-      {showGuide && (
-        <div className="p-4 rounded-xl bg-secondary-fixed/20 border border-secondary/30 flex flex-col gap-2 text-xs">
-          <span className="font-bold text-secondary uppercase">
-            Phần D. Hướng dẫn đánh giá &amp; Đáp án tham khảo (Hoạt động 4: 3.0 điểm / 10 điểm tiết học)
-          </span>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-on-surface-variant">
-            <div className="p-2.5 rounded-lg bg-surface-container-lowest">
-              <span className="font-bold text-on-surface block mb-1">Tiêu chí chấm điểm (Tổng 3.0 điểm):</span>
-              <ul className="list-disc pl-4 space-y-1">
-                <li>Xác định đúng vật mang tin: 1.0 điểm</li>
-                <li>Trích xuất dữ liệu chính xác dạng số, chữ, ảnh: 1.0 điểm</li>
-                <li>Nêu được thông tin và hành động phù hợp: 1.0 điểm</li>
-              </ul>
-            </div>
-            <div className="p-2.5 rounded-lg bg-surface-container-lowest">
-              <span className="font-bold text-on-surface block mb-1">Ví dụ chuẩn mẫu:</span>
-              <p>
-                - Vật mang tin: Bảng giá tại căng tin trường.<br />
-                - Dữ liệu: Các con số: Bánh mì 15.000đ, Sữa 10.000đ.<br />
-                - Thông tin &amp; Hành động: Biết giá tiền để chuẩn bị đủ tiền mua đồ ăn sáng.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Observation Table */}
       <div className="overflow-x-auto rounded-xl border border-outline-variant/30">
@@ -1544,6 +1705,20 @@ export const ApplicationThreeTasksActivity: React.FC<ApplicationThreeTasksProps>
     (grade1.matchPercentage + grade2.matchPercentage + grade3.matchPercentage) / 3
   );
 
+  if (
+    !deepAnalysis?.prompt?.trim() &&
+    !practicalTask?.prompt?.trim() &&
+    !extendedTask?.prompt?.trim()
+  ) {
+    return (
+      <div className="flex flex-col gap-2 p-8 rounded-2xl bg-surface-container-low border border-dashed border-outline-variant text-center text-sm text-on-surface-variant">
+        <span className="text-2xl">⚠️</span>
+        <span className="font-bold text-base">Trống dữ liệu Vận dụng</span>
+        <span className="text-xs">Tiết học này chưa có câu hỏi Vận dụng &amp; Mở rộng trong CSDL.</span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-5 p-6 rounded-2xl bg-surface-container-lowest border border-outline-variant/30 shadow-md">
       {/* Header */}
@@ -1555,26 +1730,6 @@ export const ApplicationThreeTasksActivity: React.FC<ApplicationThreeTasksProps>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setShowScaffoldingHint((v) => !v)}
-            className="px-3.5 py-1.5 rounded-full bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-          >
-            <span className="material-symbols-outlined text-[16px]">psychology</span>
-            <span>
-              {showScaffoldingHint
-                ? 'Ẩn Gia sư Cú Vàng gợi mở'
-                : '🦉 Gia sư Cú Vàng gợi ý giải quyết vấn đề (Scaffolding)'}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowAllGuides((v) => !v)}
-            className="px-3.5 py-1.5 rounded-full bg-secondary-fixed text-secondary font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-          >
-            <span className="material-symbols-outlined text-[16px]">menu_book</span>
-            <span>{showAllGuides ? 'Ẩn đáp án gợi ý' : 'Đáp án gợi ý'}</span>
-          </button>
           <span className="px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs">
             Khớp: {avgMatchPercentage}%
           </span>
@@ -1583,29 +1738,6 @@ export const ApplicationThreeTasksActivity: React.FC<ApplicationThreeTasksProps>
           </span>
         </div>
       </div>
-
-      {/* Pedagogical Scaffolding Guide Box (YCCĐ GDPT 2018 & QĐ 3439) */}
-      {showScaffoldingHint && (
-        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-on-surface flex flex-col gap-2 animate-in fade-in duration-200">
-          <span className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
-            <span className="material-symbols-outlined text-[18px]">smart_toy</span>
-            <span>
-              🦉 Phương Pháp Giải Quyết Vấn Đề Thực Tiễn Từng Bước (Scaffolding — Chuẩn YCCĐ GDPT 2018, CV 3456 &amp; Khung AI QĐ 3439):
-            </span>
-          </span>
-          <ul className="list-disc pl-5 space-y-1 text-on-surface-variant">
-            <li>
-              <strong>Bước 1 — Phân tích bản chất (Bài 1 - 1.0đ):</strong> Xác định đối tượng dữ liệu đầu vào (Input), quá trình xử lý và thông tin có ích thu được (Output).
-            </li>
-            <li>
-              <strong>Bước 2 — Quy trình kỹ năng số (Bài 2 - 1.0đ - CV 3456):</strong> Liệt kê rõ các thao tác thực hành theo thứ tự tuần tự, cách đặt tên tệp/thư mục khoa học và lưu trữ an toàn.
-            </li>
-            <li>
-              <strong>Bước 3 — Ứng dụng &amp; Đạo đức AI (Bài 3 - 1.0đ - QĐ 3439):</strong> Khi sử dụng công cụ AI hỗ trợ giải quyết tình huống thực tế, luôn kiểm chứng nguồn thông tin, tôn trọng bản quyền và bảo mật dữ liệu cá nhân.
-            </li>
-          </ul>
-        </div>
-      )}
 
       {/* Task 1: Tự luận phân tích */}
       <div className="p-4 rounded-xl bg-surface-container-low border border-outline-variant/30 flex flex-col gap-3">
@@ -1644,11 +1776,6 @@ export const ApplicationThreeTasksActivity: React.FC<ApplicationThreeTasksProps>
             style={{ width: `${grade1.matchPercentage}%` }}
           />
         </div>
-        {(showAllGuides || showAnswers) && deepAnalysis?.guideAnswer && (
-          <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
-            <strong>Đáp án gợi ý:</strong> {deepAnalysis.guideAnswer}
-          </div>
-        )}
       </div>
 
       {/* Task 2: Bài tập thực hành */}
@@ -1688,11 +1815,6 @@ export const ApplicationThreeTasksActivity: React.FC<ApplicationThreeTasksProps>
             style={{ width: `${grade2.matchPercentage}%` }}
           />
         </div>
-        {(showAllGuides || showAnswers) && practicalTask?.guideAnswer && (
-          <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
-            <strong>Đáp án gợi ý:</strong> {practicalTask.guideAnswer}
-          </div>
-        )}
       </div>
 
       {/* Task 3: Vận dụng mở rộng */}
@@ -1732,11 +1854,6 @@ export const ApplicationThreeTasksActivity: React.FC<ApplicationThreeTasksProps>
             style={{ width: `${grade3.matchPercentage}%` }}
           />
         </div>
-        {(showAllGuides || showAnswers) && extendedTask?.guideAnswer && (
-          <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
-            <strong>Đáp án gợi ý:</strong> {extendedTask.guideAnswer}
-          </div>
-        )}
       </div>
 
       {/* Footer Submit */}

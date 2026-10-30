@@ -56,6 +56,13 @@ export function build29PeriodsRawTextTemplate(grade: 6 | 7 | 8 | 9): string {
       })
       .join('\n');
 
+    const saList = (ws.stage2.shortAnswerQuestions || [])
+      .map(
+        (sq, idx) =>
+          `   Câu hỏi ${idx + 1}: ${sq.question} | Đáp án: ${sq.sampleAnswer} (${sq.points}đ)`
+      )
+      .join('\n');
+
     blocks.push(
       [
         `TIẾT ${pNum}: ${lessonTitle.replace(/^Tiết\s*\d+\s*[:.-]?\s*/i, '')}`,
@@ -80,6 +87,7 @@ export function build29PeriodsRawTextTemplate(grade: 6 | 7 | 8 | 9): string {
         `- Dạng 3 (Nối cột khái niệm - 1.0đ):`,
         matchList,
         `- Dạng 4 (Trả lời ngắn tình huống - 1.0đ): ${ws.stage2.shortAnswerPrompt || ''}`,
+        saList,
         ``,
         `3. HOẠT ĐỘNG 3: LUYỆN TẬP & ĐẤU TRƯỜNG TRẮC NGHIỆM 25S (6 câu hỏi x 0.5đ = 3.0 điểm)`,
         quizList,
@@ -316,13 +324,28 @@ export function create29PeriodsDocxDocument(grade: 6 | 7 | 8 | 9): Document {
 
     children.push(
       new Paragraph({
-        spacing: { before: 60, after: 120 },
+        spacing: { before: 60, after: 60 },
         children: [
           new TextRun({ text: `Dạng 4 - Trả lời ngắn tình huống (1.0 điểm): `, bold: true, size: 20 }),
           new TextRun({ text: ws.stage2.shortAnswerPrompt || '', size: 20 }),
         ],
       })
     );
+
+    (ws.stage2.shortAnswerQuestions || []).forEach((sq, idx) => {
+      children.push(
+        new Paragraph({
+          spacing: { after: 50 },
+          children: [
+            new TextRun({ text: `   Câu hỏi ${idx + 1}: `, bold: true, size: 20 }),
+            new TextRun({
+              text: `${sq.question} | Đáp án: ${sq.sampleAnswer} (${sq.points}đ)`,
+              size: 20,
+            }),
+          ],
+        })
+      );
+    });
 
     // Stage 3: Luyện tập
     children.push(
@@ -836,8 +859,14 @@ export function parse29PeriodsFromDocxText(
 
     // Dạng 4: Trả lời ngắn
     const shortPromptMatch = blockText.match(
-      /(?:Dạng 4[^:\n]*:|Câu hỏi 1\s*:)\s*([^\n|]+)/i
+      /(?:Dạng 4\s*(?:\([^)]*\)|-\s*[^:\n]+)?\s*:|Tình huống trả lời ngắn\s*:)\s*([^\n|]+)/i
     );
+    const cleanedShortPrompt = shortPromptMatch
+      ? cleanMarkdownLine(shortPromptMatch[1])
+          .replace(/^-\s*Trả lời ngắn[^\n:]*:\s*/i, '')
+          .replace(/^:\s*/, '')
+          .trim()
+      : '';
     const shortQuestionsFound: Array<{ q: string; a: string }> = [];
     const saRegex =
       /Câu hỏi\s*(\d)\s*:\s*([^\n|]+?)(?:\s*\|\s*(?:Gợi ý đáp án|Đáp án)\s*:\s*([^\n(]+))?(?:\s*\([\d.,]+đ\))?\s*(?:\n|$)/gi;
@@ -853,7 +882,7 @@ export function parse29PeriodsFromDocxText(
       shortQuestionsFound.length > 0
         ? shortQuestionsFound.slice(0, 3).map((item, idx) => ({
             id: `k${grade}-t${pNum}-sa${idx + 1}`,
-            label: `• Câu hỏi ${idx + 1}:`,
+            label: baseWs.stage2.shortAnswerQuestions?.[idx]?.label || `• Câu hỏi ${idx + 1}:`,
             question: item.q,
             placeholder: 'Nhập câu trả lời ngắn của em...',
             sampleAnswer:
@@ -907,6 +936,10 @@ export function parse29PeriodsFromDocxText(
     const pracTaskMatch = blockText.match(/Bài(?: tập)?\s*2[^:\n]*:\s*([^\n]+)/i);
     const extTaskMatch = blockText.match(/Bài(?: tập)?\s*3[^:\n]*:\s*([^\n]+)/i);
 
+    const parsedDragParagraph = dragParaMatch
+      ? cleanMarkdownLine(dragParaMatch[1]).replace(/(\(\d+\))\s*\[[^\]]+\]/g, '$1')
+      : baseWs.stage2.dragDropParagraph;
+
     parsedWorksheets.push({
       ...baseWs,
       lessonKey: `k${grade}-tiet-${pNum}`,
@@ -930,14 +963,10 @@ export function parse29PeriodsFromDocxText(
         ...baseWs.stage2,
         dragDropWordBank: customDragWordBank,
         dragDropQuestions: customDragQuestions,
-        dragDropParagraph: dragParaMatch
-          ? cleanMarkdownLine(dragParaMatch[1])
-          : baseWs.stage2.dragDropParagraph,
+        dragDropParagraph: parsedDragParagraph,
         fillBlankQuestions: parsedFillBlanks,
         matchingQuestions: parsedMatchingQuestions,
-        shortAnswerPrompt: shortPromptMatch
-          ? cleanMarkdownLine(shortPromptMatch[1])
-          : baseWs.stage2.shortAnswerPrompt,
+        shortAnswerPrompt: cleanedShortPrompt || baseWs.stage2.shortAnswerPrompt,
         shortAnswerQuestions: parsedShortAnswerQuestions,
       },
       stage3QuizQuestions: parsedStage3Questions,

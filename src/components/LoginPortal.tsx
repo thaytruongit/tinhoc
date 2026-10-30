@@ -5,6 +5,7 @@ import {
   type ClassroomItem,
   type StudentRosterItem,
 } from '../data/mockCurriculumData';
+import { DataBoundary } from './DataBoundary';
 
 interface LoginPortalProps {
   onLoginStudent: (student: StudentRosterItem) => void;
@@ -15,6 +16,7 @@ interface LoginPortalProps {
   onShowToast: (msg: string) => void;
   students?: StudentRosterItem[];
   classes?: ClassroomItem[];
+  isLoading?: boolean;
 }
 
 export const LoginPortal: React.FC<LoginPortalProps> = ({
@@ -26,10 +28,12 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
   onShowToast,
   students = INITIAL_STUDENTS,
   classes = INITIAL_CLASSES,
+  isLoading = false,
 }) => {
   const [activeRole, setActiveRole] = useState<'student' | 'teacher'>('student');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedClass, setSelectedClass] = useState('6A10');
+  const [selectedGrade, setSelectedGrade] = useState<number | 'ALL'>('ALL');
+  const [selectedClass, setSelectedClass] = useState('ALL');
   const [studentIdInput, setStudentIdInput] = useState('61008');
   const [studentPassInput, setStudentPassInput] = useState('12345');
   const [teacherUsername, setTeacherUsername] = useState('admin');
@@ -40,6 +44,8 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
 
   const filteredStudents = students.filter((s) => {
+    const stGrade = s.grade || Number(s.classId?.charAt(0)) || 6;
+    const matchesGrade = selectedGrade === 'ALL' || stGrade === selectedGrade;
     const matchesClass = selectedClass === 'ALL' || s.classId === selectedClass;
     const q = searchQuery.toLowerCase().trim();
     const matchesSearch =
@@ -47,7 +53,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
       s.name.toLowerCase().includes(q) ||
       s.id.toLowerCase().includes(q) ||
       (s.username && s.username.toLowerCase().includes(q));
-    return matchesClass && matchesSearch;
+    return matchesGrade && matchesClass && matchesSearch;
   });
 
   const handleSelectStudent = (student: StudentRosterItem) => {
@@ -78,6 +84,10 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
             (s.username && s.username.toLowerCase() === cleanId.toLowerCase()) ||
             s.name.toLowerCase().includes(cleanId.toLowerCase())
         ) || students[0];
+      if (!matched) {
+        setErrorMsg('Chưa có tài khoản học sinh nào trong hệ thống.');
+        return;
+      }
       onShowToast(
         `Học sinh ${matched.name} (${matched.classId}) kết nối trực tuyến thành công!`
       );
@@ -97,6 +107,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
   const handleMockQRScan = () => {
     setShowQRModal(false);
     const nam = students[0];
+    if (!nam) return;
     setActiveRole('student');
     setStudentIdInput(nam.username || nam.id);
     setStudentPassInput('12345');
@@ -177,14 +188,54 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                           Danh Sách Học Sinh Trực Tuyến
                         </h2>
                         <p className="font-body-sm text-body-sm text-on-surface-variant">
-                          Tài khoản tự động • Mật khẩu mặc định: <strong>12345</strong>
+                          Hiển thị theo Khối / Lớp • Mật khẩu mặc định: <strong>12345</strong>
                         </p>
                       </div>
                     </div>
                     <span className="px-2.5 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed font-label-sm text-label-sm flex items-center gap-1 shrink-0">
                       <span className="material-symbols-outlined text-[14px]">cloud</span>{' '}
-                      {students.length} HS
+                      {filteredStudents.length}/{students.length} HS
                     </span>
+                  </div>
+
+                  {/* Khối (Grade) Filter Pills */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedGrade('ALL');
+                        setSelectedClass('ALL');
+                      }}
+                      className={`px-2.5 py-1 rounded-full text-xs font-bold cursor-pointer transition-all ${
+                        selectedGrade === 'ALL'
+                          ? 'bg-primary text-on-primary shadow-xs'
+                          : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container'
+                      }`}
+                    >
+                      Tất cả Khối ({students.length})
+                    </button>
+                    {[6, 7, 8, 9].map((g) => {
+                      const gCount = students.filter(
+                        (s) => (s.grade || Number(s.classId?.charAt(0)) || 6) === g
+                      ).length;
+                      return (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => {
+                            setSelectedGrade(g);
+                            setSelectedClass('ALL');
+                          }}
+                          className={`px-2.5 py-1 rounded-full text-xs font-bold cursor-pointer transition-all ${
+                            selectedGrade === g
+                              ? 'bg-primary text-on-primary shadow-xs'
+                              : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container'
+                          }`}
+                        >
+                          Khối {g} ({gCount})
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {/* Search & Class Filter */}
@@ -212,11 +263,13 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                         className="bg-surface-container-low text-on-surface font-label-md text-label-md rounded-full py-2 px-3 pr-8 appearance-none focus:outline-none cursor-pointer"
                       >
                         <option value="ALL">Tất cả lớp ({classes.length})</option>
-                        {classes.map((cls) => (
-                          <option key={cls.id} value={cls.id}>
-                            {cls.name} (Khối {cls.grade})
-                          </option>
-                        ))}
+                        {classes
+                          .filter((cls) => selectedGrade === 'ALL' || cls.grade === selectedGrade)
+                          .map((cls) => (
+                            <option key={cls.id} value={cls.id}>
+                              {cls.name} (Khối {cls.grade})
+                            </option>
+                          ))}
                       </select>
                       <span className="material-symbols-outlined absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant text-[16px] pointer-events-none">
                         expand_more
@@ -224,64 +277,75 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                     </div>
                   </div>
 
-                  {/* Student Cards List */}
-                  <div className="flex flex-col gap-2.5 overflow-y-auto max-h-[380px] pr-1">
-                    {filteredStudents.map((st, idx) => {
-                      const isSelected =
-                        (studentIdInput === st.id || studentIdInput === st.username) &&
-                        activeRole === 'student';
-                      return (
-                        <div
-                          key={st.id}
-                          className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-all ${
-                            isSelected || idx === 0
-                              ? 'bg-primary-fixed/20 border-primary-container/40 hover:bg-primary-fixed/30'
-                              : 'bg-surface-container-low border-outline-variant/20 hover:bg-surface-container'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
+                  {/* Student Cards List wrapped in DataBoundary */}
+                  <DataBoundary
+                    data={filteredStudents}
+                    isLoading={isLoading}
+                    loadingMessage="Đang tải danh sách học sinh từ Cloud DB..."
+                    emptyTitle="Không tìm thấy học sinh nào"
+                    emptyDescription="Chưa có tài khoản học sinh trong lớp/khối này hoặc chưa nạp danh sách."
+                  >
+                    {(studentList) => (
+                      <div className="flex flex-col gap-2.5 overflow-y-auto max-h-[380px] pr-1">
+                        {studentList.map((st, idx) => {
+                          const isSelected =
+                            (studentIdInput === st.id || studentIdInput === st.username) &&
+                            activeRole === 'student';
+                          const stGrade = st.grade || Number(st.classId?.charAt(0)) || 6;
+                          return (
                             <div
-                              className={`w-9 h-9 rounded-full font-headline-sm text-headline-sm flex items-center justify-center flex-shrink-0 ${
+                              key={st.id}
+                              className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-all ${
                                 isSelected || idx === 0
-                                  ? 'bg-primary-container text-on-primary'
-                                  : 'bg-secondary-fixed text-secondary'
+                                  ? 'bg-primary-fixed/20 border-primary-container/40 hover:bg-primary-fixed/30'
+                                  : 'bg-surface-container-low border-outline-variant/20 hover:bg-surface-container'
                               }`}
                             >
-                              {st.stationNumber}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="font-headline-sm text-headline-sm text-on-surface truncate">
-                                  {st.name}
-                                </span>
-                                <span className="px-2 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-label-sm text-label-sm">
-                                  {st.classId}
-                                </span>
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div
+                                  className={`w-9 h-9 rounded-full font-headline-sm text-headline-sm flex items-center justify-center flex-shrink-0 ${
+                                    isSelected || idx === 0
+                                      ? 'bg-primary-container text-on-primary'
+                                      : 'bg-secondary-fixed text-secondary'
+                                  }`}
+                                >
+                                  {st.stationNumber}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-headline-sm text-headline-sm text-on-surface truncate">
+                                      {st.name}
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-label-sm text-label-sm font-bold">
+                                      Khối {stGrade} • {st.classId}
+                                    </span>
+                                  </div>
+                                  <p className="font-body-sm text-body-sm text-on-surface-variant truncate">
+                                    TK: <span className="font-label-md text-primary">{st.username || st.id}</span> •
+                                    NS: {st.dob || '15/05/2013'} • MK: <strong>12345</strong>
+                                  </p>
+                                </div>
                               </div>
-                              <p className="font-body-sm text-body-sm text-on-surface-variant truncate">
-                                TK: <span className="font-label-md text-primary">{st.username || st.id}</span> •
-                                NS: {st.dob || '15/05/2013'} • MK: <strong>12345</strong>
-                              </p>
+                              <button
+                                type="button"
+                                onClick={() => handleSelectStudent(st)}
+                                className={`px-3 py-1.5 rounded-full font-label-md text-label-md flex-shrink-0 flex items-center gap-1 active:scale-95 transition-all cursor-pointer ${
+                                  isSelected || idx === 0
+                                    ? 'bg-primary text-on-primary shadow-sm hover:opacity-90'
+                                    : 'bg-surface-container-high text-on-surface hover:bg-primary-container hover:text-on-primary'
+                                }`}
+                              >
+                                <span className="material-symbols-outlined text-[16px]">
+                                  {isSelected || idx === 0 ? 'check' : 'touch_app'}
+                                </span>
+                                <span>{isSelected || idx === 0 ? 'Điền nhanh' : 'Chọn'}</span>
+                              </button>
                             </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleSelectStudent(st)}
-                            className={`px-3 py-1.5 rounded-full font-label-md text-label-md flex-shrink-0 flex items-center gap-1 active:scale-95 transition-all cursor-pointer ${
-                              isSelected || idx === 0
-                                ? 'bg-primary text-on-primary shadow-sm hover:opacity-90'
-                                : 'bg-surface-container-high text-on-surface hover:bg-primary-container hover:text-on-primary'
-                            }`}
-                          >
-                            <span className="material-symbols-outlined text-[16px]">
-                              {isSelected || idx === 0 ? 'check' : 'touch_app'}
-                            </span>
-                            <span>{isSelected || idx === 0 ? 'Điền nhanh' : 'Chọn'}</span>
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </DataBoundary>
 
                   <div className="p-3 bg-surface-container-low rounded-xl text-on-surface-variant font-body-sm text-body-sm flex items-center gap-2">
                     <span className="material-symbols-outlined text-[18px] text-tertiary flex-shrink-0">

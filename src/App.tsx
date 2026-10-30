@@ -22,6 +22,7 @@ import {
   signInWithGooglePopup,
   signOutFirebase,
 } from './services/firebaseClient';
+import { supabase, isSupabaseRealtimeConfigured } from './lib/supabase';
 
 type AppMode = 'login' | 'student' | 'teacher';
 
@@ -36,7 +37,7 @@ export default function App() {
 
   const [classes, setClasses] = useState<ClassroomItem[]>(() => {
     try {
-      const saved = localStorage.getItem('cloudplay_classes_v2');
+      const saved = localStorage.getItem('cloudplay_classes_v4');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -49,10 +50,10 @@ export default function App() {
 
   const [students, setStudents] = useState<StudentRosterItem[]>(() => {
     try {
-      const saved = localStorage.getItem('cloudplay_students_roster_v2');
+      const saved = localStorage.getItem('cloudplay_students_roster_v4');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           return parsed;
         }
       }
@@ -63,18 +64,26 @@ export default function App() {
   });
 
   const [liveSession, setLiveSession] = useState<LiveClassroomSession>(() => {
+    const defaultSession = createDefaultLiveSession();
     try {
-      const saved = localStorage.getItem('cloudplay_live_session_v3');
+      const saved = localStorage.getItem('cloudplay_live_session_v4');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object' && parsed.unlockedStagesByLesson) {
-          return parsed as LiveClassroomSession;
+          return {
+            ...defaultSession,
+            ...parsed,
+            verifiedLessonsMap: {
+              ...defaultSession.verifiedLessonsMap,
+              ...(parsed.verifiedLessonsMap || {}),
+            },
+          } as LiveClassroomSession;
         }
       }
     } catch {
       // ignore
     }
-    return createDefaultLiveSession();
+    return defaultSession;
   });
 
   const [appMode, setAppMode] = useState<AppMode>(() => {
@@ -112,7 +121,9 @@ export default function App() {
   const broadcastRef = useRef<BroadcastChannel | null>(null);
 
   const currentStudent =
-    students.find((s) => s.id === currentStudentId) || students[0];
+    students.find((s) => s.id === currentStudentId) ||
+    students[0] ||
+    INITIAL_STUDENTS[0];
 
   const activeLessonKey = `k${liveSession.activeGrade}-tiet-${liveSession.activePeriod}`;
   const unlockedStages: Record<number, boolean> = liveSession.unlockedStagesByLesson[
@@ -146,7 +157,7 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('cloudplay_students_roster_v2', JSON.stringify(students));
+      localStorage.setItem('cloudplay_students_roster_v4', JSON.stringify(students));
     } catch {
       // ignore
     }
@@ -154,7 +165,7 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('cloudplay_classes_v2', JSON.stringify(classes));
+      localStorage.setItem('cloudplay_classes_v4', JSON.stringify(classes));
     } catch {
       // ignore
     }
@@ -162,11 +173,51 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('cloudplay_live_session_v3', JSON.stringify(liveSession));
+      localStorage.setItem('cloudplay_live_session_v4', JSON.stringify(liveSession));
     } catch {
       // ignore
     }
   }, [liveSession]);
+
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Fetch initial classes, students, and liveSession from backend database on startup
+  useEffect(() => {
+    async function fetchBackendData() {
+      setIsLoading(true);
+      try {
+        const [clsRes, stRes, liveRes] = await Promise.all([
+          fetch('/api/db/classes').then((r) => r.json()).catch(() => null),
+          fetch('/api/db/students').then((r) => r.json()).catch(() => null),
+          fetch('/api/live-session').then((r) => r.json()).catch(() => null),
+        ]);
+        if (clsRes?.ok && Array.isArray(clsRes.classes) && clsRes.classes.length > 0) {
+          setClasses(clsRes.classes);
+        }
+        if (stRes?.ok && Array.isArray(stRes.students)) {
+          setStudents(stRes.students);
+        }
+        if (liveRes && typeof liveRes === 'object' && liveRes.unlockedStagesByLesson) {
+          const defaultSession = createDefaultLiveSession();
+          setLiveSession((prev) => ({
+            ...defaultSession,
+            ...prev,
+            ...liveRes,
+            verifiedLessonsMap: {
+              ...defaultSession.verifiedLessonsMap,
+              ...(prev.verifiedLessonsMap || {}),
+              ...(liveRes.verifiedLessonsMap || {}),
+            },
+          }));
+        }
+      } catch (err) {
+        console.warn('Backend db fetch notice:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    fetchBackendData();
+  }, []);
 
   // Listen to BroadcastChannel & storage events for instant cross-tab sync
   useEffect(() => {
@@ -208,6 +259,67 @@ export default function App() {
       window.removeEventListener('storage', handleStorage);
       ch.close();
       broadcastRef.current = null;
+    };
+  }, []);
+
+  // Supabase Realtime listener for Postgres changes on classes, students, and live_classroom_states
+  useEffect(() => {
+    if (!supabase || !isSupabaseRealtimeConfigured) return;
+    const realtimeChannel = supabase
+      .channel('public:supabase_realtime_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'live_classroom_states' },
+        (payload) => {
+          if (payload.new && (payload.new as any).state_json) {
+            try {
+              const parsed = JSON.parse((payload.new as any).state_json);
+              if (parsed && parsed.updatedAt) {
+                setLiveSession((prev) => {
+                  if (new Date(parsed.updatedAt).getTime() > new Date(prev.updatedAt).getTime()) {
+                    return parsed;
+                  }
+                  return prev;
+                });
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'classes' },
+        () => {
+          fetch('/api/db/classes')
+            .then((res) => res.json())
+            .then((data) => {
+              if (data.ok && Array.isArray(data.classes) && data.classes.length > 0) {
+                setClasses(data.classes);
+              }
+            })
+            .catch(() => {});
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'students' },
+        () => {
+          fetch('/api/db/students')
+            .then((res) => res.json())
+            .then((data) => {
+              if (data.ok && Array.isArray(data.students) && data.students.length > 0) {
+                setStudents(data.students);
+              }
+            })
+            .catch(() => {});
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(realtimeChannel);
     };
   }, []);
 
@@ -294,7 +406,11 @@ export default function App() {
   }, [currentStudent, selectedClass]);
 
   const broadcastStudents = (updated: StudentRosterItem[]) => {
-    setStudents(updated);
+    try {
+      localStorage.setItem('cloudplay_students_roster_v4', JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
     if (broadcastRef.current) {
       broadcastRef.current.postMessage({
         type: 'ROSTER_UPDATED',
@@ -303,12 +419,27 @@ export default function App() {
     }
   };
 
-  const handleAddStudents = (newStudents: StudentRosterItem[]) => {
-    const updated = [...newStudents, ...students];
-    broadcastStudents(updated);
+  const handleAddStudents = async (newStudents: StudentRosterItem[]) => {
+    setStudents((prev) => {
+      const existingIds = new Set(newStudents.map((s) => s.id));
+      const updated = [...newStudents, ...prev.filter((s) => !existingIds.has(s.id))];
+      broadcastStudents(updated);
+      return updated;
+    });
+    for (const st of newStudents) {
+      try {
+        await fetch('/api/db/students', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(st),
+        });
+      } catch (err) {
+        console.warn('Failed to save student to DB:', err);
+      }
+    }
   };
 
-  const handleAddClass = (newClass: ClassroomItem) => {
+  const handleAddClass = async (newClass: ClassroomItem) => {
     setClasses((prev) => {
       const exists = prev.some((c) => c.id === newClass.id);
       const updated = exists ? prev : [...prev, newClass];
@@ -320,9 +451,18 @@ export default function App() {
       }
       return updated;
     });
+    try {
+      await fetch('/api/db/classes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newClass),
+      });
+    } catch (err) {
+      console.warn('Failed to save class to DB:', err);
+    }
   };
 
-  const handleDeleteClass = (classId: string) => {
+  const handleDeleteClass = async (classId: string) => {
     setClasses((prev) => {
       const updated = prev.filter((c) => c.id !== classId);
       if (broadcastRef.current) {
@@ -339,7 +479,40 @@ export default function App() {
         setSelectedClass(remaining[0].id);
       }
     }
-    showToast(`Đã xóa lớp học thành công!`);
+    showToast(`Đã xóa lớp học ${classId} thành công!`);
+    try {
+      await fetch(`/api/db/classes/${classId}`, { method: 'DELETE' });
+    } catch (err) {
+      console.warn('Failed to delete class from DB:', err);
+    }
+  };
+
+  const handleDeleteStudent = async (studentId: string) => {
+    setStudents((prev) => {
+      const updated = prev.filter((s) => s.id !== studentId);
+      broadcastStudents(updated);
+      return updated;
+    });
+    showToast(`Đã xóa tài khoản học sinh (${studentId}) thành công!`);
+    try {
+      await fetch(`/api/db/students/${studentId}`, { method: 'DELETE' });
+    } catch (err) {
+      console.warn('Failed to delete student from DB:', err);
+    }
+  };
+
+  const handleDeleteClassStudents = async (classId: string) => {
+    setStudents((prev) => {
+      const updated = prev.filter((s) => s.classId !== classId);
+      broadcastStudents(updated);
+      return updated;
+    });
+    showToast(`Đã xóa toàn bộ tài khoản học sinh thuộc lớp ${classId}!`);
+    try {
+      await fetch(`/api/db/students/class/${classId}`, { method: 'DELETE' });
+    } catch (err) {
+      console.warn('Failed to delete class students from DB:', err);
+    }
   };
 
   const handleUnlockStage = (
@@ -481,6 +654,7 @@ export default function App() {
           onShowToast={showToast}
           students={students}
           classes={classes}
+          isLoading={isLoading}
         />
       )}
 
@@ -510,6 +684,8 @@ export default function App() {
           students={students}
           onAddStudents={handleAddStudents}
           onUpdateStudentScore={handleUpdateStudentScore}
+          onDeleteStudent={handleDeleteStudent}
+          onDeleteClassStudents={handleDeleteClassStudents}
           classes={classes}
           onAddClass={handleAddClass}
           onDeleteClass={handleDeleteClass}
@@ -518,6 +694,7 @@ export default function App() {
           liveSession={liveSession}
           onUpdateLiveSession={updateAndBroadcastLiveSession}
           onSwitchToStudentPreview={() => setAppMode('student')}
+          isLoading={isLoading}
         />
       )}
 

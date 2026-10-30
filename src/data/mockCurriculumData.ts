@@ -719,6 +719,9 @@ export interface CustomLessonWorksheet {
     points: number;
   }[];
   stage2: {
+    bucketA?: string;
+    bucketB?: string;
+    dragItems?: { id: string; text: string; correctBox: 'data' | 'info' }[];
     dragDropTitle?: string;
     dragDropInstruction?: string;
     dragDropWordBank: string[];
@@ -839,12 +842,11 @@ export function createDefaultUnlockedMap(): Record<string, Record<1 | 2 | 3 | 4,
   ([6, 7, 8, 9] as const).forEach((g) => {
     for (let p = 1; p <= 29; p++) {
       const key = `k${g}-tiet-${p}`;
-      // All 29 periods across all 4 grades unlock Stage 1 (Khởi động) by default so students can explore ahead
       map[key] = {
         1: true,
-        2: g === 6 && p === 1,
-        3: false,
-        4: false,
+        2: p === 1,
+        3: p === 1,
+        4: p === 1,
       };
     }
   });
@@ -1075,7 +1077,9 @@ export function createDefaultLiveSession(): LiveClassroomSession {
     verifiedLessonsMap: (() => {
       const vMap: Record<string, boolean> = {};
       ([6, 7, 8, 9] as const).forEach((g) => {
-        vMap[`k${g}-tiet-1`] = true;
+        for (let p = 1; p <= 29; p++) {
+          vMap[`k${g}-tiet-${p}`] = true;
+        }
       });
       return vMap;
     })(),
@@ -1260,26 +1264,6 @@ export function getPeriodsForGrade(grade: 6 | 7 | 8 | 9): CurriculumPeriodSpec[]
           ? 'CK2'
           : 'TONG_KET';
 
-      if (period >= 2) {
-        return {
-          id: `k${grade}-tiet-${period}`,
-          grade,
-          period,
-          topic: '',
-          lessonTitle: `Tiết ${period}: (Chưa có dữ liệu)`,
-          knowledgeSection: '',
-          lessonType,
-          sgkFile,
-          nlsAiFile,
-          nlsPdfUrl: gradeInfo.nlsPdfUrl,
-          sgkPages: '',
-          examMilestone,
-          yccd: '',
-          digitalCompetency: '',
-          aiCompetency: '',
-        };
-      }
-
       return {
         id: `k${grade}-tiet-${period}`,
         grade,
@@ -1365,65 +1349,8 @@ export interface NotebookLMLessonBlueprint {
 export function buildLessonBlueprintFromPeriod(
   spec: CurriculumPeriodSpec
 ): NotebookLMLessonBlueprint {
-  // If Grade 6 Period 1, 2, or 17, use ultra-detailed preset or enrich dynamically
   const baseDefault = NOTEBOOK_LM_LESSONS[0];
   const isPractice = spec.lessonType === 'practice';
-
-  // Xoá hết dữ liệu từ Tiết 2 đến Tiết 29 toàn bộ các khối
-  if (spec.period >= 2) {
-    return {
-      lessonId: spec.id,
-      grade: spec.grade,
-      periodNumber: spec.period,
-      topicCode: `Khối ${spec.grade} • Tiết ${spec.period}`,
-      title: spec.lessonTitle,
-      lessonType: spec.lessonType,
-      sgkReference: '',
-      digitalCompetency: '',
-      aiCompetency: '',
-      notebookSourceSummary: [],
-      competencyTarget: '',
-      stage1: {
-        videoTitle: '',
-        videoUrl: '',
-        videoStops: [],
-        secretPictureTitle: '',
-        secretPictureMeaning: '',
-        crosswordClues: [],
-        openScenarioPrompt: '',
-        expectedWordCloud: [],
-      },
-      stage2: {
-        worksheetTitle: `Phiếu học tập số ${spec.period} (Khối ${spec.grade})`,
-        bucketA: '',
-        bucketB: '',
-        dragItems: [],
-        blank1Label: '',
-        blank1Answer: '',
-        blank2Label: '',
-        blank2Answer: '',
-        matchingPairs: [],
-        textImagePrompt: '',
-        textImageAnswerKeywords: [],
-        fillBlankQuestions: [],
-        shortAnswerPrompt: '',
-        shortAnswerQuestions: [],
-      },
-      stage3: {
-        recommendedMode: isPractice ? 'practice' : 'theory',
-        quizQuestions: [],
-        practicalTaskTitle: '',
-        practicalTaskSteps: [],
-        practicalAllowedExtensions: [],
-      },
-      stage4: {
-        projectTitle: `Hoạt động 4 • Vận dụng thực tế (Khối ${spec.grade} - Tiết ${spec.period})`,
-        projectObjective: '',
-        steps: [],
-        rubrics: [],
-      },
-    };
-  }
 
   return {
     lessonId: spec.id,

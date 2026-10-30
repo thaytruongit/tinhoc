@@ -36,6 +36,8 @@ import {
 } from './InteractiveActivities';
 import { evaluateAnswerBySuggestedPercentage } from '../utils/essayPercentageGrader';
 import { StudentNotificationBannerModal } from './StudentNotificationBannerModal';
+import { StudentWorksheetScanner, type ExtractedWorksheetData } from './StudentWorksheetScanner';
+import { DataBoundary } from './DataBoundary';
 
 export type StudentView = 'trang-chu' | 'tro-ly-ai-cu-vang';
 
@@ -92,36 +94,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const [activeInlineStage, setActiveInlineStage] = useState<1 | 2 | 3 | 4>(1);
   const [examFilter, setExamFilter] = useState<'ALL' | 'GK1' | 'CK1' | 'GK2' | 'CK2'>('ALL');
 
-  // Focus Mode (Chế độ tập trung) to minimize all non-essential UI, hide sidebars & notification banners, and focus purely on the active exercise
-  const [isFocusMode, setIsFocusMode] = useState<boolean>(false);
-
-  // Keyboard shortcut: ESC to exit focus mode
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isFocusMode) {
-        setIsFocusMode(false);
-        onShowToast?.('Đã thoát Chế độ tập trung.');
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isFocusMode, onShowToast]);
-
-  const handleToggleFocusMode = () => {
-    if (!isFocusMode) {
-      if (openedPeriodNumber === null) {
-        setOpenedPeriodNumber(liveSession?.activePeriod || 1);
-      }
-      if (activeView !== 'trang-chu') {
-        onChangeView('trang-chu');
-      }
-      setIsFocusMode(true);
-      onShowToast?.('🎯 Đã kích hoạt Chế độ tập trung! Nhấn ESC để thoát bất cứ lúc nào.');
-    } else {
-      setIsFocusMode(false);
-      onShowToast?.('Đã thoát Chế độ tập trung.');
-    }
-  };
+  // Always in Focus Mode (Chế độ tập trung) for students to eliminate distractions
+  const [isFocusMode] = useState<boolean>(true);
+  const [stage2SubTab, setStage2SubTab] = useState<'drag' | 'fill' | 'match' | 'short'>('drag');
 
   // Check if Teacher is currently broadcasting Live specifically to this student's Grade AND Class
   const isLiveForStudentClass = Boolean(
@@ -129,6 +104,18 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       liveSession.activeGrade === selectedGrade &&
       liveSession.activeClassId === currentStudent.classId
   );
+
+  // When Teacher is broadcasting Live to this student's class, lock the student to the Live period
+  useEffect(() => {
+    if (isLiveForStudentClass && liveSession?.activePeriod) {
+      if (openedPeriodNumber !== liveSession.activePeriod) {
+        setOpenedPeriodNumber(liveSession.activePeriod);
+      }
+      if (liveSession.activeStage) {
+        setActiveInlineStage(liveSession.activeStage);
+      }
+    }
+  }, [isLiveForStudentClass, liveSession?.activePeriod, liveSession?.activeStage]);
 
   // Check if a period was marked as taught by Teacher for this class OR marked as learned by this Student
   const isPeriodTaughtByTeacher = (period: number): boolean => {
@@ -184,11 +171,78 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
   const currentPeriodSpec: CurriculumPeriodSpec =
     gradePeriods.find((p) => p.period === (openedPeriodNumber || 1)) || gradePeriods[0];
-  const currentBlueprint = buildLessonBlueprintFromPeriod(currentPeriodSpec);
   const currentLessonKey = `k${selectedGrade}-tiet-${currentPeriodSpec.period}`;
+  const isLessonVerified = Boolean(
+    liveSession?.customWorksheetsByLesson?.[currentLessonKey] ||
+      liveSession?.verifiedLessonsMap?.[currentLessonKey] !== false
+  );
+  const currentBlueprint = isLessonVerified
+    ? buildLessonBlueprintFromPeriod(currentPeriodSpec)
+    : {
+        ...buildLessonBlueprintFromPeriod(currentPeriodSpec),
+        stage1: {
+          title: 'Khởi động',
+          secretPictureTitle: 'Khởi động bài học',
+          secretPictureMeaning: 'Chưa có dữ liệu',
+          videoStops: [],
+          crosswordClues: [],
+        },
+        stage3Questions: [],
+        stage4Prompts: [],
+      };
   const customWorksheet = liveSession?.customWorksheetsByLesson?.[currentLessonKey];
-  const activeWorksheet =
-    customWorksheet || getDefaultWorksheetForLesson(selectedGrade, currentPeriodSpec.period);
+  const activeWorksheet = isLessonVerified
+    ? (customWorksheet || getDefaultWorksheetForLesson(selectedGrade, currentPeriodSpec.period))
+    : {
+        lessonId: currentLessonKey,
+        stage1: {
+          title: '',
+          scenario: '',
+          question: '',
+          sampleAnswer: '',
+          points: 1.0,
+        },
+        stage2: {
+          bucketA: '',
+          bucketB: '',
+          dragItems: [],
+          dragDropTitle: '',
+          dragDropInstruction: '',
+          dragDropWordBank: [],
+          dragDropParagraph: '',
+          dragDropQuestions: [],
+          dragDropSentenceLines: [],
+          fillBlankTitle: '',
+          fillBlankInstruction: '',
+          fillBlankQuestions: [],
+          matchingTitle: '',
+          matchingInstruction: '',
+          matchingQuestions: [],
+          shortAnswerPrompt: '',
+          shortAnswerQuestions: [],
+        },
+        stage3QuizQuestions: [],
+        stage4: {
+          deepAnalysis: {
+            title: '',
+            prompt: '',
+            guideAnswer: '',
+            points: 1.0,
+          },
+          practicalTask: {
+            title: '',
+            prompt: '',
+            guideAnswer: '',
+            points: 1.0,
+          },
+          extendedTask: {
+            title: '',
+            prompt: '',
+            guideAnswer: '',
+            points: 1.0,
+          },
+        },
+      };
 
   const currentGradeSource =
     NOTEBOOK_GRADE_SOURCES.find((g) => g.grade === selectedGrade) ||
@@ -286,11 +340,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const [selectedColA, setSelectedColA] = useState<string | null>(null);
   const [matchingConnections, setMatchingConnections] = useState<Record<string, string>>({});
 
-  const [shortAnswers, setShortAnswers] = useState<Record<string, string>>({
-    data: 'Dòng chữ "Tiết 1: Tin học" viết bằng phấn trắng trên góc bảng đen',
-    info: 'Giúp cả lớp biết hôm nay có tiết học Tin học để chuẩn bị sẵn sách vở và bật máy tính',
-    carrier: 'Tấm bảng đen treo trang trọng ở đầu lớp học',
-  });
+  const [shortAnswers, setShortAnswers] = useState<Record<string, string>>({});
 
   const [worksheetSubmitted, setWorksheetSubmitted] = useState(false);
   const [worksheetScore, setWorksheetScore] = useState<number | null>(null);
@@ -302,6 +352,29 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     practicalTask: '',
     extendedTask: '',
   });
+
+  // ================= SCANNER COMPONENT (AI GEMINI VISION OCR) =================
+  const [showWorksheetScannerModal, setShowWorksheetScannerModal] = useState<boolean>(false);
+
+  const handleApplyExtractedScannerData = (data: ExtractedWorksheetData) => {
+    if (data.dragSlots && Object.keys(data.dragSlots).length > 0) {
+      setDragSlots((prev) => ({ ...prev, ...data.dragSlots }));
+    }
+    if (data.fillBlankInputs && Object.keys(data.fillBlankInputs).length > 0) {
+      setFillBlankInputs((prev) => ({ ...prev, ...data.fillBlankInputs }));
+    }
+    if (data.matchingConnections && Object.keys(data.matchingConnections).length > 0) {
+      setMatchingConnections((prev) => ({ ...prev, ...data.matchingConnections }));
+    }
+    if (data.shortAnswers && Object.keys(data.shortAnswers).length > 0) {
+      setShortAnswers((prev) => ({ ...prev, ...data.shortAnswers }));
+    }
+    if (data.stage4Answers && Object.keys(data.stage4Answers).length > 0) {
+      setStage4Answers((prev) => ({ ...prev, ...data.stage4Answers }));
+    }
+    onAwardXp(30);
+    onShowToast('🎉 Đã tự động điền các câu trả lời từ phiếu quét OCR (+30 XP)!');
+  };
 
   // ================= DUAL-MODE ENGINE & AUTO-SAVE CROSS-DEVICE RESUME STATE =================
   const currentDraftKey = `${currentStudent.id}_k${selectedGrade}_tiet_${currentPeriodSpec.period}`;
@@ -603,10 +676,32 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const calculatePdfStage2Score = () => {
     let score = 0;
     const ddQuestions = activeWorksheet.stage2.dragDropQuestions || [];
-    ddQuestions.forEach((dq) => {
-      const slotKey = dq.slotNum ?? (dq as unknown as { slot?: number }).slot;
-      if (slotKey !== undefined && dragSlots[slotKey] === dq.correctWord) {
-        score += dq.points ?? 0.2;
+    const ddItems = activeWorksheet.stage2.dragItems || [];
+    ddQuestions.forEach((dq, idx) => {
+      const slotKey = dq.slotNum ?? (dq as unknown as { slot?: number }).slot ?? idx + 1;
+      const rawVal = dragSlots[slotKey];
+      if (!rawVal) return;
+      const normVal = String(rawVal).trim().toUpperCase();
+      const cwUpper = String(dq.correctWord || '').trim().toUpperCase();
+      const targetBox: 'A' | 'B' =
+        cwUpper === 'A' || cwUpper === 'DATA' || cwUpper === 'HỘP A'
+          ? 'A'
+          : cwUpper === 'B' || cwUpper === 'INFO' || cwUpper === 'HỘP B'
+          ? 'B'
+          : ddItems[idx]?.correctBox === 'data'
+          ? 'A'
+          : ddItems[idx]?.correctBox === 'info'
+          ? 'B'
+          : idx < Math.ceil(ddQuestions.length / 2)
+          ? 'A'
+          : 'B';
+      if (
+        normVal === targetBox ||
+        (normVal === 'DATA' && targetBox === 'A') ||
+        (normVal === 'INFO' && targetBox === 'B') ||
+        String(rawVal).trim() === String(dq.correctWord || '').trim()
+      ) {
+        score += Number(dq.points) || 0.25;
       }
     });
 
@@ -1005,80 +1100,98 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
       {/* MAIN CONTENT SHELL */}
       <div className={isFocusMode ? 'pl-0 transition-all duration-300' : 'pl-72 transition-all duration-300'}>
-        {/* TOP HEADER — SWITCHES TO DISTRACTION-FREE FOCUS BAR WHEN IN FOCUS MODE */}
+        {/* TOP HEADER — PERMANENT DISTRACTION-FREE FOCUS BAR FOR STUDENTS */}
         {isFocusMode ? (
-          <header className="fixed top-0 left-0 right-0 h-16 bg-surface-container-lowest/95 backdrop-blur-xl border-b border-primary/20 shadow-md z-40 flex items-center justify-between px-4 sm:px-8">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/25 font-label-sm text-label-sm font-bold animate-pulse">
-                <span className="material-symbols-outlined text-[18px]">center_focus_strong</span>
+          <header className="fixed top-0 left-0 right-0 h-16 bg-surface-container-lowest/95 backdrop-blur-xl border-b border-primary/20 shadow-md z-40 flex items-center justify-between px-4 sm:px-8 gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/25 font-label-sm text-xs font-bold shrink-0">
+                <span className="material-symbols-outlined text-[16px]">center_focus_strong</span>
                 <span>CHẾ ĐỘ TẬP TRUNG</span>
               </div>
-              <div className="hidden md:flex items-center gap-2 text-on-surface">
-                <span className="font-headline-sm text-headline-sm font-bold">
-                  Tiết {currentPeriodSpec.period}: {currentPeriodSpec.lessonTitle}
+              <div className="hidden lg:flex items-center gap-2 text-on-surface min-w-0">
+                <span className="font-headline-sm text-sm font-bold truncate">
+                  {openedPeriodNumber !== null
+                    ? `Tiết ${currentPeriodSpec.period}: ${currentPeriodSpec.lessonTitle}`
+                    : `Khối ${selectedGrade} • Lớp ${currentStudent.classId}`}
                 </span>
-                <span className="px-2 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-label-sm text-xs font-bold">
-                  Lớp {currentStudent.classId}
+                <span className="px-2 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-label-sm text-xs font-bold shrink-0">
+                  {currentStudent.name} ({currentStudent.classId})
                 </span>
               </div>
             </div>
 
-            {/* Quick Activity Selector Tabs for Distraction-free Jumping */}
-            <div className="flex items-center gap-1 bg-surface-container-low p-1 rounded-full">
-              {([
-                { stage: 1, label: 'Khởi động' },
-                { stage: 2, label: 'Phiếu học tập (4.0đ)' },
-                { stage: 3, label: 'Đấu trường 25s (3.0đ)' },
-                { stage: 4, label: 'Vận dụng (3.0đ)' },
-              ] as const).map((s) => {
-                const isUnlocked = currentPeriodUnlocked[s.stage];
-                const isActive = activeInlineStage === s.stage;
-                return (
-                  <button
-                    key={s.stage}
-                    type="button"
-                    disabled={!isUnlocked}
-                    onClick={() => setActiveInlineStage(s.stage)}
-                    className={`px-3 py-1 rounded-full font-label-sm text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                      isActive
-                        ? 'bg-primary text-on-primary shadow-xs'
-                        : isUnlocked
-                        ? 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
-                        : 'text-outline opacity-40 cursor-not-allowed'
-                    }`}
-                  >
-                    <span>HĐ{s.stage}</span>
-                    <span className="hidden lg:inline">{s.label}</span>
-                  </button>
-                );
-              })}
-            </div>
+            {/* Quick Activity Selector Tabs when inside a lesson */}
+            {openedPeriodNumber !== null && activeView === 'trang-chu' && (
+              <div className="flex items-center gap-1 bg-surface-container-low p-1 rounded-full">
+                {([
+                  { stage: 1, label: 'Khởi động' },
+                  { stage: 2, label: 'Khám phá (4.0đ)' },
+                  { stage: 3, label: 'Luyện tập (3.0đ)' },
+                  { stage: 4, label: 'Vận dụng (3.0đ)' },
+                ] as const).map((s) => {
+                  const isUnlocked = currentPeriodUnlocked[s.stage];
+                  const isActive = activeInlineStage === s.stage;
+                  return (
+                    <button
+                      key={s.stage}
+                      type="button"
+                      disabled={!isUnlocked}
+                      onClick={() => setActiveInlineStage(s.stage)}
+                      className={`px-3 py-1 rounded-full font-label-sm text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                        isActive
+                          ? 'bg-primary text-on-primary shadow-xs'
+                          : isUnlocked
+                          ? 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
+                          : 'text-outline opacity-40 cursor-not-allowed'
+                      }`}
+                    >
+                      <span>HĐ{s.stage}</span>
+                      <span className="hidden xl:inline">{s.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
-            {/* Focus Mode Controls */}
-            <div className="flex items-center gap-2">
+            {/* Essential Focus Bar Actions */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => onChangeView(activeView === 'trang-chu' ? 'tro-ly-ai-cu-vang' : 'trang-chu')}
+                className={`px-3 py-1.5 rounded-full font-label-sm text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                  activeView === 'tro-ly-ai-cu-vang'
+                    ? 'bg-primary text-on-primary shadow-xs'
+                    : 'bg-surface-container text-on-surface hover:bg-surface-container-high'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[16px]">
+                  {activeView === 'tro-ly-ai-cu-vang' ? 'menu_book' : 'smart_toy'}
+                </span>
+                <span className="hidden sm:inline">
+                  {activeView === 'tro-ly-ai-cu-vang' ? 'Bài học' : 'AI Cú Vàng'}
+                </span>
+              </button>
+
               <button
                 type="button"
                 onClick={onToggleDarkMode}
                 aria-label="Chuyển đổi Chế độ tối"
-                className="w-9 h-9 rounded-full bg-surface-container text-on-surface-variant flex items-center justify-center hover:bg-surface-container-high transition-colors cursor-pointer"
+                className="w-8 h-8 rounded-full bg-surface-container text-on-surface-variant flex items-center justify-center hover:bg-surface-container-high transition-colors cursor-pointer"
                 title="Giao diện sáng / tối"
               >
-                <span className="material-symbols-outlined text-[18px] text-primary">
+                <span className="material-symbols-outlined text-[17px] text-primary">
                   {darkMode ? 'light_mode' : 'dark_mode'}
                 </span>
               </button>
 
               <button
                 type="button"
-                onClick={handleToggleFocusMode}
-                className="px-3.5 py-1.5 rounded-full bg-error/15 hover:bg-error/25 text-error border border-error/30 font-label-sm text-label-sm font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
-                title="Thoát Chế độ tập trung (Nhấn phím ESC)"
+                onClick={onLogout}
+                className="px-3 py-1.5 rounded-full bg-surface-container hover:bg-error/15 text-on-surface hover:text-error font-label-sm text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                title="Đăng xuất"
               >
-                <span className="material-symbols-outlined text-[18px]">fullscreen_exit</span>
-                <span>Thoát tập trung</span>
-                <kbd className="hidden sm:inline-block px-1.5 py-0.5 rounded bg-surface-container-lowest text-on-surface-variant text-[10px] font-mono border border-outline-variant/30">
-                  ESC
-                </kbd>
+                <span className="material-symbols-outlined text-[16px]">logout</span>
+                <span className="hidden sm:inline">Đăng xuất</span>
               </button>
             </div>
           </header>
@@ -1104,17 +1217,17 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             </div>
 
             <div className="flex items-center gap-space-sm">
-              {/* CHẾ ĐỘ TẬP TRUNG BUTTON (ZEN / FOCUS MODE TOGGLE) */}
+              {/* SCANNER COMPONENT BUTTON (GEMINI OCR) */}
               <button
                 type="button"
-                onClick={handleToggleFocusMode}
-                className="px-3.5 py-1.5 rounded-full bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-label-sm text-label-sm font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs group"
-                title="Ẩn thông báo và menu phụ để học sinh tập trung làm bài"
+                onClick={() => setShowWorksheetScannerModal(true)}
+                className="px-3.5 py-1.5 rounded-full bg-secondary-container hover:bg-secondary-container/80 text-on-secondary-container font-label-sm text-label-sm font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs group"
+                title="Chụp hoặc tải ảnh phiếu học tập, AI tự động quét OCR và điền câu trả lời"
               >
                 <span className="material-symbols-outlined text-[18px] group-hover:scale-110 transition-transform">
-                  center_focus_strong
+                  document_scanner
                 </span>
-                <span className="hidden sm:inline">Chế độ tập trung</span>
+                <span className="hidden sm:inline">Quét Phiếu AI</span>
               </button>
 
               {/* Student Push Notification & Announcement Bell Modal */}
@@ -1176,86 +1289,16 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               {/* CASE A: 29-PERIOD CURRICULUM ROADMAP OVERVIEW */}
               {openedPeriodNumber === null ? (
                 <>
-                  {/* Top Banner & Live Broadcast Highlight */}
-                  <section className="relative w-full rounded-2xl bg-surface-container-lowest p-space-lg shadow-sm overflow-hidden">
-                    <div className="absolute -top-12 -right-12 w-64 h-64 rounded-full bg-primary-container/20 blur-3xl pointer-events-none" />
-                    <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-space-md">
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="px-3 py-1 rounded-full bg-tertiary-fixed text-on-tertiary-container font-label-sm text-label-sm font-bold flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-tertiary animate-ping" />
-                            100% Tiết Học Mở Sẵn Hoạt Động 1: Khởi Động • Tự Động Mở Tự Luyện Khi Đã Học
-                          </span>
-                          <span className="px-3 py-1 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-label-sm text-label-sm font-bold">
-                            Phân quyền Lớp {currentStudent.classId} • Khối {selectedGrade}
-                          </span>
-                        </div>
-                        <h1 className="font-headline-lg text-headline-lg text-on-surface mt-1">
-                          Lộ Trình 29 Tiết Học Môn Tin Học • Khối {selectedGrade} (Lớp {currentStudent.classId})
-                        </h1>
-                        <p className="font-body-md text-body-md text-on-surface-variant">
-                          {currentGradeSource.description} •{' '}
-                          <strong className="text-primary">
-                            {currentGradeSource.examScheduleNote}
-                          </strong>
-                        </p>
-                      </div>
-
-                      {isLiveForStudentClass && liveSession ? (
-                        <div className="bg-primary-fixed/40 border border-primary/30 rounded-xl p-space-md flex flex-col gap-2 min-w-[290px]">
-                          <div className="flex items-center justify-between">
-                            <span className="font-label-sm text-label-sm text-primary font-extrabold uppercase flex items-center gap-1">
-                              <span className="w-2 h-2 rounded-full bg-error animate-ping" />
-                              GV Đang Phát Live Lớp {currentStudent.classId}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-sm text-label-sm font-bold">
-                              Khối {liveSession.activeGrade} • Tiết {liveSession.activePeriod}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={handleJoinTeacherLiveLesson}
-                            className="w-full py-2.5 px-4 rounded-full bg-primary text-on-primary font-label-md text-label-md font-bold shadow-md hover:scale-[1.02] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                          >
-                            <span className="material-symbols-outlined text-[18px]">
-                              rocket_launch
-                            </span>
-                            <span>Vào Học Trực Tiếp Tiết {liveSession.activePeriod} Ngay</span>
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="bg-surface-container-low border border-outline-variant/30 rounded-xl p-space-md flex flex-col gap-1 min-w-[270px]">
-                          <span className="font-label-sm text-label-sm text-secondary font-bold uppercase">
-                            Trạng thái Phát Live Lớp {currentStudent.classId}
-                          </span>
-                          <span className="text-xs text-on-surface-variant">
-                            {liveSession?.isBroadcasting
-                              ? `Giáo viên đang phát Live cho Lớp ${liveSession.activeClassId} (Khối ${liveSession.activeGrade}).`
-                              : 'Hiện chưa có phiên phát Live cho lớp của em.'}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Authorized Grade Badge & Exam Period Filter */}
-                    <div className="mt-space-md pt-space-md border-t border-outline-variant/20 flex flex-wrap items-center justify-between gap-space-md">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-label-md text-label-md text-on-surface-variant">
-                          Lộ trình được phân quyền theo tài khoản:
-                        </span>
-                        <span className="px-5 py-2 rounded-full bg-primary text-on-primary font-headline-sm text-headline-sm shadow-sm flex items-center gap-2">
-                          <span className="material-symbols-outlined text-[18px]">verified_user</span>
-                          <span>Học sinh Lớp {currentStudent.classId} — Lộ trình Khối {selectedGrade} (29 Tiết)</span>
-                        </span>
-                      </div>
-
+                  {/* Top Filter Bar & Live Broadcast Highlight (Compact & Clean) */}
+                  <section className="relative w-full rounded-2xl bg-surface-container-lowest p-4 shadow-xs border border-outline-variant/20">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {[
-                          { id: 'ALL', label: 'Tất cả 29 tiết' },
-                          { id: 'GK1', label: 'Giữa kỳ 1 (T1–T7)' },
-                          { id: 'CK1', label: 'Cuối kỳ 1 (T8–T15)' },
-                          { id: 'GK2', label: 'Giữa kỳ 2 (T16–T22)' },
-                          { id: 'CK2', label: 'Cuối kỳ 2 (T23–T27)' },
+                          { id: 'ALL', label: 'Tất cả (29)' },
+                          { id: 'GK1', label: 'GK1 (T1–T7)' },
+                          { id: 'CK1', label: 'CK1 (T8–T15)' },
+                          { id: 'GK2', label: 'GK2 (T16–T22)' },
+                          { id: 'CK2', label: 'CK2 (T23–T27)' },
                         ].map((f) => (
                           <button
                             key={f.id}
@@ -1263,9 +1306,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             onClick={() =>
                               setExamFilter(f.id as 'ALL' | 'GK1' | 'CK1' | 'GK2' | 'CK2')
                             }
-                            className={`px-3 py-1.5 rounded-full font-label-sm text-label-sm transition-all cursor-pointer ${
+                            className={`px-3 py-1 rounded-full font-label-sm text-xs transition-all cursor-pointer ${
                               examFilter === f.id
-                                ? 'bg-secondary text-on-secondary font-bold shadow-xs'
+                                ? 'bg-secondary text-on-secondary font-bold shadow-2xs'
                                 : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container'
                             }`}
                           >
@@ -1273,48 +1316,76 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                           </button>
                         ))}
                       </div>
+
+                      {isLiveForStudentClass && liveSession && (
+                        <button
+                          type="button"
+                          onClick={handleJoinTeacherLiveLesson}
+                          className="py-1.5 px-3.5 rounded-full bg-error text-on-error font-label-sm text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer animate-pulse"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">sensors</span>
+                          <span>Đang học Live Tiết {liveSession.activePeriod} — Vào ngay</span>
+                        </button>
+                      )}
                     </div>
                   </section>
 
-                  {/* 29-Period Roadmap Cards Grid */}
-                  <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-space-md">
-                    {filteredPeriods.map((spec) => {
-                      const unlockedMap = getUnlockedStagesForPeriod(selectedGrade, spec.period);
-                      const isLiveLesson =
-                        isLiveForStudentClass && liveSession?.activePeriod === spec.period;
-                      const taughtByTeacher = isPeriodTaughtByTeacher(spec.period);
-                      const learnedByStudent = isPeriodLearnedByStudent(spec.period);
-                      const selfStudyReady = taughtByTeacher || learnedByStudent;
-                      const unlockedCount = [1, 2, 3, 4].filter(
-                        (s) => unlockedMap[s as 1 | 2 | 3 | 4]
-                      ).length;
+                  {/* Compact Icon ListView of 29 Periods wrapped in DataBoundary */}
+                  <DataBoundary
+                    data={filteredPeriods}
+                    isLoading={false}
+                    emptyTitle={`Chưa có tiết học nào thuộc đợt ${examFilter}`}
+                    emptyDescription="Vui lòng chọn 'Tất cả (29)' để xem đầy đủ chương trình."
+                  >
+                    {(periodsList) => (
+                      <section
+                        data-testid="student-periods-listview"
+                        className="bg-surface-container-lowest rounded-2xl border border-outline-variant/25 divide-y divide-outline-variant/15 overflow-hidden shadow-xs"
+                      >
+                        {periodsList.map((spec) => {
+                          const unlockedMap = getUnlockedStagesForPeriod(selectedGrade, spec.period);
+                          const isLiveLesson =
+                            isLiveForStudentClass && liveSession?.activePeriod === spec.period;
+                          const isLockedByLive =
+                            isLiveForStudentClass && liveSession?.activePeriod !== spec.period;
+                          const taughtByTeacher = isPeriodTaughtByTeacher(spec.period);
+                          const learnedByStudent = isPeriodLearnedByStudent(spec.period);
+                          const selfStudyReady = taughtByTeacher || learnedByStudent;
+                          const unlockedCount = [1, 2, 3, 4].filter(
+                            (s) => unlockedMap[s as 1 | 2 | 3 | 4]
+                          ).length;
 
-                      return (
-                        <div
-                          key={spec.id}
-                          onClick={() => {
-                            setOpenedPeriodNumber(spec.period);
-                            setActiveInlineStage(
-                              isLiveLesson && liveSession?.activeStage
-                                ? liveSession.activeStage
-                                : 1
-                            );
-                          }}
-                          className={`rounded-2xl p-space-md transition-all cursor-pointer flex flex-col justify-between gap-space-sm border-2 ${
-                            isLiveLesson
-                              ? 'bg-primary-fixed/25 border-primary shadow-[0_8px_24px_rgba(149,74,5,0.18)] scale-[1.01]'
-                              : selfStudyReady
-                              ? 'bg-tertiary-fixed/15 border-tertiary/50 shadow-sm hover:shadow-md'
-                              : 'bg-surface-container-lowest border-transparent hover:border-secondary-container shadow-sm hover:shadow-md'
-                          }`}
-                        >
-                          <div className="flex flex-col gap-2">
-                            <div className="flex items-center justify-between gap-2 flex-wrap">
-                              <div className="flex items-center gap-2">
+                          return (
+                            <div
+                              key={spec.id}
+                              onClick={() => {
+                                if (isLockedByLive) {
+                                  onShowToast(
+                                    `🔴 Lớp đang học Live Tiết ${liveSession?.activePeriod}, không thể chuyển sang tiết khác!`
+                                  );
+                                  return;
+                                }
+                                setOpenedPeriodNumber(spec.period);
+                                setActiveInlineStage(
+                                  isLiveLesson && liveSession?.activeStage
+                                    ? liveSession.activeStage
+                                    : 1
+                                );
+                              }}
+                              className={`px-3.5 py-2.5 flex items-center justify-between gap-3 transition-all ${
+                                isLockedByLive
+                                  ? 'opacity-45 cursor-not-allowed bg-surface-container-low/40'
+                                  : isLiveLesson
+                                  ? 'bg-primary-fixed/25 cursor-pointer hover:bg-primary-fixed/35'
+                                  : 'hover:bg-surface-container-low/80 cursor-pointer'
+                              }`}
+                            >
+                              {/* Left: Compact Icon + Period Number + Title */}
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
                                 <span
-                                  className={`w-9 h-9 rounded-full flex items-center justify-center font-headline-sm text-headline-sm font-black shadow-xs ${
+                                  className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
                                     isLiveLesson
-                                      ? 'bg-primary text-on-primary'
+                                      ? 'bg-error text-on-error'
                                       : selfStudyReady
                                       ? 'bg-tertiary text-on-tertiary'
                                       : 'bg-secondary-fixed text-on-secondary-fixed-variant'
@@ -1322,198 +1393,152 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                 >
                                   {spec.period}
                                 </span>
-                                <span className="px-2.5 py-0.5 rounded-full bg-surface-container text-on-surface-variant font-label-sm text-label-sm font-bold">
-                                  {spec.examMilestone === 'TONG_KET'
-                                    ? 'Tổng kết'
-                                    : `Đợt ${spec.examMilestone}`}
-                                </span>
                                 <span
-                                  className={`px-2.5 py-0.5 rounded-full font-label-sm text-label-sm font-bold ${
+                                  className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${
                                     spec.lessonType === 'practice'
-                                      ? 'bg-tertiary-fixed text-on-tertiary-container'
-                                      : 'bg-secondary-fixed/60 text-secondary'
+                                      ? 'bg-tertiary-fixed/70 text-on-tertiary-container'
+                                      : 'bg-surface-container text-secondary'
                                   }`}
+                                  title={spec.lessonType === 'practice' ? 'Thực hành' : 'Lý thuyết'}
                                 >
-                                  {spec.lessonType === 'practice' ? 'Thực hành' : 'Lý thuyết'}
+                                  <span className="material-symbols-outlined text-[15px]">
+                                    {spec.lessonType === 'practice' ? 'terminal' : 'menu_book'}
+                                  </span>
                                 </span>
+                                <div className="min-w-0 flex-1 flex items-center gap-2">
+                                  <span className="text-sm font-bold text-on-surface truncate">
+                                    {spec.lessonTitle}
+                                  </span>
+                                  <span className="hidden sm:inline-block px-2 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px] font-bold shrink-0">
+                                    {spec.examMilestone === 'TONG_KET' ? 'TK' : spec.examMilestone}
+                                  </span>
+                                </div>
                               </div>
 
-                              {isLiveLesson ? (
-                                <span className="px-2.5 py-0.5 rounded-full bg-error text-on-error font-label-sm text-label-sm font-bold flex items-center gap-1 animate-pulse">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-on-error" />
-                                  ĐANG HỌC LIVE ({currentStudent.classId})
-                                </span>
-                              ) : selfStudyReady ? (
-                                <span className="px-2.5 py-0.5 rounded-full bg-tertiary text-on-tertiary font-label-sm text-label-sm font-bold">
-                                  {taughtByTeacher ? 'GV Đã dạy' : 'Đã học'} • Mở Tự luyện ✓
-                                </span>
-                              ) : (
-                                <span className="px-2.5 py-0.5 rounded-full bg-tertiary-fixed/70 text-on-tertiary-container font-label-sm text-label-sm font-bold">
-                                  Mở Khởi động ✓
-                                </span>
-                              )}
-                            </div>
+                              {/* Right: Compact Stage Icons & Enter Action */}
+                              <div className="flex items-center gap-2 shrink-0">
+                                <div className="hidden md:flex items-center gap-1">
+                                  {([1, 2, 3, 4] as const).map((stNum) => {
+                                    const isOpen = unlockedMap[stNum];
+                                    return (
+                                      <span
+                                        key={stNum}
+                                        title={`Hoạt động ${stNum}: ${isOpen ? 'Đã mở' : 'Khóa'}`}
+                                        className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold ${
+                                          isOpen
+                                            ? 'bg-tertiary-fixed text-on-tertiary-container'
+                                            : 'bg-surface-container text-on-surface-variant opacity-50'
+                                        }`}
+                                      >
+                                        {stNum}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
 
-                            <div>
-                              <span className="font-label-sm text-label-sm text-secondary uppercase font-bold block">
-                                {spec.topic}
-                              </span>
-                              <h3 className="font-headline-sm text-headline-sm text-on-surface mt-0.5 line-clamp-2">
-                                {spec.lessonTitle}
-                              </h3>
-                              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1 line-clamp-2">
-                                {spec.yccd}
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* 4 Activity Status Pills & Self-Study Toggle */}
-                          <div className="pt-2 border-t border-outline-variant/20 flex items-center justify-between gap-2 flex-wrap">
-                            <div className="flex items-center gap-1">
-                              {([1, 2, 3, 4] as const).map((stNum) => {
-                                const isOpen = unlockedMap[stNum];
-                                return (
-                                  <span
-                                    key={stNum}
-                                    title={`Hoạt động ${stNum}: ${isOpen ? 'Đã mở khóa' : 'Chờ GV mở'}`}
-                                    className={`px-2 py-0.5 rounded-full font-label-sm text-[10px] flex items-center gap-0.5 ${
-                                      isOpen
-                                        ? 'bg-tertiary-fixed text-on-tertiary-container font-bold'
-                                        : 'bg-surface-container text-on-surface-variant opacity-70'
+                                {!isLockedByLive && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleToggleStudentLearnedPeriod(spec.period, e)}
+                                    title={
+                                      learnedByStudent
+                                        ? 'Đã đánh dấu đã học (Mở tự luyện)'
+                                        : 'Đánh dấu đã học để tự luyện'
+                                    }
+                                    className={`w-7 h-7 rounded-lg flex items-center justify-center cursor-pointer transition-all ${
+                                      learnedByStudent
+                                        ? 'bg-tertiary text-on-tertiary'
+                                        : 'bg-surface-container text-on-surface-variant hover:bg-secondary-fixed'
                                     }`}
                                   >
-                                    <span className="material-symbols-outlined text-[11px]">
-                                      {isOpen ? 'lock_open' : 'lock'}
+                                    <span className="material-symbols-outlined text-[15px]">
+                                      {learnedByStudent ? 'task_alt' : 'check'}
                                     </span>
-                                    HĐ{stNum}
-                                  </span>
-                                );
-                              })}
-                            </div>
+                                  </button>
+                                )}
 
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={(e) => handleToggleStudentLearnedPeriod(spec.period, e)}
-                                className={`px-2.5 py-1 rounded-full font-label-sm text-[11px] font-bold cursor-pointer transition-all ${
-                                  learnedByStudent
-                                    ? 'bg-tertiary text-on-tertiary'
-                                    : 'bg-surface-container-low text-on-surface-variant hover:bg-secondary-fixed'
-                                }`}
-                              >
-                                {learnedByStudent ? '✓ Đã học (Tự luyện)' : '+ Đánh dấu Đã học'}
-                              </button>
-                              <span className="font-label-sm text-label-sm text-primary font-bold flex items-center gap-0.5">
-                                <span>Vào ({unlockedCount}/4)</span>
-                                <span className="material-symbols-outlined text-[15px]">
-                                  arrow_forward
-                                </span>
-                              </span>
+                                {isLiveLesson ? (
+                                  <span className="px-2.5 py-1 rounded-lg bg-error text-on-error text-[11px] font-bold flex items-center gap-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-on-error animate-ping" />
+                                    LIVE
+                                  </span>
+                                ) : isLockedByLive ? (
+                                  <span className="px-2 py-1 rounded-lg bg-surface-container text-on-surface-variant text-[11px] font-semibold flex items-center gap-1">
+                                    <span className="material-symbols-outlined text-[13px]">lock</span>
+                                    Khóa Live
+                                  </span>
+                                ) : (
+                                  <span className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-xs font-bold flex items-center gap-1">
+                                    <span>{unlockedCount}/4</span>
+                                    <span className="material-symbols-outlined text-[14px]">
+                                      chevron_right
+                                    </span>
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </section>
+                          );
+                        })}
+                      </section>
+                    )}
+                  </DataBoundary>
                 </>
               ) : (
-                /* CASE B: TRANG LỘ TRÌNH HỌC TẬP CỦA TIẾT HỌC (SERPENTINE ROADMAP + INLINE STAGE WORKSPACE BELOW) */
+                /* CASE B: TRANG BÀI HỌC TẬP TRUNG CỦA TIẾT HỌC */
                 <div className="flex flex-col gap-space-lg">
-                  {/* Top Bar: Back to 29-Period Roadmap + Lesson Metadata */}
+                  {/* Top Bar: Back to Compact ListView (disabled during Live) + Lesson Metadata */}
                   <div className="bg-surface-container-lowest rounded-2xl p-space-lg shadow-sm flex flex-col gap-space-md">
                     <div className="flex flex-wrap items-center justify-between gap-space-sm">
-                      <button
-                        type="button"
-                        onClick={() => setOpenedPeriodNumber(null)}
-                        className="px-4 py-2 rounded-full bg-surface-container-low hover:bg-surface-container-high text-on-surface font-label-md text-label-md flex items-center gap-1.5 transition-all cursor-pointer"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-                        <span>Quay lại Lộ trình 29 tiết học (Khối {selectedGrade} • Lớp {currentStudent.classId})</span>
-                      </button>
-
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {/* Focus Mode button in Lesson Top Bar */}
+                      {isLiveForStudentClass || activeLearningMode === 'IN_CLASS_LIVE' ? (
+                        <div className="px-4 py-1.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-700 dark:text-rose-300 font-label-sm text-xs font-bold flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-rose-600 animate-ping" />
+                          <span>
+                            Đang học Live Tiết {currentPeriodSpec.period} — Khóa chuyển tiết khác
+                          </span>
+                        </div>
+                      ) : (
                         <button
                           type="button"
-                          onClick={handleToggleFocusMode}
-                          className="px-3.5 py-1.5 rounded-full bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-label-sm text-label-sm font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
-                          title="Ẩn thông báo và menu điều hướng phụ để học sinh tập trung làm bài"
+                          onClick={() => setOpenedPeriodNumber(null)}
+                          className="px-3.5 py-1.5 rounded-full bg-surface-container-low hover:bg-surface-container-high text-on-surface font-label-sm text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
                         >
-                          <span className="material-symbols-outlined text-[18px]">center_focus_strong</span>
-                          <span>{isFocusMode ? 'Thoát tập trung (ESC)' : '🎯 Chế độ tập trung'}</span>
+                          <span className="material-symbols-outlined text-[16px]">format_list_bulleted</span>
+                          <span>Danh sách tiết học</span>
                         </button>
+                      )}
 
+                      <div className="flex items-center gap-2 flex-wrap">
                         <button
                           type="button"
                           onClick={() => handleToggleStudentLearnedPeriod(currentPeriodSpec.period)}
-                          className={`px-3.5 py-1.5 rounded-full font-label-sm text-label-sm font-bold cursor-pointer flex items-center gap-1 ${
+                          className={`px-3.5 py-1.5 rounded-full font-label-sm text-xs font-bold cursor-pointer flex items-center gap-1 ${
                             isSelfStudyUnlocked(currentPeriodSpec.period)
                               ? 'bg-tertiary text-on-tertiary shadow-xs'
                               : 'bg-surface-container-low text-on-surface hover:bg-secondary-fixed'
                           }`}
                         >
-                          <span className="material-symbols-outlined text-[16px]">
+                          <span className="material-symbols-outlined text-[15px]">
                             {isSelfStudyUnlocked(currentPeriodSpec.period) ? 'task_alt' : 'check_circle'}
                           </span>
                           <span>
                             {isSelfStudyUnlocked(currentPeriodSpec.period)
-                              ? '✓ Đã học / Đã dạy (Đang mở Chế độ Tự luyện)'
-                              : 'Đánh dấu Đã học để mở khóa Tự luyện'}
+                              ? '✓ Đã học (Mở Tự luyện)'
+                              : 'Đánh dấu Đã học'}
                           </span>
                         </button>
-                        <span className="px-3 py-1 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-label-sm text-label-sm font-bold">
+                        <span className="px-3 py-1 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-label-sm text-xs font-bold">
                           Khối {selectedGrade} • Lớp {currentStudent.classId}
                         </span>
                       </div>
                     </div>
 
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-space-md">
-                      <div className="flex flex-col gap-1">
-                        <h1 className="font-headline-lg text-headline-lg text-on-surface">
-                          {currentPeriodSpec.lessonTitle}
-                        </h1>
-                        <p className="font-body-md text-body-md text-on-surface-variant">
-                          <strong>Mục tiêu cần đạt:</strong> {currentPeriodSpec.yccd}
-                        </p>
-                      </div>
-
-                      {/* Quick period prev/next switcher */}
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          disabled={currentPeriodSpec.period <= 1}
-                          onClick={() =>
-                            setOpenedPeriodNumber((p) => Math.max(1, (p || 1) - 1))
-                          }
-                          className="px-3 py-1.5 rounded-full bg-surface-container text-on-surface font-label-sm text-label-sm disabled:opacity-40 cursor-pointer"
-                        >
-                          ← Tiết trước
-                        </button>
-                        <span className="font-label-md text-label-md text-primary font-bold">
-                          Tiết {currentPeriodSpec.period} / 29
-                        </span>
-                        <select
-                          value={currentPeriodSpec.period}
-                          onChange={(e) => setOpenedPeriodNumber(Number(e.target.value))}
-                          className="px-3 py-1.5 rounded-full bg-primary-fixed text-primary font-label-sm text-label-sm font-bold cursor-pointer"
-                        >
-                          {gradePeriods.map((p) => (
-                            <option key={p.period} value={p.period}>
-                              Chuyển nhanh: {p.lessonTitle}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          disabled={currentPeriodSpec.period >= 29}
-                          onClick={() =>
-                            setOpenedPeriodNumber((p) => Math.min(29, (p || 1) + 1))
-                          }
-                          className="px-3 py-1.5 rounded-full bg-surface-container text-on-surface font-label-sm text-label-sm disabled:opacity-40 cursor-pointer"
-                        >
-                          Tiết tiếp →
-                        </button>
-                      </div>
+                    <div className="flex flex-col gap-1">
+                      <h1 className="font-headline-lg text-headline-lg text-on-surface">
+                        {currentPeriodSpec.lessonTitle}
+                      </h1>
+                      <p className="font-body-md text-body-md text-on-surface-variant">
+                        <strong>Mục tiêu cần đạt:</strong> {currentPeriodSpec.yccd}
+                      </p>
                     </div>
 
                     {/* DUAL-MODE STATUS BANNER & AUTO-SAVE CROSS-DEVICE RESUME BAR */}
@@ -1634,32 +1659,38 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="w-2.5 h-2.5 rounded-full bg-tertiary animate-pulse" />
                         <span className="font-label-sm text-label-sm font-bold text-on-surface">
-                          Đang tập trung làm: Hoạt động {activeInlineStage} • {
-                            activeInlineStage === 1
-                              ? 'Khởi động'
-                              : activeInlineStage === 2
-                              ? 'Phiếu học tập Khám phá (4.0 điểm)'
-                              : activeInlineStage === 3
-                              ? 'Đấu trường Trắc nghiệm 25s (3.0 điểm)'
-                              : 'Vận dụng & Mở rộng (3.0 điểm)'
-                          }
+                          Đang tập trung làm: Hoạt động {activeInlineStage} •{' '}
+                          {activeInlineStage === 1
+                            ? 'Khởi động'
+                            : activeInlineStage === 2
+                            ? 'Khám phá (4.0 điểm)'
+                            : activeInlineStage === 3
+                            ? 'Đấu trường Trắc nghiệm 25s (3.0 điểm)'
+                            : 'Vận dụng & Mở rộng (3.0 điểm)'}
                         </span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-on-surface-variant hidden sm:inline">
-                          Các thông báo & menu phụ đã được ẩn
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsFocusMode(false);
-                            onShowToast?.('Đã thoát Chế độ tập trung.');
-                          }}
-                          className="text-xs text-error hover:underline font-bold flex items-center gap-1 cursor-pointer bg-error/10 px-3 py-1 rounded-full"
-                        >
-                          <span className="material-symbols-outlined text-[14px]">fullscreen_exit</span>
-                          Thoát tập trung (ESC)
-                        </button>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {([1, 2, 3, 4] as const).map((st) => {
+                          const unlocked = currentPeriodUnlocked[st];
+                          const active = activeInlineStage === st;
+                          return (
+                            <button
+                              key={st}
+                              type="button"
+                              disabled={!unlocked}
+                              onClick={() => setActiveInlineStage(st)}
+                              className={`px-3 py-1 rounded-full text-xs font-bold cursor-pointer transition-all ${
+                                active
+                                  ? 'bg-primary text-on-primary shadow-2xs'
+                                  : unlocked
+                                  ? 'bg-surface-container text-on-surface hover:bg-surface-container-high'
+                                  : 'bg-surface-container text-outline opacity-40 cursor-not-allowed'
+                              }`}
+                            >
+                              Hoạt động {st}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   ) : (
@@ -1986,7 +2017,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                                 [c.id]: e.target.value.toUpperCase(),
                                               }))
                                             }
-                                            placeholder={`Gợi ý: ${c.answer.length} chữ cái (${c.answer})`}
+                                            placeholder={`Nhập từ khóa (${c.answer.length} chữ cái)...`}
                                             className="flex-1 px-3 py-1.5 rounded-lg bg-surface-container-lowest text-on-surface font-label-md"
                                           />
                                           <button
@@ -2103,73 +2134,149 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                               <span className="w-10 h-10 rounded-full bg-secondary-fixed text-secondary flex items-center justify-center font-headline-sm font-black">
                                 2
                               </span>
-                              <h3 className="font-headline-md text-headline-md text-on-surface">
-                                Khám phá
-                              </h3>
+                              <div>
+                                <h3 className="font-headline-md text-headline-md text-on-surface">
+                                  Khám phá
+                                </h3>
+                                <span className="text-xs text-on-surface-variant font-medium">Phiếu học tập điện tử (4.0 điểm)</span>
+                              </div>
                             </div>
-                            {worksheetSubmitted && (
-                              <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs">
-                                ✓ Đã nộp: {(worksheetScore ?? 4.0).toFixed(2)} / 4.0 điểm
-                              </span>
-                            )}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => setShowWorksheetScannerModal(true)}
+                                className="px-3.5 py-1.5 rounded-full bg-secondary-container hover:bg-secondary-container/80 text-on-secondary-container font-label-sm text-label-sm font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                                title="Chụp hoặc tải ảnh phiếu học tập giấy, AI tự động nhận diện và điền câu trả lời"
+                              >
+                                <span className="material-symbols-outlined text-[18px]">document_scanner</span>
+                                <span>📷 Quét Phiếu AI (OCR)</span>
+                              </button>
+                              {worksheetSubmitted && (
+                                <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs">
+                                  ✓ Đã nộp: {(worksheetScore ?? 4.0).toFixed(2)} / 4.0 điểm
+                                </span>
+                              )}
+                            </div>
                           </div>
 
-                          {/* 1. KÉO - THẢ (1.0đ) */}
-                          <DragDropActivity
-                            title={activeWorksheet.stage2.dragDropTitle}
-                            instruction={activeWorksheet.stage2.dragDropInstruction}
-                            wordBank={activeWorksheet.stage2.dragDropWordBank}
-                            paragraph={activeWorksheet.stage2.dragDropParagraph}
-                            customQuestions={activeWorksheet.stage2.dragDropQuestions}
-                            sentenceLines={activeWorksheet.stage2.dragDropSentenceLines}
-                            slots={dragSlots}
-                            onSlotChange={(num, val) =>
-                              setDragSlots((prev) => ({ ...prev, [num]: val }))
-                            }
-                            showAnswers={worksheetSubmitted}
-                          />
+                          {/* Thanh 4 tab ngang theo đúng bố cục ảnh mẫu */}
+                          <div
+                            data-testid="stage2-subtabs-bar"
+                            className="p-2 rounded-2xl bg-white border border-slate-200 shadow-2xs grid grid-cols-2 lg:grid-cols-4 gap-2.5"
+                          >
+                            {(
+                              [
+                                {
+                                  id: 'drag' as const,
+                                  icon: 'extension',
+                                  label: '1. Kéo Thả (1.0đ)',
+                                },
+                                {
+                                  id: 'fill' as const,
+                                  icon: 'edit_square',
+                                  label: '2. Điền Khuyết (1.0đ)',
+                                },
+                                {
+                                  id: 'match' as const,
+                                  icon: 'account_tree',
+                                  label: '3. Nối Cột (1.0đ)',
+                                },
+                                {
+                                  id: 'short' as const,
+                                  icon: 'format_list_bulleted',
+                                  label: '4. Trả Lời Ngắn (1.0đ)',
+                                },
+                              ] as const
+                            ).map((tab) => {
+                              const isActive = stage2SubTab === tab.id;
+                              return (
+                                <button
+                                  key={tab.id}
+                                  type="button"
+                                  data-testid={`stage2-tab-${tab.id}`}
+                                  onClick={() => setStage2SubTab(tab.id)}
+                                  className={`py-3 px-4 rounded-xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                                    isActive
+                                      ? 'bg-[#4f39f6] text-white shadow-sm'
+                                      : 'bg-slate-100/90 text-slate-700 hover:bg-slate-200/75'
+                                  }`}
+                                >
+                                  <span className="material-symbols-outlined text-[18px]">
+                                    {tab.icon}
+                                  </span>
+                                  <span>{tab.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* 1. KÉO - THẢ MINIGAME (1.0đ) */}
+                          {stage2SubTab === 'drag' && (
+                            <DragDropActivity
+                              title={activeWorksheet.stage2.dragDropTitle}
+                              instruction={activeWorksheet.stage2.dragDropInstruction}
+                              wordBank={activeWorksheet.stage2.dragDropWordBank}
+                              paragraph={activeWorksheet.stage2.dragDropParagraph}
+                              customQuestions={activeWorksheet.stage2.dragDropQuestions}
+                              sentenceLines={activeWorksheet.stage2.dragDropSentenceLines}
+                              bucketA={activeWorksheet.stage2.bucketA}
+                              bucketB={activeWorksheet.stage2.bucketB}
+                              dragItems={activeWorksheet.stage2.dragItems}
+                              slots={dragSlots}
+                              onSlotChange={(num, val) =>
+                                setDragSlots((prev) => ({ ...prev, [num]: val }))
+                              }
+                              showAnswers={worksheetSubmitted}
+                            />
+                          )}
 
                           {/* 2. ĐIỀN KHUYẾT (1.0đ) */}
-                          <FillBlankActivity
-                            title={activeWorksheet.stage2.fillBlankTitle}
-                            instruction={activeWorksheet.stage2.fillBlankInstruction}
-                            answers={fillBlankInputs}
-                            onChange={(k, val) =>
-                              setFillBlankInputs((prev) => ({ ...prev, [k]: val }))
-                            }
-                            showAnswers={worksheetSubmitted}
-                            customItems={activeWorksheet.stage2.fillBlankQuestions}
-                          />
+                          {stage2SubTab === 'fill' && (
+                            <FillBlankActivity
+                              title={activeWorksheet.stage2.fillBlankTitle}
+                              instruction={activeWorksheet.stage2.fillBlankInstruction}
+                              answers={fillBlankInputs}
+                              onChange={(k, val) =>
+                                setFillBlankInputs((prev) => ({ ...prev, [k]: val }))
+                              }
+                              showAnswers={worksheetSubmitted}
+                              customItems={activeWorksheet.stage2.fillBlankQuestions}
+                            />
+                          )}
 
                           {/* 3. NỐI CỘT (1.0đ) */}
-                          <MatchingActivity
-                            title={activeWorksheet.stage2.matchingTitle}
-                            instruction={activeWorksheet.stage2.matchingInstruction}
-                            connections={matchingConnections}
-                            onConnect={(aId, bId) =>
-                              setMatchingConnections((prev) => ({ ...prev, [aId]: bId }))
-                            }
-                            onDisconnect={(aId) =>
-                              setMatchingConnections((prev) => {
-                                const next = { ...prev };
-                                delete next[aId];
-                                return next;
-                              })
-                            }
-                            showAnswers={worksheetSubmitted}
-                            customPairs={activeWorksheet.stage2.matchingQuestions}
-                          />
+                          {stage2SubTab === 'match' && (
+                            <MatchingActivity
+                              title={activeWorksheet.stage2.matchingTitle}
+                              instruction={activeWorksheet.stage2.matchingInstruction}
+                              connections={matchingConnections}
+                              onConnect={(aId, bId) =>
+                                setMatchingConnections((prev) => ({ ...prev, [aId]: bId }))
+                              }
+                              onDisconnect={(aId) =>
+                                setMatchingConnections((prev) => {
+                                  const next = { ...prev };
+                                  delete next[aId];
+                                  return next;
+                                })
+                              }
+                              showAnswers={worksheetSubmitted}
+                              customPairs={activeWorksheet.stage2.matchingQuestions}
+                            />
+                          )}
 
                           {/* 4. CÂU HỎI TRẢ LỜI NGẮN (1.0đ) */}
-                          <ShortAnswerActivity
-                            answers={shortAnswers}
-                            onChange={(k, val) =>
-                              setShortAnswers((prev) => ({ ...prev, [k]: val }))
-                            }
-                            showAnswers={worksheetSubmitted}
-                            customPrompt={activeWorksheet.stage2.shortAnswerPrompt}
-                            customQuestions={activeWorksheet.stage2.shortAnswerQuestions}
-                          />
+                          {stage2SubTab === 'short' && (
+                            <ShortAnswerActivity
+                              answers={shortAnswers}
+                              onChange={(k, val) =>
+                                setShortAnswers((prev) => ({ ...prev, [k]: val }))
+                              }
+                              showAnswers={worksheetSubmitted}
+                              customPrompt={activeWorksheet.stage2.shortAnswerPrompt}
+                              customQuestions={activeWorksheet.stage2.shortAnswerQuestions}
+                            />
+                          )}
 
                           {/* Submission Footer */}
                           <div className="flex items-center justify-between flex-wrap gap-3 pt-4 border-t border-outline-variant/30">
@@ -2305,24 +2412,26 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             learningMode={activeLearningMode}
                             lessonContext={`Khối ${selectedGrade} • ${currentPeriodSpec.lessonTitle} | YCCĐ: ${currentPeriodSpec.yccd}`}
                             questions={(
-                              activeWorksheet.stage3QuizQuestions || INITIAL_MINIGAME_QUESTIONS
-                            ).map((q) => ({
+                              ((activeWorksheet as any).stage3QuizQuestions ||
+                               (activeWorksheet as any).stage3Questions ||
+                               []) as any[]
+                            ).map((q: any) => ({
                               id: q.id,
-                              level: q.question.includes('Vận dụng')
+                              level: q.question?.includes('Vận dụng')
                                 ? 'Vận dụng'
-                                : q.question.includes('Thông hiểu')
+                                : q.question?.includes('Thông hiểu')
                                 ? 'Thông hiểu'
                                 : 'Nhận biết',
                               question: q.question,
                               points: q.points ?? 0.5,
-                              options: q.options.map((o) => ({
+                              options: (q.options || []).map((o: any) => ({
                                 letter: o.letter,
                                 text: o.text,
                                 isCorrect: o.isCorrect,
                               })),
                               explanation:
-                                'explanation' in (q.options.find((o) => o.isCorrect) || {})
-                                  ? (q.options.find((o) => o.isCorrect) as { explanation?: string })
+                                'explanation' in ((q.options || []).find((o: any) => o.isCorrect) || {})
+                                  ? ((q.options || []).find((o: any) => o.isCorrect) as { explanation?: string })
                                       ?.explanation || 'Theo chuẩn kiến thức SGK Tin học GDPT 2018'
                                   : 'Theo chuẩn kiến thức SGK Tin học GDPT 2018',
                             }))}
@@ -2390,29 +2499,30 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             </div>
                           </div>
                           <ApplicationThreeTasksActivity
-                            deepAnalysis={activeWorksheet.stage4?.deepAnalysis}
-                            practicalTask={activeWorksheet.stage4?.practicalTask}
-                            extendedTask={activeWorksheet.stage4?.extendedTask}
+                            deepAnalysis={(activeWorksheet as any)?.stage4?.deepAnalysis || { title: '', prompt: '', guideAnswer: '', points: 1.0 }}
+                            practicalTask={(activeWorksheet as any)?.stage4?.practicalTask || { title: '', prompt: '', guideAnswer: '', points: 1.0 }}
+                            extendedTask={(activeWorksheet as any)?.stage4?.extendedTask || { title: '', prompt: '', guideAnswer: '', points: 1.0 }}
                             answers={stage4Answers}
                             onAnswerChange={(field, val) =>
                               setStage4Answers((prev) => ({ ...prev, [field]: val }))
                             }
                             isSubmitted={stage4Submitted}
                             onSubmit={() => {
+                              const stage4Obj = (activeWorksheet as any)?.stage4;
                               const eval1 = evaluateAnswerBySuggestedPercentage(
                                 stage4Answers.deepAnalysis,
-                                activeWorksheet.stage4?.deepAnalysis?.guideAnswer || '',
-                                activeWorksheet.stage4?.deepAnalysis?.points || 1.0
+                                stage4Obj?.deepAnalysis?.guideAnswer || '',
+                                stage4Obj?.deepAnalysis?.points || 1.0
                               );
                               const eval2 = evaluateAnswerBySuggestedPercentage(
                                 stage4Answers.practicalTask,
-                                activeWorksheet.stage4?.practicalTask?.guideAnswer || '',
-                                activeWorksheet.stage4?.practicalTask?.points || 1.0
+                                stage4Obj?.practicalTask?.guideAnswer || '',
+                                stage4Obj?.practicalTask?.points || 1.0
                               );
                               const eval3 = evaluateAnswerBySuggestedPercentage(
                                 stage4Answers.extendedTask,
-                                activeWorksheet.stage4?.extendedTask?.guideAnswer || '',
-                                activeWorksheet.stage4?.extendedTask?.points || 1.0
+                                stage4Obj?.extendedTask?.guideAnswer || '',
+                                stage4Obj?.extendedTask?.points || 1.0
                               );
                               const totalPts =
                                 Math.round(
@@ -2667,27 +2777,16 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           )}
         </main>
 
-        {/* Floating Focus Mode Helper Badge with Quick ESC Exit */}
-        {isFocusMode && (
-          <aside
-            aria-label="Thoát chế độ tập trung"
-            className="fixed bottom-5 right-5 z-50 flex items-center gap-2.5 bg-surface-container-lowest/95 backdrop-blur-md border border-primary/30 rounded-full px-4 py-2 shadow-2xl text-on-surface"
-          >
-            <span className="w-2.5 h-2.5 rounded-full bg-tertiary animate-ping" />
-            <span className="font-label-sm text-xs font-bold text-on-surface">
-              Chế độ tập trung đang bật
-            </span>
-            <button
-              type="button"
-              onClick={handleToggleFocusMode}
-              className="ml-1.5 px-3 py-1 rounded-full bg-error/15 hover:bg-error/25 text-error font-label-sm text-xs font-bold flex items-center gap-1 transition-all cursor-pointer"
-              title="Thoát Chế độ tập trung (phím ESC)"
-            >
-              <span className="material-symbols-outlined text-[14px]">close</span>
-              <span>Thoát (ESC)</span>
-            </button>
-          </aside>
-        )}
+        {/* Student Worksheet Scanner Modal (Gemini Vision OCR) */}
+        <StudentWorksheetScanner
+          isOpen={showWorksheetScannerModal}
+          onClose={() => setShowWorksheetScannerModal(false)}
+          grade={selectedGrade}
+          period={currentPeriodSpec.period}
+          lessonTitle={currentPeriodSpec.lessonTitle}
+          onApplyExtractedData={handleApplyExtractedScannerData}
+          onShowToast={onShowToast}
+        />
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   INITIAL_DRIVE_FOLDERS,
   INITIAL_MINIGAME_QUESTIONS,
@@ -35,8 +35,10 @@ import { ClassProgressionTrackerModal } from './ClassProgressionTrackerModal';
 import { ClassCompletionRechartsPanel } from './ClassCompletionRechartsPanel';
 import { BulkImportForm } from './BulkImportForm';
 import { ClassQRCodeModal } from './ClassQRCodeModal';
-import { ClassScoreProgressionChartPanel } from './ClassScoreProgressionChartPanel';
 import { NotebookLMPromptModal } from './NotebookLMPromptModal';
+import { QuestionMasterInspectorModal } from './QuestionMasterInspectorModal';
+import { DatabaseDiagnosticModal } from './DatabaseDiagnosticModal';
+import { DataBoundary } from './DataBoundary';
 
 export type TeacherTab =
   | 'trang-chu'
@@ -61,6 +63,8 @@ interface TeacherPortalProps {
   students: StudentRosterItem[];
   onAddStudents: (newStudents: StudentRosterItem[]) => void;
   onUpdateStudentScore: (studentId: string, newScore: number) => void;
+  onDeleteStudent?: (studentId: string) => void;
+  onDeleteClassStudents?: (classId: string) => void;
   classes: ClassroomItem[];
   onAddClass: (newClass: ClassroomItem) => void;
   onDeleteClass?: (classId: string) => void;
@@ -75,6 +79,7 @@ interface TeacherPortalProps {
     updater: (prev: LiveClassroomSession) => LiveClassroomSession
   ) => void;
   onSwitchToStudentPreview?: () => void;
+  isLoading?: boolean;
 }
 
 export const TeacherPortal: React.FC<TeacherPortalProps> = ({
@@ -89,6 +94,8 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   students,
   onAddStudents,
   onUpdateStudentScore,
+  onDeleteStudent,
+  onDeleteClassStudents,
   classes,
   onAddClass,
   onDeleteClass,
@@ -96,6 +103,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   onUnlockStage,
   liveSession,
   onUpdateLiveSession,
+  isLoading = false,
 }) => {
   // Active Grade (6, 7, 8, 9) & Period (1 -> 29) Selection
   const [selectedNotebookGrade, setSelectedNotebookGrade] = useState<6 | 7 | 8 | 9>(
@@ -204,8 +212,11 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   });
   const [bucketAName, setBucketAName] = useState(activeLesson.stage2.bucketA);
   const [bucketBName, setBucketBName] = useState(activeLesson.stage2.bucketB);
-  const [dragCards, setDragCards] = useState(activeLesson.stage2.dragItems);
+  const [dragCards, setDragCards] = useState<
+    Array<{ id: string; text: string; correctBox: 'data' | 'info'; promptFragment?: string }>
+  >(activeLesson.stage2.dragItems);
   const [dragCardPointsMap, setDragCardPointsMap] = useState<Record<string, number>>({});
+  const [newDragCardPrompt, setNewDragCardPrompt] = useState('');
   const [newDragCardText, setNewDragCardText] = useState('');
   const [newDragCardBox, setNewDragCardBox] = useState<'data' | 'info'>('data');
   const [newDragCardPoints, setNewDragCardPoints] = useState<number>(0.25);
@@ -399,6 +410,8 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
   // ================= CLASS & EXCEL ACCOUNT MANAGEMENT STATE =================
   const [selectedGradeFilter, setSelectedGradeFilter] = useState<number | 'ALL'>('ALL');
+  const [studentAccountGradeFilter, setStudentAccountGradeFilter] = useState<number | 'ALL'>('ALL');
+  const [studentAccountClassFilter, setStudentAccountClassFilter] = useState<string>('ALL');
   const [newClassGrade, setNewClassGrade] = useState<number>(6);
   const [newClassName, setNewClassName] = useState<string>('6A12');
   const [newClassRoom, setNewClassRoom] = useState<string>('Phòng Lab Cloud 04');
@@ -464,7 +477,25 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       })),
       stage2: {
         ...baseWorksheet.stage2,
+        bucketA: bucketAName,
+        bucketB: bucketBName,
         dragDropParagraph,
+        dragDropWordBank: dragCards.map((c) => c.promptFragment || c.text),
+        dragDropQuestions: dragCards.map((c, idx) => ({
+          slotNum: idx + 1,
+          promptFragment:
+            c.promptFragment ||
+            c.text ||
+            baseWorksheet.stage2.dragDropQuestions?.[idx]?.promptFragment ||
+            `Nhận định phân loại #${idx + 1}`,
+          correctWord: c.correctBox === 'info' ? 'B' : 'A',
+          points: dragCardPointsMap[c.id] ?? 0.25,
+        })),
+        dragItems: dragCards.map((c) => ({
+          id: c.id,
+          text: c.promptFragment || c.text,
+          correctBox: c.correctBox,
+        })),
         fillBlankQuestions: fillBlankItems.map((it) => ({
           id: it.id,
           label: it.label,
@@ -505,6 +536,10 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           ...(prev.customWorksheetsByLesson || {}),
           [lessonKey]: updatedWorksheet,
         },
+        verifiedLessonsMap: {
+          ...(prev.verifiedLessonsMap || {}),
+          [lessonKey]: true,
+        },
       }));
     }
 
@@ -534,13 +569,19 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const [showBulkImportModal, setShowBulkImportModal] = useState<boolean>(false);
   // State to control ClassQRCodeModal (Mã QR & PIN Lớp học trực tiếp cho học sinh quét)
   const [showQRCodeModal, setShowQRCodeModal] = useState<boolean>(false);
+  // State to control Master Question Inspector ListView modal
+  const [showQuestionInspectorModal, setShowQuestionInspectorModal] = useState<boolean>(false);
+  // State to control Database Diagnostic CRUD test modal
+  const [showDbDiagnosticModal, setShowDbDiagnosticModal] = useState<boolean>(false);
 
   const handleBulkImportWorksheets = async (importedWorksheets: CustomLessonWorksheet[]) => {
     if (importedWorksheets.length === 0) return;
 
     const worksheetMap: Record<string, CustomLessonWorksheet> = {};
+    const verifiedMap: Record<string, boolean> = {};
     importedWorksheets.forEach((ws) => {
       worksheetMap[ws.lessonKey] = ws;
+      verifiedMap[ws.lessonKey] = true;
     });
 
     if (onUpdateLiveSession) {
@@ -550,6 +591,11 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           ...(prev.customWorksheetsByLesson || {}),
           ...worksheetMap,
         },
+        verifiedLessonsMap: {
+          ...(prev.verifiedLessonsMap || {}),
+          ...verifiedMap,
+        },
+        updatedAt: new Date().toISOString(),
       }));
     }
 
@@ -557,7 +603,11 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       await fetch('/api/worksheets/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ worksheets: worksheetMap }),
+        body: JSON.stringify({
+          grade: selectedNotebookGrade,
+          worksheets: worksheetMap,
+          verified: true,
+        }),
       });
     } catch {
       // ignore offline
@@ -614,6 +664,34 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       liveSession?.customWorksheetsByLesson?.[lessonKey] ||
       getDefaultWorksheetForLesson(targetGrade, targetPeriod);
 
+    const isLessonVerified = Boolean(
+      wsOverride ||
+      liveSession?.customWorksheetsByLesson?.[lessonKey] ||
+      liveSession?.verifiedLessonsMap?.[lessonKey] !== false
+    );
+
+    if (!isLessonVerified) {
+      setWarmupScenario('');
+      setWarmupQuestion('');
+      setWarmupSampleAnswer('');
+      setCrosswordClues([]);
+      setWorksheetTitle(blueprint.stage2.worksheetTitle);
+      setDragDropParagraph('');
+      setDragCards([]);
+      setDragCardPointsMap({});
+      setFillBlankItems([]);
+      setMatchingPairs([]);
+      setMatchingPointsMap({});
+      setShortAnswerPrompt('');
+      setShortAnswerQuestions([]);
+      setQuestions([]);
+      setEditingQuestionIdx(0);
+      setDeepAnalysisTask({ title: '1. Tự luận phân tích sâu', prompt: '', points: 1.0 });
+      setPracticalTask({ title: '2. Bài tập thực hành', prompt: '', points: 1.0 });
+      setExtendedTask({ title: '3. Vận dụng mở rộng', prompt: '', points: 1.0 });
+      return;
+    }
+
     if (effectiveWs?.stage1) {
       setWarmupScenario(effectiveWs.stage1.scenario);
       setWarmupQuestion(effectiveWs.stage1.question);
@@ -632,19 +710,33 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
     setWorksheetTitle(effectiveWs?.worksheetTitle || blueprint.stage2.worksheetTitle);
     setDragDropParagraph(effectiveWs?.stage2?.dragDropParagraph ?? '');
-    setBucketAName(blueprint.stage2.bucketA);
-    setBucketBName(blueprint.stage2.bucketB);
-    if (effectiveWs?.stage2?.dragDropQuestions !== undefined) {
+    setBucketAName(effectiveWs?.stage2?.bucketA || blueprint.stage2.bucketA || 'Hộp A');
+    setBucketBName(effectiveWs?.stage2?.bucketB || blueprint.stage2.bucketB || 'Hộp B');
+    if (effectiveWs?.stage2?.dragDropQuestions !== undefined && effectiveWs.stage2.dragDropQuestions.length > 0) {
       setDragCards(
-        effectiveWs.stage2.dragDropQuestions.map((dq) => ({
-          id: `dd-${dq.slotNum}`,
-          text: dq.correctWord,
-          correctBox: dq.slotNum % 2 === 1 ? 'data' : 'info',
-        }))
+        effectiveWs.stage2.dragDropQuestions.map((dq, idx) => {
+          const resolvedBox =
+            effectiveWs.stage2.dragItems?.[idx]?.correctBox ||
+            (dq.correctWord === 'B'
+              ? 'info'
+              : dq.correctWord === 'A'
+              ? 'data'
+              : idx < 2
+              ? 'data'
+              : 'info');
+          const resolvedStatement =
+            dq.promptFragment || effectiveWs.stage2.dragItems?.[idx]?.text || dq.correctWord;
+          return {
+            id: `dd-${dq.slotNum}`,
+            text: resolvedBox === 'data' ? 'Hộp A' : 'Hộp B',
+            promptFragment: resolvedStatement,
+            correctBox: resolvedBox,
+          };
+        })
       );
       const nextDragPts: Record<string, number> = {};
       effectiveWs.stage2.dragDropQuestions.forEach((dq) => {
-        nextDragPts[`dd-${dq.slotNum}`] = dq.points ?? 0.2;
+        nextDragPts[`dd-${dq.slotNum}`] = dq.points ?? 0.25;
       });
       setDragCardPointsMap(nextDragPts);
     } else {
@@ -697,13 +789,13 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
     // DẠNG TRẢ LỜI NGẮN (100% NGUYÊN BẢN TỪ PDF BẢN GỐC)
     const promptSource =
-      effectiveWs?.stage2?.shortAnswerPrompt !== undefined
+      effectiveWs?.stage2?.shortAnswerPrompt !== undefined && effectiveWs.stage2.shortAnswerPrompt.trim().length > 0
         ? effectiveWs.stage2.shortAnswerPrompt
         : blueprint.stage2.shortAnswerPrompt || '';
     setShortAnswerPrompt(promptSource);
 
     const shortQuestionsSource =
-      effectiveWs?.stage2?.shortAnswerQuestions !== undefined
+      effectiveWs?.stage2?.shortAnswerQuestions !== undefined && effectiveWs.stage2.shortAnswerQuestions.length > 0
         ? effectiveWs.stage2.shortAnswerQuestions
         : blueprint.stage2.shortAnswerQuestions || [];
     setShortAnswerQuestions(shortQuestionsSource);
@@ -759,6 +851,18 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       `Đã đồng bộ câu hỏi & cấu trúc chuẩn 10.0đ cho Khối ${grade} • ${spec.lessonTitle} (${spec.sgkPages}).`
     );
   };
+
+  useEffect(() => {
+    const spec = selectedPeriodSpec || getPeriodsForGrade(selectedNotebookGrade)[0];
+    if (spec) {
+      const blueprint = buildLessonBlueprintFromPeriod(spec);
+      const lessonKey = `k${selectedNotebookGrade}-tiet-${spec.period}`;
+      const ws =
+        liveSession?.customWorksheetsByLesson?.[lessonKey] ||
+        getDefaultWorksheetForLesson(selectedNotebookGrade, spec.period);
+      applyNotebookBlueprintToAllStages(blueprint, ws);
+    }
+  }, [selectedNotebookGrade, selectedNotebookPeriod, liveSession?.customWorksheetsByLesson]);
 
   // Reusable Grade & Period Selector Bar inside Activity Authoring Tabs (Hoạt động 1, 2, 3, 4)
   const renderActivityGradePeriodSelector = (
@@ -1349,15 +1453,53 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               <span className="hidden sm:inline">Mẫu Prompt NotebookLM (4 Khối)</span>
             </button>
 
-            {/* Bulk Import Word (.docx) 29 Periods Button */}
+            {/* Clean Reset Database Button */}
             <button
               type="button"
-              onClick={() => setShowBulkImportModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-300 font-label-md text-xs font-bold hover:bg-blue-500/20 transition-all shadow-xs cursor-pointer border border-blue-500/30"
-              title="Nạp dữ liệu đủ 29 tiết học từ tệp Word (.docx) vào Database"
+              onClick={async () => {
+                try {
+                  const res = await fetch('/api/db/clean-reset', { method: 'POST' });
+                  const data = await res.json();
+                  if (data.ok) {
+                    onShowToast('✨ ' + data.message);
+                    if (onUpdateLiveSession) {
+                      onUpdateLiveSession((prev) => ({
+                        ...prev,
+                        customWorksheetsByLesson: {},
+                      }));
+                    }
+                  }
+                } catch {
+                  onShowToast('Đã làm sạch dữ liệu tùy chỉnh và khôi phục dữ liệu chuẩn SGK!');
+                }
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-500/15 text-slate-700 dark:text-slate-300 font-label-md text-xs font-bold hover:bg-slate-500/25 transition-all shadow-xs cursor-pointer border border-slate-500/30"
+              title="Xóa toàn bộ dữ liệu tùy chỉnh từ tiết 1 đến 29 và thiết lập lại dữ liệu sạch"
             >
-              <span className="material-symbols-outlined text-[17px]">description</span>
-              <span className="hidden sm:inline">Nạp Word (.docx) 29 Tiết</span>
+              <span className="material-symbols-outlined text-[17px]">cleaning_services</span>
+              <span className="hidden sm:inline">Reset CSDL Sạch</span>
+            </button>
+
+            {/* Master Question Inspector ListView Button */}
+            <button
+              type="button"
+              onClick={() => setShowQuestionInspectorModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 font-label-md text-xs font-bold hover:bg-amber-500/25 transition-all shadow-xs cursor-pointer border border-amber-500/30"
+              title="Xem danh sách toàn bộ câu hỏi, kiểm thử dữ liệu nạp và đối chiếu trường phiếu"
+            >
+              <span className="material-symbols-outlined text-[17px]">checklist_rtl</span>
+              <span className="hidden sm:inline">ListView Câu Hỏi (Inspector)</span>
+            </button>
+
+            {/* Database Sync & CRUD Diagnostic Utility Button */}
+            <button
+              type="button"
+              onClick={() => setShowDbDiagnosticModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-300 font-label-md text-xs font-bold hover:bg-rose-500/25 transition-all shadow-xs cursor-pointer border border-rose-500/30"
+              title="Chẩn đoán kết nối Supabase/PostgreSQL & Kiểm thử CRUD dữ liệu Lớp học"
+            >
+              <span className="material-symbols-outlined text-[17px]">database</span>
+              <span className="hidden sm:inline">Chẩn đoán CRUD CSDL</span>
             </button>
 
             {/* Real-Time 29-Period Progression Counter Badge/Button */}
@@ -1647,14 +1789,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                 </div>
               </div>
 
-              {/* Recharts Class Average Score Progression Over Time Panel */}
-              <ClassScoreProgressionChartPanel
-                classes={classes}
-                selectedGrade={selectedNotebookGrade}
-                liveSession={liveSession}
-                onShowToast={onShowToast}
-              />
-
               {/* CASE A: 29-PERIOD CURRICULUM ROADMAP GRID (DEFAULT ON TEACHER HOME) */}
               {openedHomePeriod === null ? (
                 <div className="flex flex-col gap-space-lg">
@@ -1769,22 +1903,33 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     liveSession={liveSession}
                   />
 
-                  {/* 29-Period Cards Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-space-md">
-                    {gradePeriods
-                      .filter(
-                        (p) =>
-                          homeExamFilter === 'ALL' || p.examMilestone === homeExamFilter
-                      )
-                      .map((spec) => {
-                        const isLiveActive =
-                          liveSession?.isBroadcasting &&
-                          liveSession.activeGrade === spec.grade &&
-                          liveSession.activePeriod === spec.period &&
-                          liveSession.activeClassId === selectedClass;
-                        const isTaughtForClass = (
-                          liveSession?.taughtPeriodsByClass?.[selectedClass] || []
-                        ).includes(spec.period);
+                  {/* 29-Period Cards Grid wrapped in unified DataBoundary */}
+                  <DataBoundary
+                    data={gradePeriods.filter(
+                      (p) =>
+                        homeExamFilter === 'ALL' || p.examMilestone === homeExamFilter
+                    )}
+                    isLoading={isLoading}
+                    loadingMessage={`Đang tải lộ trình 29 tiết học Khối ${selectedNotebookGrade} từ CSDL...`}
+                    emptyTitle={`Chưa có tiết học nào thuộc đợt ${homeExamFilter}`}
+                    emptyDescription="Vui lòng chọn bộ lọc 'Tất cả 29 tiết' để xem đầy đủ chương trình."
+                  >
+                    {(filteredGradePeriods) => (
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-space-md">
+                        {filteredGradePeriods.map((spec) => {
+                          const isLiveActive =
+                            liveSession?.isBroadcasting &&
+                            liveSession.activeGrade === spec.grade &&
+                            liveSession.activePeriod === spec.period &&
+                            liveSession.activeClassId === selectedClass;
+                          const isTaughtForClass = (
+                            liveSession?.taughtPeriodsByClass?.[selectedClass] || []
+                          ).includes(spec.period);
+                          const specKey = `k${spec.grade}-tiet-${spec.period}`;
+                          const isVerifiedInDb = Boolean(
+                            liveSession?.customWorksheetsByLesson?.[specKey] ||
+                            liveSession?.verifiedLessonsMap?.[specKey] !== false
+                          );
 
                         return (
                           <div
@@ -1836,7 +1981,18 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                                   </span>
                                 </div>
 
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {isVerifiedInDb ? (
+                                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-label-sm text-[11px] font-bold flex items-center gap-1 border border-emerald-500/30">
+                                      <span className="material-symbols-outlined text-[13px]">verified</span>
+                                      <span>✓ Đã có dữ liệu CSDL</span>
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-[11px] flex items-center gap-1 border border-outline-variant/30">
+                                      <span className="material-symbols-outlined text-[13px] text-outline">hourglass_empty</span>
+                                      <span>Trống dữ liệu</span>
+                                    </span>
+                                  )}
                                   {isTaughtForClass && (
                                     <span className="px-2 py-0.5 rounded-full bg-tertiary text-on-tertiary font-label-sm text-label-sm font-bold">
                                       ✓ Đã dạy ({selectedClass})
@@ -1855,7 +2011,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                                   {spec.topic}
                                 </span>
                                 <h3 className="font-headline-sm text-headline-sm text-on-surface mt-0.5 line-clamp-2">
-                                  {spec.lessonTitle}
+                                  {liveSession?.customWorksheetsByLesson?.[specKey]?.worksheetTitle || spec.lessonTitle}
                                 </h3>
                                 <p className="font-body-sm text-body-sm text-on-surface-variant mt-1 line-clamp-2">
                                   {spec.yccd}
@@ -1935,7 +2091,9 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                           </div>
                         );
                       })}
-                  </div>
+                      </div>
+                    )}
+                  </DataBoundary>
                 </div>
               ) : (
                 /* CASE B: TIẾN TRÌNH GIẢNG DẠY CỦA TIẾT HỌC */
@@ -2402,24 +2560,11 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                           />
                         </div>
                       ))}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVideoStops((prev) => [
-                            ...prev,
-                            {
-                              time: '02:45',
-                              question:
-                                'Thiết bị nào lưu trữ dữ liệu lâu dài khi tắt nguồn máy tính?',
-                              answer: 'Ổ cứng (SSD/HDD), thẻ nhớ USB hoặc đám mây Cloud.',
-                            },
-                          ]);
-                          onShowToast('Đã thêm 1 câu hỏi dừng video mới!');
-                        }}
-                        className="self-start px-4 py-2 rounded-full bg-surface-container text-primary font-label-md text-label-md hover:bg-primary-fixed cursor-pointer"
-                      >
-                        + Thêm 1 điểm dừng câu hỏi mới
-                      </button>
+                      {videoStops.length === 0 && (
+                        <div className="p-4 rounded-xl bg-surface-container-low border border-dashed border-outline-variant text-center text-xs text-on-surface-variant">
+                          ⚠️ Trống dữ liệu điểm dừng video bài giảng cho tiết học này.
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -2555,71 +2700,11 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       })}
                     </div>
 
-                    {/* Add new crossword row with custom points */}
-                    <div className="p-4 rounded-xl bg-surface-container-low flex flex-col gap-2 border border-primary/20">
-                      <span className="font-label-md text-label-md text-primary font-bold">
-                        + Thêm 1 câu hỏi Ô chữ hàng ngang mới
-                      </span>
-                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
-                        <input
-                          type="text"
-                          value={newClueText}
-                          onChange={(e) => setNewClueText(e.target.value)}
-                          placeholder="Câu gợi ý hàng ngang..."
-                          className="sm:col-span-6 px-3 py-2 rounded-lg bg-surface-container-lowest text-on-surface font-body-sm text-body-sm"
-                        />
-                        <input
-                          type="text"
-                          value={newClueAnswer}
-                          onChange={(e) => setNewClueAnswer(e.target.value)}
-                          placeholder="Đáp án (VD: DULIEU)"
-                          className="sm:col-span-3 px-3 py-2 rounded-lg bg-surface-container-lowest text-on-surface font-label-md text-label-md uppercase"
-                        />
-                        <div className="sm:col-span-3 flex items-center gap-1 bg-surface-container-lowest px-2.5 py-1.5 rounded-lg">
-                          <span className="text-xs text-on-surface-variant font-bold">Điểm:</span>
-                          <input
-                            type="number"
-                            step="0.25"
-                            min="0.25"
-                            max="10"
-                            value={newCluePoints}
-                            onChange={(e) => setNewCluePoints(Number(e.target.value) || 2.5)}
-                            className="w-full text-center font-bold text-primary text-sm focus:outline-none"
-                          />
-                          <span className="text-xs font-bold text-primary">đ</span>
-                        </div>
+                    {crosswordClues.length === 0 && (
+                      <div className="p-4 rounded-xl bg-surface-container-low border border-dashed border-outline-variant text-center text-xs text-on-surface-variant">
+                        ⚠️ Trống dữ liệu câu hỏi Ô chữ hàng ngang cho tiết học này.
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!newClueText.trim() || !newClueAnswer.trim()) return;
-                          const cleanAns = newClueAnswer
-                            .toUpperCase()
-                            .replace(/[^A-Z0-9]/g, '');
-                          const newId = `cw-${Date.now()}`;
-                          setCrosswordClues((prev) => [
-                            ...prev,
-                            {
-                              id: newId,
-                              rowNumber: prev.length + 1,
-                              clue: newClueText.trim(),
-                              answer: cleanAns || 'TINHOC',
-                              hintTileLabel: `Mảnh ghép ${prev.length + 1}`,
-                            },
-                          ]);
-                          setCrosswordPointsMap((prev) => ({
-                            ...prev,
-                            [newId]: newCluePoints,
-                          }));
-                          setNewClueText('');
-                          setNewClueAnswer('');
-                          onShowToast(`Đã thêm câu hỏi ô chữ mới (${newCluePoints}đ)!`);
-                        }}
-                        className="self-start px-4 py-1.5 rounded-full bg-primary text-on-primary font-label-sm text-label-sm font-bold cursor-pointer"
-                      >
-                        + Thêm câu hỏi vào Ô chữ
-                      </button>
-                    </div>
+                    )}
                   </div>
 
                   {/* Right: Secret Picture Live Preview */}
@@ -2692,28 +2777,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const rawWs = getDefaultWorksheetForLesson(
-                              selectedNotebookGrade,
-                              selectedNotebookPeriod
-                            );
-                            if (rawWs?.stage1) {
-                              setWarmupScenario(rawWs.stage1.scenario);
-                              setWarmupQuestion(rawWs.stage1.question);
-                              setWarmupSampleAnswer(rawWs.stage1.sampleAnswer || '');
-                              setWarmupPoints(rawWs.stage1.points ?? 1.0);
-                              onShowToast(
-                                `Đã đồng bộ Khởi động Khối ${selectedNotebookGrade} • Tiết ${selectedNotebookPeriod}!`
-                              );
-                            }
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-primary/15 hover:bg-primary/25 text-primary font-label-sm text-xs font-bold flex items-center gap-1 cursor-pointer border border-primary/30"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">restart_alt</span>
-                          <span>Đồng bộ gốc</span>
-                        </button>
                         <div className="flex items-center gap-1 px-3 py-1 rounded-full bg-tertiary-fixed text-on-tertiary-fixed text-xs font-bold">
                           <span>Điểm:</span>
                           <input
@@ -2938,178 +3001,255 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="p-4 rounded-xl bg-secondary-fixed/30 flex flex-col gap-2">
+                  {dragCards.length === 0 ? (
+                    <div className="p-8 text-center bg-surface-container-low rounded-xl border border-dashed border-outline-variant/40 flex flex-col items-center justify-center">
+                      <span className="material-symbols-outlined text-4xl mb-1 text-outline">hourglass_empty</span>
+                      <p className="font-bold text-sm text-on-surface">Trống dữ liệu Kéo thả</p>
+                      <p className="text-xs text-on-surface-variant mt-0.5">Tiết học này chưa có dữ liệu từ tệp nạp/CSDL.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="p-4 rounded-xl bg-secondary-fixed/30 flex flex-col gap-2.5 border border-secondary/20">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2.5 py-1 rounded-md bg-secondary text-on-secondary text-xs font-bold shrink-0">
+                            Hộp A
+                          </span>
+                          <input
+                            type="text"
+                            aria-label="Tên Hộp A"
+                            value={bucketAName}
+                            onChange={(e) => setBucketAName(e.target.value)}
+                            className="flex-1 font-headline-sm text-headline-sm text-secondary bg-surface-container-lowest px-3 py-1.5 rounded-lg border border-secondary/30"
+                          />
+                        </div>
+                        {dragCards
+                          .filter((c) => c.correctBox === 'data')
+                          .map((c, idx) => (
+                            <div
+                              key={c.id}
+                              className="p-3 rounded-lg bg-surface-container-lowest flex flex-col gap-2 border border-outline-variant/30"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-bold text-secondary">
+                                  Mục A.{idx + 1} (Câu hỏi / Mô tả gợi ý &amp; Từ khóa kéo thả):
+                                </span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <input
+                                    type="number"
+                                    step="0.25"
+                                    min="0.1"
+                                    max="10"
+                                    value={dragCardPointsMap[c.id] ?? 0.25}
+                                    onChange={(e) =>
+                                      setDragCardPointsMap((prev) => ({
+                                        ...prev,
+                                        [c.id]: Number(e.target.value) || 0.25,
+                                      }))
+                                    }
+                                    className="w-14 px-1.5 py-0.5 rounded bg-surface-container-low text-primary font-bold text-xs text-center"
+                                    title="Điểm của thẻ kéo thả này"
+                                  />
+                                  <span className="text-xs font-bold text-primary">đ</span>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDragCards((prev) => prev.filter((x) => x.id !== c.id))
+                                    }
+                                    className="text-error text-xs font-bold px-1.5 py-0.5 hover:underline cursor-pointer"
+                                  >
+                                    Xóa
+                                  </button>
+                                </div>
+                              </div>
+                              <input
+                                type="text"
+                                value={c.promptFragment || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setDragCards((prev) =>
+                                    prev.map((item) =>
+                                      item.id === c.id ? { ...item, promptFragment: val } : item
+                                    )
+                                  );
+                                }}
+                                placeholder="Câu hỏi / Vế mô tả gợi ý cho vị trí này..."
+                                className="w-full font-body-sm text-xs text-on-surface-variant bg-surface-container-low px-2.5 py-1.5 rounded-md border border-outline-variant/25"
+                              />
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] font-bold text-primary shrink-0">
+                                  Từ khóa đúng:
+                                </span>
+                                <input
+                                  type="text"
+                                  value={c.text}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setDragCards((prev) =>
+                                      prev.map((item) =>
+                                        item.id === c.id ? { ...item, text: val } : item
+                                      )
+                                    );
+                                  }}
+                                  className="flex-1 font-body-sm text-body-sm font-bold text-primary bg-primary-fixed/30 px-2.5 py-1 rounded-md border border-primary/30"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+
+                      <div className="p-4 rounded-xl bg-primary-fixed/30 flex flex-col gap-2.5 border border-primary/20">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2.5 py-1 rounded-md bg-primary text-on-primary text-xs font-bold shrink-0">
+                            Hộp B
+                          </span>
+                          <input
+                            type="text"
+                            aria-label="Tên Hộp B"
+                            value={bucketBName}
+                            onChange={(e) => setBucketBName(e.target.value)}
+                            className="flex-1 font-headline-sm text-headline-sm text-primary bg-surface-container-lowest px-3 py-1.5 rounded-lg border border-primary/30"
+                          />
+                        </div>
+                        {dragCards
+                          .filter((c) => c.correctBox === 'info')
+                          .map((c, idx) => (
+                            <div
+                              key={c.id}
+                              className="p-3 rounded-lg bg-surface-container-lowest flex flex-col gap-2 border border-outline-variant/30"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-bold text-primary">
+                                  Mục B.{idx + 1} (Câu hỏi / Mô tả gợi ý &amp; Từ khóa kéo thả):
+                                </span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <input
+                                    type="number"
+                                    step="0.25"
+                                    min="0.1"
+                                    max="10"
+                                    value={dragCardPointsMap[c.id] ?? 0.25}
+                                    onChange={(e) =>
+                                      setDragCardPointsMap((prev) => ({
+                                        ...prev,
+                                        [c.id]: Number(e.target.value) || 0.25,
+                                      }))
+                                    }
+                                    className="w-14 px-1.5 py-0.5 rounded bg-surface-container-low text-primary font-bold text-xs text-center"
+                                    title="Điểm của thẻ kéo thả này"
+                                  />
+                                  <span className="text-xs font-bold text-primary">đ</span>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDragCards((prev) => prev.filter((x) => x.id !== c.id))
+                                    }
+                                    className="text-error text-xs font-bold px-1.5 py-0.5 hover:underline cursor-pointer"
+                                  >
+                                    Xóa
+                                  </button>
+                                </div>
+                              </div>
+                              <input
+                                type="text"
+                                value={c.promptFragment || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setDragCards((prev) =>
+                                    prev.map((item) =>
+                                      item.id === c.id ? { ...item, promptFragment: val } : item
+                                    )
+                                  );
+                                }}
+                                placeholder="Câu hỏi / Vế mô tả gợi ý cho vị trí này..."
+                                className="w-full font-body-sm text-xs text-on-surface-variant bg-surface-container-low px-2.5 py-1.5 rounded-md border border-outline-variant/25"
+                              />
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] font-bold text-primary shrink-0">
+                                  Từ khóa đúng:
+                                </span>
+                                <input
+                                  type="text"
+                                  value={c.text}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setDragCards((prev) =>
+                                      prev.map((item) =>
+                                        item.id === c.id ? { ...item, text: val } : item
+                                      )
+                                    );
+                                  }}
+                                  className="flex-1 font-body-sm text-body-sm font-bold text-primary bg-primary-fixed/30 px-2.5 py-1 rounded-md border border-primary/30"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Quick Add New Drag & Drop Item into Hộp A or Hộp B */}
+                  <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30 flex flex-col gap-2">
+                    <span className="text-xs font-bold text-primary">
+                      + Thêm câu hỏi / thẻ Kéo - Thả mới vào {bucketAName} hoặc {bucketBName}:
+                    </span>
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
                       <input
                         type="text"
-                        value={bucketAName}
-                        onChange={(e) => setBucketAName(e.target.value)}
-                        className="font-headline-sm text-headline-sm text-secondary bg-surface-container-lowest px-3 py-1.5 rounded-lg"
+                        value={newDragCardPrompt}
+                        onChange={(e) => setNewDragCardPrompt(e.target.value)}
+                        placeholder="Nội dung câu hỏi / mô tả vị trí (VD: (5) Thiết bị hiển thị hình ảnh là:)"
+                        className="md:col-span-5 px-3 py-1.5 rounded-lg bg-surface-container-lowest text-xs text-on-surface border border-outline-variant/30"
                       />
-                      {dragCards
-                        .filter((c) => c.correctBox === 'data')
-                        .map((c) => (
-                          <div
-                            key={c.id}
-                            className="p-2.5 rounded-lg bg-surface-container-lowest flex items-center justify-between gap-2"
-                          >
-                            <input
-                              type="text"
-                              value={c.text}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setDragCards((prev) =>
-                                  prev.map((item) =>
-                                    item.id === c.id ? { ...item, text: val } : item
-                                  )
-                                );
-                              }}
-                              className="flex-1 font-body-sm text-body-sm text-on-surface bg-surface-container-low px-2.5 py-1 rounded-md"
-                            />
-                            <div className="flex items-center gap-1 shrink-0">
-                              <input
-                                type="number"
-                                step="0.25"
-                                min="0.25"
-                                max="10"
-                                value={dragCardPointsMap[c.id] ?? 0.25}
-                                onChange={(e) =>
-                                  setDragCardPointsMap((prev) => ({
-                                    ...prev,
-                                    [c.id]: Number(e.target.value) || 0.25,
-                                  }))
-                                }
-                                className="w-14 px-1.5 py-1 rounded bg-surface-container-low text-primary font-bold text-xs text-center"
-                                title="Điểm của thẻ kéo thả này"
-                              />
-                              <span className="text-xs font-bold text-primary">đ</span>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setDragCards((prev) => prev.filter((x) => x.id !== c.id))
-                                }
-                                className="text-error text-xs px-1.5 py-1 hover:underline cursor-pointer"
-                              >
-                                Xóa
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-
-                    <div className="p-4 rounded-xl bg-primary-fixed/30 flex flex-col gap-2">
                       <input
                         type="text"
-                        value={bucketBName}
-                        onChange={(e) => setBucketBName(e.target.value)}
-                        className="font-headline-sm text-headline-sm text-primary bg-surface-container-lowest px-3 py-1.5 rounded-lg"
+                        value={newDragCardText}
+                        onChange={(e) => setNewDragCardText(e.target.value)}
+                        placeholder="Từ khóa đáp án (VD: Màn hình)"
+                        className="md:col-span-3 px-3 py-1.5 rounded-lg bg-surface-container-lowest text-xs font-bold text-primary border border-primary/30"
                       />
-                      {dragCards
-                        .filter((c) => c.correctBox === 'info')
-                        .map((c) => (
-                          <div
-                            key={c.id}
-                            className="p-2.5 rounded-lg bg-surface-container-lowest flex items-center justify-between gap-2"
-                          >
-                            <input
-                              type="text"
-                              value={c.text}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setDragCards((prev) =>
-                                  prev.map((item) =>
-                                    item.id === c.id ? { ...item, text: val } : item
-                                  )
-                                );
-                              }}
-                              className="flex-1 font-body-sm text-body-sm text-on-surface bg-surface-container-low px-2.5 py-1 rounded-md"
-                            />
-                            <div className="flex items-center gap-1 shrink-0">
-                              <input
-                                type="number"
-                                step="0.25"
-                                min="0.25"
-                                max="10"
-                                value={dragCardPointsMap[c.id] ?? 0.25}
-                                onChange={(e) =>
-                                  setDragCardPointsMap((prev) => ({
-                                    ...prev,
-                                    [c.id]: Number(e.target.value) || 0.25,
-                                  }))
-                                }
-                                className="w-14 px-1.5 py-1 rounded bg-surface-container-low text-primary font-bold text-xs text-center"
-                                title="Điểm của thẻ kéo thả này"
-                              />
-                              <span className="text-xs font-bold text-primary">đ</span>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setDragCards((prev) => prev.filter((x) => x.id !== c.id))
-                                }
-                                className="text-error text-xs px-1.5 py-1 hover:underline cursor-pointer"
-                              >
-                                Xóa
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                      <select
+                        value={newDragCardBox}
+                        onChange={(e) => setNewDragCardBox(e.target.value as 'data' | 'info')}
+                        className="md:col-span-2 px-2.5 py-1.5 rounded-lg bg-surface-container-lowest text-xs font-bold text-on-surface border border-outline-variant/30"
+                      >
+                        <option value="data">Thuộc Hộp A</option>
+                        <option value="info">Thuộc Hộp B</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!newDragCardText.trim()) {
+                            onShowToast('Vui lòng nhập từ khóa đáp án cho thẻ Kéo - Thả.');
+                            return;
+                          }
+                          const newId = `dd-custom-${Date.now()}`;
+                          const nextSlot = dragCards.length + 1;
+                          setDragCards((prev) => [
+                            ...prev,
+                            {
+                              id: newId,
+                              text: newDragCardText.trim(),
+                              promptFragment:
+                                newDragCardPrompt.trim() ||
+                                `(${nextSlot}) Mục phân loại thuộc ${
+                                  newDragCardBox === 'data' ? bucketAName : bucketBName
+                                }:`,
+                              correctBox: newDragCardBox,
+                            },
+                          ]);
+                          setDragCardPointsMap((prev) => ({
+                            ...prev,
+                            [newId]: newDragCardPoints || 0.25,
+                          }));
+                          setNewDragCardPrompt('');
+                          setNewDragCardText('');
+                          onShowToast('Đã thêm thẻ Kéo - Thả mới! Nhấn "Lưu vào Database" để đồng bộ.');
+                        }}
+                        className="md:col-span-2 px-3 py-1.5 rounded-full bg-primary text-on-primary text-xs font-bold cursor-pointer hover:opacity-95"
+                      >
+                        + Thêm thẻ
+                      </button>
                     </div>
-                  </div>
-
-                  {/* Add Drag Card with Points */}
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <input
-                      type="text"
-                      value={newDragCardText}
-                      onChange={(e) => setNewDragCardText(e.target.value)}
-                      placeholder="Nhập nội dung thẻ kéo thả mới..."
-                      className="flex-1 px-3.5 py-2 rounded-full bg-surface-container-low text-on-surface font-body-sm text-body-sm"
-                    />
-                    <select
-                      value={newDragCardBox}
-                      onChange={(e) => setNewDragCardBox(e.target.value as 'data' | 'info')}
-                      className="px-3 py-2 rounded-full bg-surface-container-low text-on-surface font-label-sm text-label-sm"
-                    >
-                      <option value="data">Đáp án đúng: Hộp A</option>
-                      <option value="info">Đáp án đúng: Hộp B</option>
-                    </select>
-                    <div className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-low">
-                      <span className="text-xs text-on-surface-variant font-bold">Điểm:</span>
-                      <input
-                        type="number"
-                        step="0.25"
-                        min="0.25"
-                        max="10"
-                        value={newDragCardPoints}
-                        onChange={(e) => setNewDragCardPoints(Number(e.target.value) || 0.25)}
-                        className="w-12 text-center font-bold text-primary text-xs focus:outline-none"
-                      />
-                      <span className="text-xs font-bold text-primary">đ</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!newDragCardText.trim()) return;
-                        const id = `dc-${Date.now()}`;
-                        setDragCards((prev) => [
-                          ...prev,
-                          {
-                            id,
-                            text: newDragCardText.trim(),
-                            correctBox: newDragCardBox,
-                          },
-                        ]);
-                        setDragCardPointsMap((prev) => ({
-                          ...prev,
-                          [id]: newDragCardPoints,
-                        }));
-                        setNewDragCardText('');
-                        onShowToast(`Đã thêm thẻ kéo thả mới (${newDragCardPoints}đ)!`);
-                      }}
-                      className="px-4 py-2 rounded-full bg-primary text-on-primary font-label-sm text-label-sm font-bold cursor-pointer"
-                    >
-                      + Thêm 1 câu Kéo thả
-                    </button>
                   </div>
                 </div>
               )}
@@ -3129,29 +3269,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const rawWs = getDefaultWorksheetForLesson(selectedNotebookGrade, selectedNotebookPeriod);
-                          if (rawWs.stage2?.fillBlankQuestions?.length) {
-                            setFillBlankItems(
-                              rawWs.stage2.fillBlankQuestions.map((fb, idx) => ({
-                                id: fb.id,
-                                label: fb.label,
-                                preText: fb.preText,
-                                postText: fb.postText,
-                                correctAnswer: fb.correctAnswer,
-                                points: fb.points ?? (idx === 0 ? 0.35 : 0.3),
-                              }))
-                            );
-                            onShowToast(`Đã đồng bộ Điền khuyết Tiết ${selectedNotebookPeriod} Khối ${selectedNotebookGrade}!`);
-                          }
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-secondary/15 hover:bg-secondary/25 text-secondary font-label-sm text-label-sm font-bold flex items-center gap-1 cursor-pointer transition-all border border-secondary/30"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">restart_alt</span>
-                        <span>Đồng bộ gốc</span>
-                      </button>
                       <span className="px-3 py-1 rounded-full bg-tertiary-fixed text-on-tertiary-fixed font-label-sm text-label-sm font-bold">
                         Tổng:{' '}
                         {fillBlankItems
@@ -3162,158 +3279,98 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-3">
-                    {fillBlankItems.map((item, idx) => (
-                      <div
-                        key={item.id}
-                        className="p-3.5 rounded-xl bg-surface-container-low flex flex-col gap-2 border border-outline-variant/25"
-                      >
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <span className="font-headline-sm text-headline-sm text-secondary font-bold">
-                            Câu điền khuyết {item.label || `${idx + 1})`}:
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <label className="text-xs font-bold text-on-surface-variant flex items-center gap-1">
-                              <span>Điểm câu này:</span>
-                              <input
-                                type="number"
-                                step="0.25"
-                                min="0.25"
-                                max="10"
-                                value={item.points}
-                                onChange={(e) => {
-                                  const pts = Number(e.target.value) || 1.0;
-                                  setFillBlankItems((prev) =>
-                                    prev.map((x) => (x.id === item.id ? { ...x, points: pts } : x))
-                                  );
-                                }}
-                                className="w-16 px-2 py-1 rounded bg-surface-container-lowest text-primary font-bold text-xs text-center border border-outline-variant/40"
-                              />
-                              <span>đ</span>
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setFillBlankItems((prev) => prev.filter((x) => x.id !== item.id))
-                              }
-                              className="text-error text-xs font-bold hover:underline cursor-pointer"
-                            >
-                              Xóa câu
-                            </button>
+                  {fillBlankItems.length === 0 ? (
+                    <div className="p-8 text-center bg-surface-container-low rounded-xl border border-dashed border-outline-variant/40 flex flex-col items-center justify-center">
+                      <span className="material-symbols-outlined text-4xl mb-1 text-outline">hourglass_empty</span>
+                      <p className="font-bold text-sm text-on-surface">Trống dữ liệu Điền khuyết</p>
+                      <p className="text-xs text-on-surface-variant mt-0.5">Tiết học này chưa có dữ liệu từ tệp nạp/CSDL.</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {fillBlankItems.map((item, idx) => (
+                        <div
+                          key={item.id}
+                          className="p-3.5 rounded-xl bg-surface-container-low flex flex-col gap-2 border border-outline-variant/25"
+                        >
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="font-headline-sm text-headline-sm text-secondary font-bold">
+                              Câu điền khuyết {item.label || `${idx + 1})`}:
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs font-bold text-on-surface-variant flex items-center gap-1">
+                                <span>Điểm câu này:</span>
+                                <input
+                                  type="number"
+                                  step="0.25"
+                                  min="0.25"
+                                  max="10"
+                                  value={item.points}
+                                  onChange={(e) => {
+                                    const pts = Number(e.target.value) || 1.0;
+                                    setFillBlankItems((prev) =>
+                                      prev.map((x) => (x.id === item.id ? { ...x, points: pts } : x))
+                                    );
+                                  }}
+                                  className="w-16 px-2 py-1 rounded bg-surface-container-lowest text-primary font-bold text-xs text-center border border-outline-variant/40"
+                                />
+                                <span>đ</span>
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setFillBlankItems((prev) => prev.filter((x) => x.id !== item.id))
+                                }
+                                className="text-error text-xs font-bold hover:underline cursor-pointer"
+                              >
+                                Xóa câu
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                            <input
+                              type="text"
+                              value={item.preText}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setFillBlankItems((prev) =>
+                                  prev.map((x) => (x.id === item.id ? { ...x, preText: val } : x))
+                                );
+                              }}
+                              placeholder="Vế câu trước ô trống..."
+                              className="md:col-span-4 px-3 py-1.5 rounded-lg bg-surface-container-lowest text-on-surface font-body-sm text-body-sm"
+                            />
+                            <input
+                              type="text"
+                              value={item.correctAnswer}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setFillBlankItems((prev) =>
+                                  prev.map((x) =>
+                                    x.id === item.id ? { ...x, correctAnswer: val } : x
+                                  )
+                                );
+                              }}
+                              placeholder="Từ cần điền (Đáp án chuẩn)"
+                              className="md:col-span-3 px-3 py-1.5 rounded-lg bg-primary-fixed/40 text-primary font-bold font-body-sm text-body-sm border border-primary/40"
+                            />
+                            <input
+                              type="text"
+                              value={item.postText}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setFillBlankItems((prev) =>
+                                  prev.map((x) => (x.id === item.id ? { ...x, postText: val } : x))
+                                );
+                              }}
+                              placeholder="Vế câu sau ô trống..."
+                              className="md:col-span-5 px-3 py-1.5 rounded-lg bg-surface-container-lowest text-on-surface font-body-sm text-body-sm"
+                            />
                           </div>
                         </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
-                          <input
-                            type="text"
-                            value={item.preText}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setFillBlankItems((prev) =>
-                                prev.map((x) => (x.id === item.id ? { ...x, preText: val } : x))
-                              );
-                            }}
-                            placeholder="Vế câu trước ô trống..."
-                            className="md:col-span-4 px-3 py-1.5 rounded-lg bg-surface-container-lowest text-on-surface font-body-sm text-body-sm"
-                          />
-                          <input
-                            type="text"
-                            value={item.correctAnswer}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setFillBlankItems((prev) =>
-                                prev.map((x) =>
-                                  x.id === item.id ? { ...x, correctAnswer: val } : x
-                                )
-                              );
-                            }}
-                            placeholder="Từ cần điền (Đáp án chuẩn)"
-                            className="md:col-span-3 px-3 py-1.5 rounded-lg bg-primary-fixed/40 text-primary font-bold font-body-sm text-body-sm border border-primary/40"
-                          />
-                          <input
-                            type="text"
-                            value={item.postText}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setFillBlankItems((prev) =>
-                                prev.map((x) => (x.id === item.id ? { ...x, postText: val } : x))
-                              );
-                            }}
-                            placeholder="Vế câu sau ô trống..."
-                            className="md:col-span-5 px-3 py-1.5 rounded-lg bg-surface-container-lowest text-on-surface font-body-sm text-body-sm"
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Add 1 Fill-in-the-blank Question */}
-                  <div className="p-4 rounded-xl bg-surface-container-low border border-secondary/30 flex flex-col gap-2">
-                    <span className="font-label-md text-label-md text-secondary font-bold">
-                      + Thêm 1 câu Điền khuyết mới
-                    </span>
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
-                      <input
-                        type="text"
-                        value={newFillPreText}
-                        onChange={(e) => setNewFillPreText(e.target.value)}
-                        placeholder="Vế câu trước [Ô trống] (VD: Mọi dữ liệu đều cần...)"
-                        className="md:col-span-4 px-3 py-2 rounded-lg bg-surface-container-lowest text-on-surface font-body-sm text-body-sm"
-                      />
-                      <input
-                        type="text"
-                        value={newFillAnswer}
-                        onChange={(e) => setNewFillAnswer(e.target.value)}
-                        placeholder="Đáp án từ cần điền (VD: vật mang tin)"
-                        className="md:col-span-3 px-3 py-2 rounded-lg bg-surface-container-lowest text-primary font-bold font-body-sm text-body-sm"
-                      />
-                      <input
-                        type="text"
-                        value={newFillPostText}
-                        onChange={(e) => setNewFillPostText(e.target.value)}
-                        placeholder="Vế câu sau [Ô trống] (VD: để lưu trữ và truyền đi.)"
-                        className="md:col-span-3 px-3 py-2 rounded-lg bg-surface-container-lowest text-on-surface font-body-sm text-body-sm"
-                      />
-                      <div className="md:col-span-2 flex items-center gap-1 bg-surface-container-lowest px-2.5 py-1.5 rounded-lg">
-                        <span className="text-xs text-on-surface-variant font-bold">Điểm:</span>
-                        <input
-                          type="number"
-                          step="0.25"
-                          min="0.25"
-                          max="10"
-                          value={newFillPoints}
-                          onChange={(e) => setNewFillPoints(Number(e.target.value) || 1.0)}
-                          className="w-full text-center font-bold text-primary text-xs focus:outline-none"
-                        />
-                        <span className="text-xs font-bold text-primary">đ</span>
-                      </div>
+                      ))}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!newFillAnswer.trim()) return;
-                        const nextChar = String.fromCharCode(97 + fillBlankItems.length);
-                        setFillBlankItems((prev) => [
-                          ...prev,
-                          {
-                            id: `fb-${Date.now()}`,
-                            label: `${nextChar})`,
-                            preText: newFillPreText.trim(),
-                            postText: newFillPostText.trim(),
-                            correctAnswer: newFillAnswer.trim(),
-                            points: newFillPoints,
-                          },
-                        ]);
-                        setNewFillPreText('');
-                        setNewFillPostText('');
-                        setNewFillAnswer('');
-                        onShowToast(`Đã thêm 1 câu Điền khuyết mới (${newFillPoints}đ)!`);
-                      }}
-                      className="self-start px-4 py-1.5 rounded-full bg-secondary text-on-secondary font-label-sm text-label-sm font-bold cursor-pointer"
-                    >
-                      + Thêm câu Điền khuyết
-                    </button>
-                  </div>
+                  )}
                 </div>
               )}
 
@@ -3340,124 +3397,79 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     </span>
                   </div>
 
-                  <div className="flex flex-col gap-2.5">
-                    {matchingPairs.map((pair, idx) => (
-                      <div
-                        key={pair.id}
-                        className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center bg-surface-container-low p-3 rounded-xl"
-                      >
-                        <input
-                          type="text"
-                          value={pair.left}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setMatchingPairs((prev) =>
-                              prev.map((p) => (p.id === pair.id ? { ...p, left: val } : p))
-                            );
-                          }}
-                          className="md:col-span-4 p-2.5 rounded-lg bg-secondary-fixed/50 font-headline-sm text-headline-sm text-on-surface"
-                          placeholder={`Cột A${idx + 1}`}
-                        />
-                        <div className="md:col-span-1 flex justify-center text-secondary font-bold">
-                          ⟷
-                        </div>
-                        <input
-                          type="text"
-                          value={pair.right}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setMatchingPairs((prev) =>
-                              prev.map((p) => (p.id === pair.id ? { ...p, right: val } : p))
-                            );
-                          }}
-                          className="md:col-span-4 p-2.5 rounded-lg bg-primary-fixed/40 font-body-sm text-body-sm text-on-surface"
-                          placeholder={`Cột B${idx + 1}`}
-                        />
-                        <div className="md:col-span-3 flex items-center justify-end gap-2">
-                          <label className="text-xs font-bold text-on-surface-variant flex items-center gap-1">
-                            <span>Điểm:</span>
-                            <input
-                              type="number"
-                              step="0.25"
-                              min="0.25"
-                              max="10"
-                              value={matchingPointsMap[pair.id] ?? 1.0}
-                              onChange={(e) =>
-                                setMatchingPointsMap((prev) => ({
-                                  ...prev,
-                                  [pair.id]: Number(e.target.value) || 1.0,
-                                }))
-                              }
-                              className="w-14 px-1.5 py-1 rounded bg-surface-container-lowest text-primary font-bold text-xs text-center border border-outline-variant/40"
-                            />
-                            <span>đ</span>
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setMatchingPairs((prev) => prev.filter((p) => p.id !== pair.id))
-                            }
-                            className="text-error hover:underline font-label-sm text-label-sm cursor-pointer"
-                          >
-                            Xóa
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Add New Matching Pair with Points */}
-                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-1">
-                    <input
-                      type="text"
-                      value={newMatchLeft}
-                      onChange={(e) => setNewMatchLeft(e.target.value)}
-                      placeholder="Cột A: Khái niệm / Thiết bị..."
-                      className="sm:col-span-4 px-3.5 py-2 rounded-full bg-surface-container-low text-on-surface font-body-sm text-body-sm"
-                    />
-                    <input
-                      type="text"
-                      value={newMatchRight}
-                      onChange={(e) => setNewMatchRight(e.target.value)}
-                      placeholder="Cột B: Ý nghĩa / Định nghĩa tương ứng..."
-                      className="sm:col-span-4 px-3.5 py-2 rounded-full bg-surface-container-low text-on-surface font-body-sm text-body-sm"
-                    />
-                    <div className="sm:col-span-2 flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-low">
-                      <span className="text-xs text-on-surface-variant font-bold">Điểm:</span>
-                      <input
-                        type="number"
-                        step="0.25"
-                        min="0.25"
-                        max="10"
-                        value={newMatchPoints}
-                        onChange={(e) => setNewMatchPoints(Number(e.target.value) || 1.0)}
-                        className="w-full text-center font-bold text-primary text-xs focus:outline-none"
-                      />
-                      <span className="text-xs font-bold text-primary">đ</span>
+                  {matchingPairs.length === 0 ? (
+                    <div className="p-8 text-center bg-surface-container-low rounded-xl border border-dashed border-outline-variant/40 flex flex-col items-center justify-center">
+                      <span className="material-symbols-outlined text-4xl mb-1 text-outline">hourglass_empty</span>
+                      <p className="font-bold text-sm text-on-surface">Trống dữ liệu Nối cột</p>
+                      <p className="text-xs text-on-surface-variant mt-0.5">Tiết học này chưa có dữ liệu từ tệp nạp/CSDL.</p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!newMatchLeft.trim() || !newMatchRight.trim()) return;
-                        const id = `mp-${Date.now()}`;
-                        setMatchingPairs((prev) => [
-                          ...prev,
-                          { id, left: newMatchLeft.trim(), right: newMatchRight.trim() },
-                        ]);
-                        setMatchingPointsMap((prev) => ({
-                          ...prev,
-                          [id]: newMatchPoints,
-                        }));
-                        setStudioConnectedPairs((prev) => [...prev, id]);
-                        setNewMatchLeft('');
-                        setNewMatchRight('');
-                        onShowToast(`Đã thêm cặp nối cột mới (${newMatchPoints}đ)!`);
-                      }}
-                      className="sm:col-span-2 px-4 py-2 rounded-full bg-secondary text-on-secondary font-label-sm text-label-sm font-bold cursor-pointer"
-                    >
-                      + Thêm cặp nối
-                    </button>
-                  </div>
+                  ) : (
+                    <div className="flex flex-col gap-2.5">
+                      {matchingPairs.map((pair, idx) => (
+                        <div
+                          key={pair.id}
+                          className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center bg-surface-container-low p-3 rounded-xl"
+                        >
+                          <input
+                            type="text"
+                            value={pair.left}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setMatchingPairs((prev) =>
+                                prev.map((p) => (p.id === pair.id ? { ...p, left: val } : p))
+                              );
+                            }}
+                            className="md:col-span-4 p-2.5 rounded-lg bg-secondary-fixed/50 font-headline-sm text-headline-sm text-on-surface"
+                            placeholder={`Cột A${idx + 1}`}
+                          />
+                          <div className="md:col-span-1 flex justify-center text-secondary font-bold">
+                            ⟷
+                          </div>
+                          <input
+                            type="text"
+                            value={pair.right}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setMatchingPairs((prev) =>
+                                prev.map((p) => (p.id === pair.id ? { ...p, right: val } : p))
+                              );
+                            }}
+                            className="md:col-span-4 p-2.5 rounded-lg bg-primary-fixed/40 font-body-sm text-body-sm text-on-surface"
+                            placeholder={`Cột B${idx + 1}`}
+                          />
+                          <div className="md:col-span-3 flex items-center justify-end gap-2">
+                            <label className="text-xs font-bold text-on-surface-variant flex items-center gap-1">
+                              <span>Điểm:</span>
+                              <input
+                                type="number"
+                                step="0.25"
+                                min="0.25"
+                                max="10"
+                                value={matchingPointsMap[pair.id] ?? 1.0}
+                                onChange={(e) =>
+                                  setMatchingPointsMap((prev) => ({
+                                    ...prev,
+                                    [pair.id]: Number(e.target.value) || 1.0,
+                                  }))
+                                }
+                                className="w-14 px-1.5 py-1 rounded bg-surface-container-lowest text-primary font-bold text-xs text-center border border-outline-variant/40"
+                              />
+                              <span>đ</span>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setMatchingPairs((prev) => prev.filter((p) => p.id !== pair.id))
+                              }
+                              className="text-error hover:underline font-label-sm text-label-sm cursor-pointer"
+                            >
+                              Xóa
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -3476,23 +3488,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const rawWs = getDefaultWorksheetForLesson(selectedNotebookGrade, selectedNotebookPeriod);
-                          if (rawWs.stage2?.shortAnswerPrompt) {
-                            setShortAnswerPrompt(rawWs.stage2.shortAnswerPrompt);
-                          }
-                          if (rawWs.stage2?.shortAnswerQuestions?.length) {
-                            setShortAnswerQuestions(rawWs.stage2.shortAnswerQuestions);
-                          }
-                          onShowToast(`Đã đồng bộ Trả lời ngắn Tiết ${selectedNotebookPeriod} Khối ${selectedNotebookGrade}!`);
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-primary/15 hover:bg-primary/25 text-primary font-label-sm text-label-sm font-bold flex items-center gap-1 cursor-pointer transition-all border border-primary/30"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">restart_alt</span>
-                        <span>Đồng bộ gốc</span>
-                      </button>
                       <span className="px-3 py-1 rounded-full bg-tertiary-fixed text-on-tertiary-fixed font-label-sm text-label-sm font-bold">
                         Tổng:{' '}
                         {shortAnswerQuestions
@@ -3518,161 +3513,168 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   </div>
 
                   {/* Danh sách các câu hỏi trả lời ngắn */}
-                  <div className="flex flex-col gap-3">
-                    {shortAnswerQuestions.map((sq, idx) => (
-                      <div
-                        key={sq.id}
-                        className="p-4 rounded-xl bg-surface-container-low flex flex-col gap-2 border border-outline-variant/30"
-                      >
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <div className="flex items-center gap-2 flex-1">
-                            <span className="w-6 h-6 rounded-full bg-primary text-on-primary text-xs font-bold flex items-center justify-center">
-                              {idx + 1}
-                            </span>
+                  {shortAnswerQuestions.length === 0 ? (
+                    <div className="p-8 text-center bg-surface-container-low rounded-xl border border-dashed border-outline-variant/40 flex flex-col items-center justify-center">
+                      <span className="material-symbols-outlined text-4xl mb-1 text-outline">hourglass_empty</span>
+                      <p className="font-bold text-sm text-on-surface">Trống dữ liệu Trả lời ngắn</p>
+                      <p className="text-xs text-on-surface-variant mt-0.5">Tiết học này chưa có dữ liệu từ tệp nạp/CSDL.</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {shortAnswerQuestions.map((sq, idx) => (
+                        <div
+                          key={sq.id}
+                          className="p-4 rounded-xl bg-surface-container-low flex flex-col gap-2 border border-outline-variant/30"
+                        >
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 flex-1">
+                              <span className="w-6 h-6 rounded-full bg-primary text-on-primary text-xs font-bold flex items-center justify-center">
+                                {idx + 1}
+                              </span>
+                              <input
+                                type="text"
+                                value={sq.label}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setShortAnswerQuestions((prev) =>
+                                    prev.map((item) =>
+                                      item.id === sq.id ? { ...item, label: val } : item
+                                    )
+                                  );
+                                }}
+                                className="px-3 py-1 rounded-md bg-surface-container-lowest text-primary font-headline-sm text-headline-sm font-bold"
+                                placeholder="Nhãn ý hỏi (VD: 1. Dữ liệu (Em thấy/nghe gì?))"
+                              />
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs font-bold text-on-surface-variant flex items-center gap-1">
+                                <span>Điểm câu này:</span>
+                                <input
+                                  type="number"
+                                  step="0.25"
+                                  min="0.25"
+                                  max="10"
+                                  value={sq.points}
+                                  onChange={(e) => {
+                                    const pts = Number(e.target.value) || 1.0;
+                                    setShortAnswerQuestions((prev) =>
+                                      prev.map((item) =>
+                                        item.id === sq.id ? { ...item, points: pts } : item
+                                      )
+                                    );
+                                  }}
+                                  className="w-16 px-2 py-1 rounded bg-surface-container-lowest text-primary font-bold text-xs text-center border border-outline-variant/40"
+                                />
+                                <span>đ</span>
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setShortAnswerQuestions((prev) =>
+                                    prev.filter((item) => item.id !== sq.id)
+                                  )
+                                }
+                                className="text-error text-xs font-bold hover:underline cursor-pointer"
+                              >
+                                Xóa câu
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                             <input
                               type="text"
-                              value={sq.label}
+                              value={sq.question}
                               onChange={(e) => {
                                 const val = e.target.value;
                                 setShortAnswerQuestions((prev) =>
                                   prev.map((item) =>
-                                    item.id === sq.id ? { ...item, label: val } : item
+                                    item.id === sq.id ? { ...item, question: val } : item
                                   )
                                 );
                               }}
-                              className="px-3 py-1 rounded-md bg-surface-container-lowest text-primary font-headline-sm text-headline-sm font-bold"
-                              placeholder="Nhãn ý hỏi (VD: 1. Dữ liệu (Em thấy/nghe gì?))"
+                              placeholder="Câu hỏi gợi mở cho học sinh nhập..."
+                              className="px-3 py-2 rounded-lg bg-surface-container-lowest text-on-surface font-body-sm text-body-sm"
+                            />
+                            <input
+                              type="text"
+                              value={sq.sampleAnswer}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setShortAnswerQuestions((prev) =>
+                                  prev.map((item) =>
+                                    item.id === sq.id ? { ...item, sampleAnswer: val } : item
+                                  )
+                                );
+                              }}
+                              placeholder="Đáp án mẫu / Từ khóa đối chiếu..."
+                              className="px-3 py-2 rounded-lg bg-tertiary-fixed/30 text-on-surface font-body-sm text-body-sm border border-tertiary/30"
                             />
                           </div>
-
-                          <div className="flex items-center gap-2">
-                            <label className="text-xs font-bold text-on-surface-variant flex items-center gap-1">
-                              <span>Điểm câu này:</span>
-                              <input
-                                type="number"
-                                step="0.25"
-                                min="0.25"
-                                max="10"
-                                value={sq.points}
-                                onChange={(e) => {
-                                  const pts = Number(e.target.value) || 1.0;
-                                  setShortAnswerQuestions((prev) =>
-                                    prev.map((item) =>
-                                      item.id === sq.id ? { ...item, points: pts } : item
-                                    )
-                                  );
-                                }}
-                                className="w-16 px-2 py-1 rounded bg-surface-container-lowest text-primary font-bold text-xs text-center border border-outline-variant/40"
-                              />
-                              <span>đ</span>
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setShortAnswerQuestions((prev) =>
-                                  prev.filter((item) => item.id !== sq.id)
-                                )
-                              }
-                              className="text-error text-xs font-bold hover:underline cursor-pointer"
-                            >
-                              Xóa câu
-                            </button>
-                          </div>
                         </div>
+                      ))}
+                    </div>
+                  )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          <input
-                            type="text"
-                            value={sq.question}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setShortAnswerQuestions((prev) =>
-                                prev.map((item) =>
-                                  item.id === sq.id ? { ...item, question: val } : item
-                                )
-                              );
-                            }}
-                            placeholder="Câu hỏi gợi mở cho học sinh nhập..."
-                            className="px-3 py-2 rounded-lg bg-surface-container-lowest text-on-surface font-body-sm text-body-sm"
-                          />
-                          <input
-                            type="text"
-                            value={sq.sampleAnswer}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setShortAnswerQuestions((prev) =>
-                                prev.map((item) =>
-                                  item.id === sq.id ? { ...item, sampleAnswer: val } : item
-                                )
-                              );
-                            }}
-                            placeholder="Đáp án mẫu / Từ khóa đối chiếu..."
-                            className="px-3 py-2 rounded-lg bg-tertiary-fixed/30 text-on-surface font-body-sm text-body-sm border border-tertiary/30"
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Add 1 Short Answer Question */}
-                  <div className="p-4 rounded-xl bg-surface-container-low border border-primary/30 flex flex-col gap-2">
-                    <span className="font-label-md text-label-md text-primary font-bold">
-                      + Thêm 1 câu hỏi trả lời ngắn mới
+                  {/* Quick Add New Short Answer Question */}
+                  <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30 flex flex-col gap-2">
+                    <span className="text-xs font-bold text-primary">
+                      + Thêm câu hỏi Trả lời ngắn mới:
                     </span>
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
                       <input
                         type="text"
                         value={newShortLabel}
                         onChange={(e) => setNewShortLabel(e.target.value)}
-                        placeholder="Tiêu đề câu hỏi ngắn (VD: 4. Hành động của em là gì?)"
-                        className="md:col-span-5 px-3 py-2 rounded-lg bg-surface-container-lowest text-on-surface font-body-sm text-body-sm"
+                        placeholder="Nhãn ý hỏi (VD: Câu 4.4:)"
+                        className="md:col-span-2 px-3 py-1.5 rounded-lg bg-surface-container-lowest text-xs font-bold text-primary border border-outline-variant/30"
+                      />
+                      <input
+                        type="text"
+                        value={newShortQuestion}
+                        onChange={(e) => setNewShortQuestion(e.target.value)}
+                        placeholder="Nội dung câu hỏi trả lời ngắn..."
+                        className="md:col-span-4 px-3 py-1.5 rounded-lg bg-surface-container-lowest text-xs text-on-surface border border-outline-variant/30"
                       />
                       <input
                         type="text"
                         value={newShortSampleAnswer}
                         onChange={(e) => setNewShortSampleAnswer(e.target.value)}
-                        placeholder="Đáp án mẫu / Gợi ý trả lời ngắn..."
-                        className="md:col-span-5 px-3 py-2 rounded-lg bg-surface-container-lowest text-on-surface font-body-sm text-body-sm"
+                        placeholder="Đáp án gợi ý / từ khóa chấm điểm..."
+                        className="md:col-span-4 px-3 py-1.5 rounded-lg bg-surface-container-lowest text-xs text-on-surface border border-tertiary/30"
                       />
-                      <div className="md:col-span-2 flex items-center gap-1 bg-surface-container-lowest px-2.5 py-1.5 rounded-lg">
-                        <span className="text-xs text-on-surface-variant font-bold">Điểm:</span>
-                        <input
-                          type="number"
-                          step="0.25"
-                          min="0.25"
-                          max="10"
-                          value={newShortPoints}
-                          onChange={(e) => setNewShortPoints(Number(e.target.value) || 1.0)}
-                          className="w-full text-center font-bold text-primary text-xs focus:outline-none"
-                        />
-                        <span className="text-xs font-bold text-primary">đ</span>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!newShortQuestion.trim()) {
+                            onShowToast('Vui lòng nhập nội dung câu hỏi trả lời ngắn.');
+                            return;
+                          }
+                          const nextIdx = shortAnswerQuestions.length + 1;
+                          setShortAnswerQuestions((prev) => [
+                            ...prev,
+                            {
+                              id: `sa-custom-${Date.now()}`,
+                              label: newShortLabel.trim() || `Câu 4.${nextIdx}:`,
+                              question: newShortQuestion.trim(),
+                              placeholder: 'Nhập câu trả lời ngắn của em...',
+                              sampleAnswer:
+                                newShortSampleAnswer.trim() ||
+                                'Trả lời đúng trọng tâm kiến thức bài học.',
+                              points: newShortPoints || 0.3,
+                            },
+                          ]);
+                          setNewShortLabel('');
+                          setNewShortQuestion('');
+                          setNewShortSampleAnswer('');
+                          onShowToast('Đã thêm câu hỏi Trả lời ngắn! Nhấn "Lưu vào Database" để đồng bộ.');
+                        }}
+                        className="md:col-span-2 px-3 py-1.5 rounded-full bg-primary text-on-primary text-xs font-bold cursor-pointer hover:opacity-95"
+                      >
+                        + Thêm câu
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!newShortLabel.trim()) return;
-                        setShortAnswerQuestions((prev) => [
-                          ...prev,
-                          {
-                            id: `sa-${Date.now()}`,
-                            label: newShortLabel.trim(),
-                            question: newShortLabel.trim(),
-                            placeholder: 'Nhập câu trả lời ngắn của em...',
-                            sampleAnswer:
-                              newShortSampleAnswer.trim() ||
-                              'Học sinh nêu ví dụ thực tế đúng chuẩn kiến thức.',
-                            points: newShortPoints,
-                          },
-                        ]);
-                        setNewShortLabel('');
-                        setNewShortSampleAnswer('');
-                        onShowToast(`Đã thêm 1 câu hỏi trả lời ngắn (${newShortPoints}đ)!`);
-                      }}
-                      className="self-start px-4 py-1.5 rounded-full bg-primary text-on-primary font-label-sm text-label-sm font-bold cursor-pointer"
-                    >
-                      + Thêm câu hỏi trả lời ngắn
-                    </button>
                   </div>
                 </div>
               )}
@@ -3755,195 +3757,155 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                         </span>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const newQ: MinigameQuestionItem = {
-                              id: `q-25s-${Date.now()}`,
-                              order: questions.length + 1,
-                              question: `Câu ${questions.length + 1}: [Nhập nội dung câu hỏi trắc nghiệm 25s mới cho Tiết ${selectedNotebookPeriod}]`,
-                              timeLimitSec: 25,
-                              status: 'Đã duyệt',
-                              points: 0.5,
-                              options: [
-                                {
-                                  letter: 'A',
-                                  text: 'Phương án A (Đáp án đúng)',
-                                  isCorrect: true,
-                                  explanation: 'Giải thích đáp án đúng theo SGK Tin học.',
-                                },
-                                {
-                                  letter: 'B',
-                                  text: 'Phương án B',
-                                  isCorrect: false,
-                                  explanation: 'Chưa chính xác.',
-                                },
-                                {
-                                  letter: 'C',
-                                  text: 'Phương án C',
-                                  isCorrect: false,
-                                  explanation: 'Chưa chính xác.',
-                                },
-                                {
-                                  letter: 'D',
-                                  text: 'Phương án D',
-                                  isCorrect: false,
-                                  explanation: 'Chưa chính xác.',
-                                },
-                              ],
-                            };
-                            setQuestions((prev) => [...prev, newQ]);
-                            setEditingQuestionIdx(questions.length);
-                            onShowToast('Đã thêm 1 câu hỏi trắc nghiệm 25s mới (0.5đ)!');
-                          }}
-                          className="px-3.5 py-1.5 rounded-full bg-primary text-on-primary font-label-sm text-label-sm cursor-pointer"
-                        >
-                          + Thêm 1 câu hỏi
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isGeneratingAI}
-                          onClick={handleGenerateQuestionsWithAI}
-                          className="px-4 py-1.5 rounded-full bg-secondary-fixed text-on-secondary-fixed font-label-sm text-label-sm cursor-pointer"
-                        >
-                          {isGeneratingAI ? 'Đang sinh câu hỏi...' : '✨ AI Tạo thêm câu hỏi'}
-                        </button>
+                        <span className="px-3 py-1 rounded-full bg-tertiary-fixed text-on-tertiary-fixed font-label-sm text-label-sm font-bold">
+                          Tổng: {questions.reduce((acc, q) => acc + (q.points ?? 0.5), 0).toFixed(1)} / 3.0 Điểm
+                        </span>
                       </div>
                     </div>
 
-                    {/* Active question header with Points & Delete */}
-                    <div className="flex items-center justify-between flex-wrap gap-2 p-3 rounded-xl bg-surface-container-low border border-outline-variant/20">
-                      <span className="font-label-md text-label-md text-primary font-bold">
-                        Đang chỉnh sửa: Câu {editingQuestionIdx + 1} / {questions.length} (Thời gian: 25 giây)
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <label className="font-label-sm text-label-sm text-on-surface-variant font-bold">
-                          Điểm câu này:
-                        </label>
-                        <input
-                          type="number"
-                          step="0.25"
-                          min="0.25"
-                          max="10"
-                          value={activeQuestion.points ?? 0.5}
-                          onChange={(e) => {
-                            const val = Math.max(0.25, Number(e.target.value) || 0.5);
-                            setQuestions((prev) =>
-                              prev.map((q, idx) =>
-                                idx === editingQuestionIdx ? { ...q, points: val } : q
-                              )
-                            );
-                          }}
-                          className="w-20 px-2.5 py-1 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-center font-headline-sm text-primary font-bold"
-                        />
-                        <span className="text-xs font-bold text-on-surface-variant">điểm</span>
-                        {questions.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setQuestions((prev) => prev.filter((_, idx) => idx !== editingQuestionIdx));
-                              setEditingQuestionIdx(0);
-                              onShowToast('Đã xóa câu hỏi khỏi Đấu trường 25s!');
-                            }}
-                            className="px-3 py-1 rounded-full bg-error/10 text-error font-label-sm text-label-sm cursor-pointer hover:bg-error/20"
-                          >
-                            Xóa câu này
-                          </button>
-                        )}
+                    {questions.length === 0 ? (
+                      <div className="p-8 text-center bg-surface-container-low rounded-xl border border-dashed border-outline-variant/40 flex flex-col items-center justify-center">
+                        <span className="material-symbols-outlined text-4xl mb-1 text-outline">hourglass_empty</span>
+                        <p className="font-bold text-sm text-on-surface">Trống dữ liệu Đấu trường Trắc nghiệm</p>
+                        <p className="text-xs text-on-surface-variant mt-0.5">Tiết học này chưa có câu hỏi từ tệp nạp/CSDL.</p>
                       </div>
-                    </div>
-
-                    <textarea
-                      rows={2}
-                      value={activeQuestion.question}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setQuestions((prev) =>
-                          prev.map((q, idx) =>
-                            idx === editingQuestionIdx ? { ...q, question: val } : q
-                          )
-                        );
-                      }}
-                      className="w-full p-3 rounded-lg bg-surface-container-low font-headline-sm text-headline-sm text-on-surface"
-                    />
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {activeQuestion.options.map((opt, optIdx) => (
-                        <div
-                          key={opt.letter}
-                          className={`p-3 rounded-xl border ${
-                            opt.isCorrect
-                              ? 'bg-tertiary-fixed/25 border-tertiary'
-                              : 'bg-surface-container-low border-transparent'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <button
-                              type="button"
-                              onClick={() => {
+                    ) : (
+                      <>
+                        {/* Active question header with Points & Delete */}
+                        <div className="flex items-center justify-between flex-wrap gap-2 p-3 rounded-xl bg-surface-container-low border border-outline-variant/20">
+                          <span className="font-label-md text-label-md text-primary font-bold">
+                            Đang chỉnh sửa: Câu {editingQuestionIdx + 1} / {questions.length} (Thời gian: 25 giây)
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <label className="font-label-sm text-label-sm text-on-surface-variant font-bold">
+                              Điểm câu này:
+                            </label>
+                            <input
+                              type="number"
+                              step="0.25"
+                              min="0.25"
+                              max="10"
+                              value={activeQuestion.points ?? 0.5}
+                              onChange={(e) => {
+                                const val = Math.max(0.25, Number(e.target.value) || 0.5);
                                 setQuestions((prev) =>
                                   prev.map((q, idx) =>
-                                    idx === editingQuestionIdx
-                                      ? {
-                                          ...q,
-                                          options: q.options.map((o, oI) => ({
-                                            ...o,
-                                            isCorrect: oI === optIdx,
-                                          })),
-                                        }
-                                      : q
+                                    idx === editingQuestionIdx ? { ...q, points: val } : q
                                   )
                                 );
                               }}
-                              className={`px-2.5 py-0.5 rounded-full font-label-sm text-label-sm cursor-pointer ${
+                              className="w-20 px-2.5 py-1 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-center font-headline-sm text-primary font-bold"
+                            />
+                            <span className="text-xs font-bold text-on-surface-variant">điểm</span>
+                            {questions.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setQuestions((prev) => prev.filter((_, idx) => idx !== editingQuestionIdx));
+                                  setEditingQuestionIdx(0);
+                                  onShowToast('Đã xóa câu hỏi khỏi Đấu trường 25s!');
+                                }}
+                                className="px-3 py-1 rounded-full bg-error/10 text-error font-label-sm text-label-sm cursor-pointer hover:bg-error/20"
+                              >
+                                Xóa câu này
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <textarea
+                          rows={2}
+                          value={activeQuestion.question}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setQuestions((prev) =>
+                              prev.map((q, idx) =>
+                                idx === editingQuestionIdx ? { ...q, question: val } : q
+                              )
+                            );
+                          }}
+                          className="w-full p-3 rounded-lg bg-surface-container-low font-headline-sm text-headline-sm text-on-surface"
+                        />
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {activeQuestion.options.map((opt, optIdx) => (
+                            <div
+                              key={opt.letter}
+                              className={`p-3 rounded-xl border ${
                                 opt.isCorrect
-                                  ? 'bg-tertiary text-on-tertiary'
-                                  : 'bg-surface-container-lowest text-on-surface-variant'
+                                  ? 'bg-tertiary-fixed/25 border-tertiary'
+                                  : 'bg-surface-container-low border-transparent'
                               }`}
                             >
-                              Phương án {opt.letter} {opt.isCorrect ? '✓ Đúng' : ''}
-                            </button>
-                          </div>
-                          <input
-                            type="text"
-                            value={opt.text}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setQuestions((prev) =>
-                                prev.map((q, idx) =>
-                                  idx === editingQuestionIdx
-                                    ? {
-                                        ...q,
-                                        options: q.options.map((o, oI) =>
-                                          oI === optIdx ? { ...o, text: val } : o
-                                        ),
-                                      }
-                                    : q
-                                )
-                              );
-                            }}
-                            className="w-full bg-surface-container-lowest px-3 py-1.5 rounded-lg font-body-sm text-body-sm text-on-surface"
-                          />
+                              <div className="flex items-center justify-between mb-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setQuestions((prev) =>
+                                      prev.map((q, idx) =>
+                                        idx === editingQuestionIdx
+                                          ? {
+                                              ...q,
+                                              options: q.options.map((o, oI) => ({
+                                                ...o,
+                                                isCorrect: oI === optIdx,
+                                              })),
+                                            }
+                                          : q
+                                      )
+                                    );
+                                  }}
+                                  className={`px-2.5 py-0.5 rounded-full font-label-sm text-label-sm cursor-pointer ${
+                                    opt.isCorrect
+                                      ? 'bg-tertiary text-on-tertiary'
+                                      : 'bg-surface-container-lowest text-on-surface-variant'
+                                  }`}
+                                >
+                                  Phương án {opt.letter} {opt.isCorrect ? '✓ Đúng' : ''}
+                                </button>
+                              </div>
+                              <input
+                                type="text"
+                                value={opt.text}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setQuestions((prev) =>
+                                    prev.map((q, idx) =>
+                                      idx === editingQuestionIdx
+                                        ? {
+                                            ...q,
+                                            options: q.options.map((o, oI) =>
+                                              oI === optIdx ? { ...o, text: val } : o
+                                            ),
+                                          }
+                                        : q
+                                    )
+                                  );
+                                }}
+                                className="w-full bg-surface-container-lowest px-3 py-1.5 rounded-lg font-body-sm text-body-sm text-on-surface"
+                              />
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
 
-                    <div className="flex flex-wrap gap-1.5 pt-2">
-                      {questions.map((q, idx) => (
-                        <button
-                          key={q.id}
-                          type="button"
-                          onClick={() => setEditingQuestionIdx(idx)}
-                          className={`px-3 py-1 rounded-full font-label-sm text-label-sm cursor-pointer ${
-                            editingQuestionIdx === idx
-                              ? 'bg-primary text-on-primary'
-                              : 'bg-surface-container-low text-on-surface'
-                          }`}
-                        >
-                          Câu {idx + 1} ({(q.points ?? 0.5).toFixed(1)}đ)
-                        </button>
-                      ))}
-                    </div>
+                        <div className="flex flex-wrap gap-1.5 pt-2">
+                          {questions.map((q, idx) => (
+                            <button
+                              key={q.id}
+                              type="button"
+                              onClick={() => setEditingQuestionIdx(idx)}
+                              className={`px-3 py-1 rounded-full font-label-sm text-label-sm cursor-pointer ${
+                                editingQuestionIdx === idx
+                                  ? 'bg-primary text-on-primary'
+                                  : 'bg-surface-container-low text-on-surface'
+                              }`}
+                            >
+                              Câu {idx + 1} ({(q.points ?? 0.5).toFixed(1)}đ)
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -4181,31 +4143,20 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       Vận dụng
                     </h2>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const rawWs = getDefaultWorksheetForLesson(
-                        selectedNotebookGrade,
-                        selectedNotebookPeriod
-                      );
-                      if (rawWs?.stage4) {
-                        setDeepAnalysisTask(rawWs.stage4.deepAnalysis);
-                        setPracticalTask(rawWs.stage4.practicalTask);
-                        setExtendedTask(rawWs.stage4.extendedTask);
-                        onShowToast(
-                          `Đã đồng bộ Vận dụng Khối ${selectedNotebookGrade} • Tiết ${selectedNotebookPeriod}!`
-                        );
-                      }
-                    }}
-                    className="px-3.5 py-1.5 rounded-lg bg-primary/15 hover:bg-primary/25 text-primary font-label-sm text-xs font-bold flex items-center gap-1 cursor-pointer border border-primary/30"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">restart_alt</span>
-                    <span>Đồng bộ gốc</span>
-                  </button>
+                  <span className="px-3 py-1 rounded-full bg-tertiary-fixed text-on-tertiary-fixed font-label-sm text-label-sm font-bold">
+                    Tổng: 3.0 Điểm (3 Nhiệm vụ)
+                  </span>
                 </div>
 
-                {/* 3 NHIỆM VỤ VẬN DỤNG NGUYÊN BẢN TỪ PDF GỐC */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {!deepAnalysisTask.prompt && !practicalTask.prompt && !extendedTask.prompt ? (
+                  <div className="p-8 text-center bg-surface-container-low rounded-xl border border-dashed border-outline-variant/40 flex flex-col items-center justify-center">
+                    <span className="material-symbols-outlined text-4xl mb-1 text-outline">hourglass_empty</span>
+                    <p className="font-bold text-sm text-on-surface">Trống dữ liệu Vận dụng</p>
+                    <p className="text-xs text-on-surface-variant mt-0.5">Tiết học này chưa có dữ liệu từ tệp nạp/CSDL.</p>
+                  </div>
+                ) : (
+                  /* 3 NHIỆM VỤ VẬN DỤNG NGUYÊN BẢN TỪ PDF GỐC */
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                   {/* Nhiệm vụ 1: Tự luận phân tích */}
                   <div className="p-4 rounded-xl bg-primary-fixed/20 border border-primary/30 flex flex-col gap-2.5">
                     <div className="flex items-center justify-between">
@@ -4368,6 +4319,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     />
                   </div>
                 </div>
+                )}
               </div>
             </div>
           )}
@@ -4483,59 +4435,67 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                    {classes
-                      .filter(
-                        (c) =>
-                          selectedGradeFilter === 'ALL' || c.grade === selectedGradeFilter
-                      )
-                      .map((cls) => {
-                        const count = students.filter((s) => s.classId === cls.id).length;
-                        return (
-                          <div
-                            key={cls.id}
-                            onClick={() => onChangeClass(cls.id)}
-                            className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
-                              selectedClass === cls.id
-                                ? 'bg-primary-fixed/30 border-primary shadow-xs'
-                                : 'bg-surface-container-low border-transparent hover:bg-surface-container'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-headline-sm text-headline-sm text-on-surface">
-                                {cls.name}
-                              </span>
-                              <div className="flex items-center gap-1">
-                                <span className="px-2 py-0.5 rounded-full bg-secondary-fixed text-secondary font-label-sm text-label-sm font-bold">
-                                  Khối {cls.grade}
+                  <DataBoundary
+                    data={classes.filter(
+                      (c) =>
+                        selectedGradeFilter === 'ALL' || c.grade === selectedGradeFilter
+                    )}
+                    isLoading={isLoading}
+                    loadingMessage="Đang tải danh sách lớp học từ CSDL..."
+                    emptyTitle="Chưa có lớp học nào trong khối này"
+                    emptyDescription="Sử dụng biểu mẫu bên trái để tạo lớp học mới."
+                  >
+                    {(filteredClassesList) => (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                        {filteredClassesList.map((cls) => {
+                          const count = students.filter((s) => s.classId === cls.id).length;
+                          return (
+                            <div
+                              key={cls.id}
+                              onClick={() => onChangeClass(cls.id)}
+                              className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                                selectedClass === cls.id
+                                  ? 'bg-primary-fixed/30 border-primary shadow-xs'
+                                  : 'bg-surface-container-low border-transparent hover:bg-surface-container'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-headline-sm text-headline-sm text-on-surface">
+                                  {cls.name}
                                 </span>
-                                {onDeleteClass && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (classes.length <= 1) {
-                                        onShowToast('Cần giữ lại ít nhất 1 lớp học trong hệ thống!');
-                                        return;
-                                      }
-                                      onDeleteClass(cls.id);
-                                      onShowToast(`Đã xóa thành công ${cls.name}!`);
-                                    }}
-                                    className="p-1 rounded-md text-error hover:bg-error-container/40 transition-colors"
-                                    title="Xóa lớp học này"
-                                  >
-                                    <span className="material-symbols-outlined text-[16px]">delete</span>
-                                  </button>
-                                )}
+                                <div className="flex items-center gap-1">
+                                  <span className="px-2 py-0.5 rounded-full bg-secondary-fixed text-secondary font-label-sm text-label-sm font-bold">
+                                    Khối {cls.grade}
+                                  </span>
+                                  {onDeleteClass && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (classes.length <= 1) {
+                                          onShowToast('Cần giữ lại ít nhất 1 lớp học trong hệ thống!');
+                                          return;
+                                        }
+                                        onDeleteClass(cls.id);
+                                      }}
+                                      className="p-1 rounded-md text-error hover:bg-error-container/40 transition-colors cursor-pointer"
+                                      title={`Xóa lớp học ${cls.name}`}
+                                      aria-label={`Xóa lớp học ${cls.name}`}
+                                    >
+                                      <span className="material-symbols-outlined text-[16px]">delete</span>
+                                    </button>
+                                  )}
+                                </div>
                               </div>
+                              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                                Sĩ số: <strong>{count} Học sinh</strong>
+                              </p>
                             </div>
-                            <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
-                              Sĩ số: <strong>{count || cls.studentCount} Học sinh</strong>
-                            </p>
-                          </div>
-                        );
-                      })}
-                  </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </DataBoundary>
                 </div>
               </div>
 
@@ -4685,41 +4645,182 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   </div>
                 </div>
 
-                {/* Current Active Student Accounts Table */}
-                <div className="pt-3 border-t border-outline-variant/20">
-                  <h4 className="font-headline-sm text-headline-sm text-on-surface mb-2">
-                    Danh sách Tài khoản Học sinh Đang hoạt động ({students.length} tài khoản)
-                  </h4>
-                  <div className="overflow-x-auto max-h-64">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-outline-variant/30 font-label-sm text-label-sm text-on-surface-variant">
-                          <th className="py-2 px-3">Mã HS</th>
-                          <th className="py-2 px-3">Họ và tên</th>
-                          <th className="py-2 px-3">Ngày sinh</th>
-                          <th className="py-2 px-3">Lớp</th>
-                          <th className="py-2 px-3">Tài khoản tự động</th>
-                          <th className="py-2 px-3">Mật khẩu chung</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-outline-variant/20 font-body-sm text-body-sm">
-                        {students.map((st) => (
-                          <tr key={st.id} className="hover:bg-surface-container-low">
-                            <td className="py-2 px-3 font-bold text-primary">{st.id}</td>
-                            <td className="py-2 px-3 font-bold text-on-surface">{st.name}</td>
-                            <td className="py-2 px-3 text-on-surface-variant">
-                              {st.dob || '15/05/2013'}
-                            </td>
-                            <td className="py-2 px-3">{st.classId}</td>
-                            <td className="py-2 px-3 font-mono text-secondary font-bold">
-                              {st.username || st.id}
-                            </td>
-                            <td className="py-2 px-3 font-bold text-tertiary">12345</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                {/* Current Active Student Accounts Table Grouped & Filtered by Khối / Lớp */}
+                <div className="pt-3 border-t border-outline-variant/20 flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="font-headline-sm text-headline-sm text-on-surface">
+                        Danh sách Tài khoản Học sinh theo Khối / Lớp ({students.length} tài khoản)
+                      </h4>
+                      <p className="text-xs text-on-surface-variant">
+                        Chọn Khối hoặc Lớp bên dưới để lọc nhanh hoặc xóa tài khoản học sinh theo lớp / cá nhân
+                      </p>
+                    </div>
+                    {onDeleteClassStudents && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {classes.map((cls) => {
+                          const count = students.filter((s) => s.classId === cls.id).length;
+                          if (count === 0) return null;
+                          return (
+                            <button
+                              key={cls.id}
+                              type="button"
+                              onClick={() => {
+                                onDeleteClassStudents(cls.id);
+                              }}
+                              className="px-3 py-1 rounded-full bg-error-container text-error font-label-sm text-label-sm font-bold hover:opacity-90 cursor-pointer flex items-center gap-1"
+                              aria-label={`Xóa tất cả học sinh lớp ${cls.name}`}
+                            >
+                              <span className="material-symbols-outlined text-[14px]">delete_sweep</span>
+                              <span>Xóa tất cả HS {cls.name} ({count})</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
+
+                  {/* Filter Bar by Khối & Lớp */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-surface-container-low">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs font-bold text-on-surface-variant mr-1">
+                        Lọc theo Khối:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStudentAccountGradeFilter('ALL');
+                          setStudentAccountClassFilter('ALL');
+                        }}
+                        className={`px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${
+                          studentAccountGradeFilter === 'ALL'
+                            ? 'bg-primary text-on-primary'
+                            : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container'
+                        }`}
+                      >
+                        Tất cả Khối ({students.length})
+                      </button>
+                      {[6, 7, 8, 9].map((g) => {
+                        const gradeCount = students.filter(
+                          (s) => s.grade === g || Number(s.classId?.charAt(0)) === g
+                        ).length;
+                        return (
+                          <button
+                            key={g}
+                            type="button"
+                            onClick={() => {
+                              setStudentAccountGradeFilter(g);
+                              setStudentAccountClassFilter('ALL');
+                            }}
+                            className={`px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${
+                              studentAccountGradeFilter === g
+                                ? 'bg-primary text-on-primary'
+                                : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container'
+                            }`}
+                          >
+                            Khối {g} ({gradeCount})
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs font-bold text-on-surface-variant">Lọc theo Lớp:</span>
+                      <select
+                        aria-label="Lọc tài khoản học sinh theo lớp"
+                        value={studentAccountClassFilter}
+                        onChange={(e) => setStudentAccountClassFilter(e.target.value)}
+                        className="px-3 py-1 rounded-full bg-surface-container-lowest text-on-surface text-xs font-bold border border-outline-variant/30 cursor-pointer"
+                      >
+                        <option value="ALL">Tất cả các lớp</option>
+                        {classes
+                          .filter(
+                            (c) =>
+                              studentAccountGradeFilter === 'ALL' ||
+                              c.grade === studentAccountGradeFilter
+                          )
+                          .map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name} (Khối {c.grade})
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <DataBoundary
+                    data={students.filter((st) => {
+                      const stGrade = st.grade || Number(st.classId?.charAt(0)) || 6;
+                      const matchGrade =
+                        studentAccountGradeFilter === 'ALL' ||
+                        stGrade === studentAccountGradeFilter;
+                      const matchClass =
+                        studentAccountClassFilter === 'ALL' ||
+                        st.classId === studentAccountClassFilter;
+                      return matchGrade && matchClass;
+                    })}
+                    isLoading={isLoading}
+                    loadingMessage="Đang tải danh sách tài khoản học sinh từ CSDL..."
+                    emptyTitle="Chưa có tài khoản học sinh nào trong bộ lọc này"
+                    emptyDescription="Vui lòng nạp danh sách lớp từ Excel, thêm học sinh mới bên trên hoặc chọn 'Tất cả Khối'."
+                  >
+                    {(filteredRosterStudents) => (
+                      <div className="overflow-x-auto max-h-80">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-outline-variant/30 font-label-sm text-label-sm text-on-surface-variant">
+                              <th className="py-2 px-3">Mã HS</th>
+                              <th className="py-2 px-3">Họ và tên</th>
+                              <th className="py-2 px-3">Ngày sinh</th>
+                              <th className="py-2 px-3">Khối / Lớp</th>
+                              <th className="py-2 px-3">Tài khoản tự động</th>
+                              <th className="py-2 px-3">Mật khẩu chung</th>
+                              <th className="py-2 px-3 text-right">Thao tác</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-outline-variant/20 font-body-sm text-body-sm">
+                            {filteredRosterStudents.map((st) => {
+                              const stGrade = st.grade || Number(st.classId?.charAt(0)) || 6;
+                              return (
+                                <tr key={st.id} className="hover:bg-surface-container-low">
+                                  <td className="py-2 px-3 font-bold text-primary">{st.id}</td>
+                                  <td className="py-2 px-3 font-bold text-on-surface">{st.name}</td>
+                                  <td className="py-2 px-3 text-on-surface-variant">
+                                    {st.dob || '15/05/2013'}
+                                  </td>
+                                  <td className="py-2 px-3">
+                                    <span className="px-2.5 py-0.5 rounded-full bg-secondary-fixed text-secondary font-bold text-xs">
+                                      Khối {stGrade} • {st.classId}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-3 font-mono text-secondary font-bold">
+                                    {st.username || st.id}
+                                  </td>
+                                  <td className="py-2 px-3 font-bold text-tertiary">12345</td>
+                                  <td className="py-2 px-3 text-right">
+                                    {onDeleteStudent && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          onDeleteStudent(st.id);
+                                        }}
+                                        className="px-2.5 py-1 rounded-full bg-error-container/50 text-error hover:bg-error hover:text-on-error transition-colors cursor-pointer inline-flex items-center gap-1 text-xs font-bold"
+                                        title={`Xóa tài khoản học sinh ${st.name}`}
+                                        aria-label={`Xóa tài khoản học sinh ${st.name}`}
+                                      >
+                                        <span className="material-symbols-outlined text-[15px]">delete</span>
+                                        <span>Xóa</span>
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </DataBoundary>
                 </div>
               </div>
             </div>
@@ -5241,6 +5342,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               </div>
             </div>
           )}
+
         </main>
       </div>
 
@@ -5303,6 +5405,23 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         onClose={() => setShowNotebookLMPromptModal(false)}
         onShowToast={onShowToast}
         defaultGrade={selectedNotebookGrade}
+      />
+
+      {/* Question Master Inspector ListView Modal */}
+      <QuestionMasterInspectorModal
+        isOpen={showQuestionInspectorModal}
+        onClose={() => setShowQuestionInspectorModal(false)}
+        liveSession={liveSession}
+        onUpdateLiveSession={onUpdateLiveSession}
+        onShowToast={onShowToast}
+      />
+
+      {/* Supabase / PostgreSQL Database CRUD Diagnostic Modal */}
+      <DatabaseDiagnosticModal
+        isOpen={showDbDiagnosticModal}
+        onClose={() => setShowDbDiagnosticModal(false)}
+        activeClassId={selectedClass}
+        onShowToast={onShowToast}
       />
     </div>
   );
