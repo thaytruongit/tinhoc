@@ -32,9 +32,28 @@ export const SUPABASE_ANON_KEY =
 export const isSupabaseRealtimeConfigured =
   Boolean(SUPABASE_ANON_KEY) && !SUPABASE_ANON_KEY.includes('placeholder_anon_key');
 
-export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
+let clientInstance: SupabaseClient;
+
+try {
+  clientInstance = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+} catch (err) {
+  console.warn('[CloudPlay Notice] Supabase client initialized with safe fallback:', err);
+  clientInstance = {
+    channel: () => ({
+      on: function () {
+        return this;
+      },
+      subscribe: function () {
+        return this;
+      },
+    }),
+    removeChannel: () => {},
+  } as unknown as SupabaseClient;
+}
+
+export const supabase: SupabaseClient = clientInstance;

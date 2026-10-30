@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { type StudentRosterItem } from '../data/mockCurriculumData';
 import {
-  ACHIEVEMENT_BADGES,
   getNextBadgeProgress,
   triggerSynchronizedCelebration,
-  type AchievementBadgeSpec,
 } from '../utils/soundEffects';
+import { BadgeLibraryPanel } from './BadgeLibraryPanel';
 
 interface StudentMetricsDashboardProps {
   currentStudent: StudentRosterItem;
@@ -25,8 +24,6 @@ export const StudentMetricsDashboard: React.FC<StudentMetricsDashboardProps> = (
   totalGradeStudents,
   onShowToast,
 }) => {
-  const [selectedBadge, setSelectedBadge] = useState<AchievementBadgeSpec | null>(null);
-
   const {
     nextBadge,
     xpRemaining,
@@ -145,123 +142,14 @@ export const StudentMetricsDashboard: React.FC<StudentMetricsDashboardProps> = (
         </div>
       </div>
 
-      {/* 2. ACHIEVEMENT BADGES GALLERY */}
-      <div className="rounded-3xl bg-white p-6 sm:p-7 shadow-xs border border-slate-100 flex flex-col gap-5">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-          <div>
-            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-              <span className="material-symbols-outlined text-amber-500">workspace_premium</span>
-              <span>Bộ Sưu Tập Huy Hiệu Thành Tựu (Achievement Badges)</span>
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Trao cho học sinh dựa trên số sao tích lũy và tiến độ hoàn thành các tiết học (Kèm hiệu ứng âm thanh &amp; pháo hoa)
-            </p>
-          </div>
-
-          <span className="px-3.5 py-1 rounded-full bg-amber-50 text-amber-800 text-xs font-bold border border-amber-200">
-            ⭐ {currentStudent.stars} Ngôi Sao Tích Lũy
-          </span>
-        </div>
-
-        {/* Badges Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
-          {ACHIEVEMENT_BADGES.map((badge) => {
-            const isUnlocked =
-              currentStudent.xp >= badge.xpRequired || currentStudent.stars >= badge.starsRequired;
-
-            return (
-              <div
-                key={badge.id}
-                onClick={() => {
-                  if (isUnlocked) {
-                    triggerCelebration(badge.name);
-                  } else {
-                    onShowToast(
-                      `🔒 Huy hiệu chưa mở khóa. Cần đạt ${badge.xpRequired} XP hoặc ${badge.starsRequired} sao.`
-                    );
-                  }
-                  setSelectedBadge(badge);
-                }}
-                className={`p-4 rounded-2xl border transition-all flex flex-col items-center text-center gap-2.5 cursor-pointer relative ${
-                  isUnlocked
-                    ? 'bg-white hover:bg-slate-50 border-slate-200 shadow-xs hover:scale-102 ring-1 ring-amber-400/30'
-                    : 'bg-slate-50/80 border-slate-200/50 opacity-50 grayscale hover:grayscale-0'
-                }`}
-              >
-                {/* Badge Icon Circle */}
-                <div
-                  className={`w-14 h-14 rounded-2xl bg-gradient-to-tr ${badge.color} text-white flex items-center justify-center shadow-md shrink-0`}
-                >
-                  <span className="material-symbols-outlined text-[28px]">{badge.icon}</span>
-                </div>
-
-                <div className="flex flex-col min-w-0">
-                  <span className="text-xs font-bold text-slate-900 truncate">
-                    {badge.name}
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    {badge.starsRequired} Sao • {badge.xpRequired} XP
-                  </span>
-                </div>
-
-                {isUnlocked ? (
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black">
-                    ✓ Đạt được
-                  </span>
-                ) : (
-                  <span className="px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-semibold flex items-center gap-0.5">
-                    <span className="material-symbols-outlined text-[11px]">lock</span>
-                    Khóa
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Badge Detail Modal */}
-      {selectedBadge && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl border border-slate-100 flex flex-col items-center text-center gap-4 animate-in fade-in zoom-in-95">
-            <div
-              className={`w-20 h-20 rounded-3xl bg-gradient-to-tr ${selectedBadge.color} text-white flex items-center justify-center shadow-lg`}
-            >
-              <span className="material-symbols-outlined text-[40px]">{selectedBadge.icon}</span>
-            </div>
-
-            <div>
-              <h4 className="text-lg font-bold text-slate-900">{selectedBadge.name}</h4>
-              <p className="text-xs text-slate-500 mt-1">{selectedBadge.description}</p>
-            </div>
-
-            <div className="flex items-center gap-3 text-xs font-bold text-slate-700 bg-slate-50 p-3 rounded-2xl w-full justify-around">
-              <span>⭐ {selectedBadge.starsRequired} Ngôi sao</span>
-              <span>✪ {selectedBadge.xpRequired} XP</span>
-            </div>
-
-            <div className="flex gap-2 w-full">
-              <button
-                type="button"
-                onClick={() => {
-                  triggerCelebration(selectedBadge.name);
-                }}
-                className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-sm cursor-pointer flex items-center justify-center gap-1"
-              >
-                <span className="material-symbols-outlined text-[16px]">volume_up</span>
-                <span>Phát âm thanh &amp; Pháo hoa 🎆</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedBadge(null)}
-                className="py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer"
-              >
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 2. ACHIEVEMENT BADGES LIBRARY (WITH 3D FLIP CARDS) */}
+      <BadgeLibraryPanel
+        currentStudent={currentStudent}
+        onShowToast={onShowToast}
+        title="Thư Viện Huy Hiệu Thành Tựu"
+        subtitle="Hiệu ứng lật thẻ (Flip Card): Nhấp vào bất kỳ huy hiệu nào để xem chi tiết điều kiện mở khóa, số XP/sao còn thiếu và mẹo sư phạm"
+      />
     </div>
   );
 };
+

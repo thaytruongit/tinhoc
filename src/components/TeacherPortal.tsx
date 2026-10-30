@@ -38,6 +38,7 @@ import { QuestionMasterInspectorModal } from './QuestionMasterInspectorModal';
 import { DataBoundary } from './DataBoundary';
 import { SlidePresenterManager } from './SlidePresenterManager';
 import { TeacherLivePresenterRoom } from './TeacherLivePresenterRoom';
+import { LectureSlideManagerModal } from './LectureSlideManagerModal';
 
 export type TeacherTab =
   | 'trang-chu'
@@ -117,6 +118,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     'ALL' | 'GK1' | 'CK1' | 'GK2' | 'CK2'
   >('ALL');
   const [isLivePresenterOpen, setIsLivePresenterOpen] = useState(false);
+  const [showLectureSlideModal, setShowLectureSlideModal] = useState(false);
 
   const gradePeriods = getPeriodsForGrade(selectedNotebookGrade);
   const selectedPeriodSpec: CurriculumPeriodSpec =
@@ -1401,6 +1403,39 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                 </button>
               );
             })}
+
+            <div className="my-2 border-t border-outline-variant/20 pt-2 flex flex-col gap-1.5">
+              <span className="px-space-sm text-[11px] font-bold uppercase tracking-wider text-on-surface-variant/80">
+                Học liệu &amp; Bài giảng
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setShowLectureSlideModal(true)}
+                className="w-full text-left flex items-center gap-space-sm px-space-md py-2.5 rounded-lg font-label-md text-label-md bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/20 font-bold transition-all cursor-pointer border border-indigo-500/25"
+              >
+                <span className="material-symbols-outlined text-[20px]">slideshow</span>
+                <span className="truncate">Nạp bài giảng (PDF, PPTX)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowBulkImportModal(true)}
+                className="w-full text-left flex items-center gap-space-sm px-space-md py-2.5 rounded-lg font-label-md text-label-md bg-blue-500/10 text-blue-700 dark:text-blue-300 hover:bg-blue-500/20 font-bold transition-all cursor-pointer border border-blue-500/25"
+              >
+                <span className="material-symbols-outlined text-[20px]">upload_file</span>
+                <span className="truncate">Nạp Word (.docx) 29 Tiết</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowBatchPrintModal(true)}
+                className="w-full text-left flex items-center gap-space-sm px-space-md py-2.5 rounded-lg font-label-md text-label-md bg-amber-500/10 text-amber-800 dark:text-amber-300 hover:bg-amber-500/20 font-bold transition-all cursor-pointer border border-amber-500/25"
+              >
+                <span className="material-symbols-outlined text-[20px]">print</span>
+                <span className="truncate">Print View 29 Phiếu</span>
+              </button>
+            </div>
           </nav>
         </div>
 
@@ -1431,56 +1466,48 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           </div>
 
           <div className="flex items-center gap-space-sm">
-
-            {/* Live Class Join QR Code & PIN Button */}
-            <button
-              type="button"
-              onClick={() => setShowQRCodeModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-primary-fixed text-primary font-label-md text-xs font-bold hover:brightness-105 transition-all shadow-xs cursor-pointer border border-primary/30"
-              title="Mở mã QR & Mã PIN tham gia lớp học trực tiếp cho học sinh quét"
+            {/* Compact Grade & Class selector in header */}
+            <select
+              value={selectedNotebookGrade}
+              onChange={(e) => {
+                const g = Number(e.target.value) as 6 | 7 | 8 | 9;
+                handleSelectGradeAndPeriod(g, 1);
+                const firstCls = classes.find((c) => c.grade === g);
+                if (firstCls) onChangeClass(firstCls.id);
+              }}
+              className="px-3 py-1.5 rounded-full bg-primary-fixed text-primary font-label-sm text-xs font-bold cursor-pointer border border-primary/20"
             >
-              <span className="material-symbols-outlined text-[17px]">qr_code_scanner</span>
-              <span className="hidden sm:inline">Mã QR Lớp Học</span>
-            </button>
+              {([6, 7, 8, 9] as const).map((g) => (
+                <option key={g} value={g}>
+                  Khối {g}
+                </option>
+              ))}
+            </select>
 
-            {/* Supabase Anti-Hibernation Keep-Alive Cron Badge */}
-            <button
-              type="button"
-              onClick={handleQuickPingSupabaseKeepAlive}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-label-md text-xs font-bold hover:bg-emerald-500/25 transition-all shadow-xs cursor-pointer border border-emerald-500/30"
-              title="Cron Job tự động giữ cho Supabase / PostgreSQL không bao giờ bị ngủ đông (Chạy mỗi 6h + GitHub Actions 12h)"
+            <select
+              value={selectedClass}
+              onChange={(e) => onChangeClass(e.target.value)}
+              className="px-3 py-1.5 rounded-full bg-secondary-fixed text-secondary font-label-sm text-xs font-bold cursor-pointer border border-secondary/20"
             >
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-              <span className="hidden xl:inline">Cron Keep-Alive Supabase 24/7</span>
-            </button>
+              {(classesForSelectedGrade.length > 0 ? classesForSelectedGrade : classes).map(
+                (cls) => (
+                  <option key={cls.id} value={cls.id}>
+                    {cls.name}
+                  </option>
+                )
+              )}
+            </select>
 
-            {/* Master Question Inspector ListView Button */}
-            <button
-              type="button"
-              onClick={() => setShowQuestionInspectorModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 font-label-md text-xs font-bold hover:bg-amber-500/25 transition-all shadow-xs cursor-pointer border border-amber-500/30"
-              title="Xem danh sách toàn bộ câu hỏi, kiểm thử dữ liệu nạp và đối chiếu trường phiếu"
-            >
-              <span className="material-symbols-outlined text-[17px]">checklist_rtl</span>
-              <span className="hidden sm:inline">ListView Câu Hỏi (Inspector)</span>
-            </button>
-
-            {/* Real-Time 29-Period Progression Counter Badge/Button */}
-            {(() => {
-              const count = (liveSession?.taughtPeriodsByClass?.[selectedClass] || []).length;
-              const pct = Math.round((count / 29) * 100);
-              return (
-                <button
-                  type="button"
-                  onClick={() => setShowProgressionTrackerModal(true)}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-primary-fixed text-primary font-label-md text-xs font-bold hover:brightness-105 transition-all shadow-xs cursor-pointer border border-primary/30"
-                  title="Mở Bộ đếm tiến trình 29 tiết học trực tiếp theo thời gian thực"
-                >
-                  <span className="material-symbols-outlined text-[17px]">insights</span>
-                  <span>Lớp {selectedClass}: {count}/29 Tiết ({pct}%)</span>
-                </button>
-              );
-            })()}
+            {liveSession?.isBroadcasting && (
+              <button
+                type="button"
+                onClick={() => setIsLivePresenterOpen(true)}
+                className="px-3.5 py-1.5 rounded-full bg-red-600 hover:bg-red-700 text-white font-label-sm text-xs font-black shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[16px]">slideshow</span>
+                <span>Phòng Live ({liveSession.activeClassId || selectedClass})</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -1516,338 +1543,9 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           {/* TAB 1: TRANG CHỦ GIÁO VIÊN — CHỌN KHỐI 6,7,8,9 -> LỘ TRÌNH 29 TIẾT HỌC -> TIẾN TRÌNH GIẢNG DẠY & ĐỒNG BỘ LIVE */}
           {activeTab === 'trang-chu' && (
             <div className="flex flex-col gap-space-lg">
-              {/* Top Teacher Welcome & Live Sync Status Bar + Grade/Class Selector before Live Broadcast */}
-              <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-space-md bg-gradient-to-r from-primary-fixed/40 via-surface-container-low to-secondary-fixed/30 p-space-lg rounded-2xl shadow-sm">
-                <div className="flex flex-col md:flex-row md:items-center gap-space-md">
-                  <div className="relative w-16 h-16 rounded-full bg-gradient-to-tr from-primary-container via-surface-container-lowest to-secondary-container p-1 shadow-md flex-shrink-0">
-                    <div className="w-full h-full rounded-full bg-surface-container-lowest flex items-center justify-center">
-                      <span className="material-symbols-outlined text-[36px] text-primary">
-                        smart_toy
-                      </span>
-                    </div>
-                    <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-tertiary-container rounded-full border-2 border-surface-container-lowest flex items-center justify-center text-[10px] text-on-tertiary-container font-bold">
-                      ✓
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <div className="flex flex-wrap items-center gap-space-xs">
-                      <h1 className="font-headline-lg text-headline-lg text-on-surface">
-                        Chào thầy Đỗ Mạnh Trường! ✨
-                      </h1>
-                      <span className="px-space-sm py-0.5 rounded-full bg-surface-container-lowest text-primary font-label-sm text-label-sm shadow-sm flex items-center gap-1 font-bold">
-                        <span className="w-2 h-2 rounded-full bg-error animate-ping" />
-                        Đang phát Live: Khối {liveSession?.activeGrade || selectedNotebookGrade} • Lớp{' '}
-                        {liveSession?.activeClassId || selectedClass} • Tiết{' '}
-                        {liveSession?.activePeriod || selectedNotebookPeriod}
-                      </span>
-                      {liveSession?.isBroadcasting && (
-                        <button
-                          type="button"
-                          onClick={() => setIsLivePresenterOpen(true)}
-                          className="px-3.5 py-1 rounded-full bg-red-600 hover:bg-red-700 text-white font-label-sm text-xs font-black shadow-sm flex items-center gap-1.5 cursor-pointer animate-pulse"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">slideshow</span>
-                          <span>VÀO PHÒNG LIVE GIẢNG DẠY (TRÌNH CHIẾU)</span>
-                        </button>
-                      )}
-                    </div>
-                    <p className="font-body-md text-body-sm sm:text-body-md text-on-surface-variant mt-0.5">
-                      Lộ trình 29 tiết học chuẩn GDPT 2018 (Khối 6, 7, 8, 9) • Chọn Khối &amp; Lớp trước khi phát Live hoặc mở khóa Chế độ Tự luyện
-                    </p>
-                  </div>
-                </div>
-
-                {/* Explicit Grade & Class Selector Bar for Live Broadcast */}
-                <div className="flex flex-wrap items-center gap-2 bg-surface-container-lowest p-3 rounded-2xl shadow-sm border border-primary/20">
-                  <div className="flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-primary text-[18px]">
-                      sensors
-                    </span>
-                    <span className="font-label-sm text-label-sm font-bold text-on-surface">
-                      Chọn Khối &amp; Lớp phát Live:
-                    </span>
-                  </div>
-
-                  <select
-                    value={selectedNotebookGrade}
-                    onChange={(e) => {
-                      const g = Number(e.target.value) as 6 | 7 | 8 | 9;
-                      handleSelectGradeAndPeriod(g, 1);
-                      const firstCls = classes.find((c) => c.grade === g);
-                      if (firstCls) onChangeClass(firstCls.id);
-                    }}
-                    className="px-3 py-1.5 rounded-full bg-primary-fixed text-primary font-label-sm text-label-sm font-bold cursor-pointer"
-                  >
-                    {([6, 7, 8, 9] as const).map((g) => (
-                      <option key={g} value={g}>
-                        Khối {g}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={selectedClass}
-                    onChange={(e) => onChangeClass(e.target.value)}
-                    className="px-3 py-1.5 rounded-full bg-secondary-fixed text-secondary font-label-sm text-label-sm font-bold cursor-pointer"
-                  >
-                    {(classesForSelectedGrade.length > 0 ? classesForSelectedGrade : classes).map(
-                      (cls) => (
-                        <option key={cls.id} value={cls.id}>
-                          {cls.name} (Khối {cls.grade})
-                        </option>
-                      )
-                    )}
-                  </select>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleBroadcastLivePeriod(
-                        selectedNotebookGrade,
-                        selectedNotebookPeriod,
-                        true,
-                        selectedClass
-                      )
-                    }
-                    className="px-3.5 py-1.5 rounded-full bg-error text-on-error font-label-sm text-label-sm font-bold shadow-xs hover:opacity-95 cursor-pointer flex items-center gap-1"
-                  >
-                    <span className="material-symbols-outlined text-[15px]">cast</span>
-                    <span>Bắt đầu phát Live ({selectedClass})</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleTriggerLiveWheelCall}
-                    className="px-3.5 py-1.5 rounded-full bg-amber-500 text-white font-label-sm text-label-sm font-bold shadow-xs hover:brightness-105 cursor-pointer flex items-center gap-1"
-                    title="Quay thưởng & gọi tên ngẫu nhiên học sinh lớp đang phát Live"
-                  >
-                    <span className="material-symbols-outlined text-[15px]">casino</span>
-                    <span>🎡 Quay Gọi Tên HS ({selectedClass})</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowQRCodeModal(true)}
-                    className="px-3.5 py-1.5 rounded-full bg-primary text-on-primary font-label-sm text-label-sm font-bold shadow-xs hover:brightness-110 cursor-pointer flex items-center gap-1"
-                    title="Mở mã QR & Mã PIN Lớp cho học sinh quét"
-                  >
-                    <span className="material-symbols-outlined text-[15px]">qr_code_scanner</span>
-                    <span>Hiện Mã QR</span>
-                  </button>
-                  <SlidePresenterManager liveSession={liveSession} onUpdateLiveSession={onUpdateLiveSession} />
-                </div>
-              </div>
-
-              {/* Real-time 29-Period Class Progress Summary Widget Bar */}
-              <div className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border border-outline-variant/30 flex flex-col gap-3">
-                <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-outline-variant/20">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-10 h-10 rounded-xl bg-primary text-on-primary flex items-center justify-center font-bold text-xl shadow-xs">
-                      <span className="material-symbols-outlined text-[22px]">insights</span>
-                    </div>
-                    <div>
-                      <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold flex items-center gap-2">
-                        <span>Bộ Đếm Tiến Trình Giảng Dạy 29 Tiết Theo Lớp (Thời Gian Thực)</span>
-                        <span className="px-2.5 py-0.5 rounded-full bg-primary-fixed text-primary text-xs font-bold">
-                          Khối {selectedNotebookGrade}
-                        </span>
-                      </h3>
-                      <p className="text-xs text-on-surface-variant mt-0.5">
-                        Theo dõi sĩ số, số tiết đã dạy/còn lại và trạng thái phát Live trực tiếp cho từng lớp học
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => setShowBulkImportModal(true)}
-                      className="px-4 py-2 rounded-full bg-blue-600 text-white font-label-md text-xs font-bold shadow-xs hover:bg-blue-700 cursor-pointer flex items-center gap-1.5 transition-all"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">upload_file</span>
-                      <span>Nạp Word (.docx) 29 Tiết</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowProgressionTrackerModal(true)}
-                      className="px-4 py-2 rounded-full bg-primary text-on-primary font-label-md text-xs font-bold shadow-xs hover:brightness-110 cursor-pointer flex items-center gap-1.5 transition-all"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">table_chart</span>
-                      <span>Mở Bảng Ma Trận Chi Tiết 29 Tiết</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {(classesForSelectedGrade.length > 0 ? classesForSelectedGrade : classes).map((cls) => {
-                    const taughtList = liveSession?.taughtPeriodsByClass?.[cls.id] || [];
-                    const count = taughtList.length;
-                    const pct = Math.round((count / 29) * 100);
-                    const isSelected = cls.id === selectedClass;
-                    const isLive =
-                      liveSession?.isBroadcasting &&
-                      liveSession?.activeClassId === cls.id &&
-                      liveSession?.activeGrade === cls.grade;
-                    const nextPeriod = Math.min(29, (taughtList.length > 0 ? Math.max(...taughtList) : 0) + 1);
-
-                    return (
-                      <div
-                        key={cls.id}
-                        onClick={() => onChangeClass(cls.id)}
-                        className={`p-3.5 rounded-xl border flex flex-col justify-between gap-2.5 cursor-pointer transition-all ${
-                          isSelected
-                            ? 'bg-primary-fixed/25 border-primary shadow-sm ring-1 ring-primary'
-                            : 'bg-surface-container-low border-outline-variant/20 hover:border-primary/40'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-sm text-on-surface flex items-center gap-1.5">
-                            <span className="material-symbols-outlined text-primary text-[18px]">groups</span>
-                            {cls.name} ({cls.studentCount} HS)
-                          </span>
-                          {isLive ? (
-                            <span className="px-2 py-0.5 rounded-full bg-error text-on-error font-bold text-[10px] animate-pulse flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-                              Live Tiết {liveSession.activePeriod}
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed text-[11px] font-black">
-                              {count}/29 Tiết
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Progress Bar */}
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center justify-between text-[11px] font-bold">
-                            <span className="text-on-surface-variant">Tiến độ PPCT:</span>
-                            <span className="text-primary">{pct}%</span>
-                          </div>
-                          <div className="w-full h-2 rounded-full bg-surface-container-high overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-primary via-secondary to-tertiary transition-all duration-300"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between text-[11px] pt-1 border-t border-outline-variant/15">
-                          <span className="text-on-surface-variant">
-                            Tiết tiếp theo: <strong>Tiết {nextPeriod}</strong>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleToggleTaughtPeriodForClass(selectedNotebookGrade, nextPeriod, cls.id);
-                            }}
-                            className="text-[10px] font-bold text-primary hover:underline"
-                          >
-                            + Xong Tiết {nextPeriod}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
               {/* CASE A: 29-PERIOD CURRICULUM ROADMAP GRID (DEFAULT ON TEACHER HOME) */}
               {openedHomePeriod === null ? (
                 <div className="flex flex-col gap-space-lg">
-                  {/* Grade 6, 7, 8, 9 Selector & Exam Milestone Filter Bar */}
-                  <div className="bg-surface-container-lowest rounded-2xl p-space-lg shadow-sm flex flex-col gap-space-md">
-                    <div className="flex flex-wrap items-center justify-between gap-space-md">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {([6, 7, 8, 9] as const).map((g) => {
-                          const isSelected = selectedNotebookGrade === g;
-                          return (
-                            <button
-                              key={g}
-                              type="button"
-                              onClick={() => {
-                                handleSelectGradeAndPeriod(g, 1);
-                                const firstCls = classes.find((c) => c.grade === g);
-                                if (firstCls) onChangeClass(firstCls.id);
-                              }}
-                              className={`px-5 py-2.5 rounded-full font-headline-sm text-headline-sm transition-all flex items-center gap-2 cursor-pointer ${
-                                isSelected
-                                  ? 'bg-primary text-on-primary shadow-md scale-105'
-                                  : 'bg-surface-container-low text-on-surface hover:bg-surface-container-high'
-                              }`}
-                            >
-                              <span className="material-symbols-outlined text-[18px]">school</span>
-                              <span>Khối {g} (29 Tiết)</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Class selector pills belonging to the selected grade */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-outline-variant/20">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-label-sm text-label-sm font-bold text-on-surface">
-                          Lớp đang chọn thuộc Khối {selectedNotebookGrade}:
-                        </span>
-                        {(classesForSelectedGrade.length > 0 ? classesForSelectedGrade : classes).map(
-                          (cls) => (
-                            <button
-                              key={cls.id}
-                              type="button"
-                              onClick={() => onChangeClass(cls.id)}
-                              className={`px-3.5 py-1 rounded-full font-label-sm text-label-sm font-bold transition-all cursor-pointer ${
-                                selectedClass === cls.id
-                                  ? 'bg-primary-container text-on-primary-container shadow-xs'
-                                  : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container'
-                              }`}
-                            >
-                              {cls.name}
-                            </button>
-                          )
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {[
-                          { id: 'ALL', label: 'Tất cả 29 tiết' },
-                          { id: 'GK1', label: 'Giữa kỳ 1 (Tiết 1–7)' },
-                          { id: 'CK1', label: 'Cuối kỳ 1 (Tiết 8–15)' },
-                          { id: 'GK2', label: 'Giữa kỳ 2 (Tiết 16–22)' },
-                          { id: 'CK2', label: 'Cuối kỳ 2 (Tiết 23–27)' },
-                        ].map((f) => (
-                          <button
-                            key={f.id}
-                            type="button"
-                            onClick={() =>
-                              setHomeExamFilter(
-                                f.id as 'ALL' | 'GK1' | 'CK1' | 'GK2' | 'CK2'
-                              )
-                            }
-                            className={`px-3 py-1.5 rounded-full font-label-sm text-label-sm transition-all cursor-pointer ${
-                              homeExamFilter === f.id
-                                ? 'bg-secondary text-on-secondary font-bold shadow-xs'
-                                : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container'
-                            }`}
-                          >
-                            {f.label}
-                          </button>
-                        ))}
-
-                        <button
-                          type="button"
-                          onClick={() => setShowBatchPrintModal(true)}
-                          className="px-3.5 py-1.5 rounded-full bg-primary text-on-primary font-label-sm text-label-sm font-bold shadow-xs hover:brightness-110 active:scale-98 transition-all flex items-center gap-1 cursor-pointer"
-                          title="Mở chế độ xem & In ấn toàn bộ 29 phiếu học tập"
-                        >
-                          <span className="material-symbols-outlined text-[15px]">print</span>
-                          <span>Print View 29 Phiếu</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
                   {/* 29-Period Cards Grid wrapped in unified DataBoundary */}
                   <DataBoundary
                     data={gradePeriods.filter(
@@ -2260,83 +1958,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   </div>
                 </div>
               )}
-
-              {/* 4 Pillars Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-space-md">
-                <div className="bg-primary-fixed/30 p-space-lg rounded-xl shadow-sm flex flex-col justify-between">
-                  <div>
-                    <div className="w-12 h-12 rounded-full bg-surface-container-lowest text-primary flex items-center justify-center shadow-md">
-                      <span className="material-symbols-outlined text-[26px]">play_circle</span>
-                    </div>
-                    <h4 className="font-headline-sm text-headline-sm text-on-surface mt-space-md font-bold">
-                      Khởi động
-                    </h4>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onChangeTab('bien-soan-stage-1')}
-                    className="mt-space-md w-full py-2.5 px-space-md rounded-full bg-surface-container-lowest hover:bg-primary-container text-on-surface hover:text-on-primary-container font-label-md text-label-md shadow-sm transition-all cursor-pointer font-bold"
-                  >
-                    Khởi động →
-                  </button>
-                </div>
-
-                <div className="bg-secondary-fixed/40 p-space-lg rounded-xl shadow-sm flex flex-col justify-between">
-                  <div>
-                    <div className="w-12 h-12 rounded-full bg-surface-container-lowest text-secondary flex items-center justify-center shadow-md">
-                      <span className="material-symbols-outlined text-[26px]">
-                        menu_book
-                      </span>
-                    </div>
-                    <h4 className="font-headline-sm text-headline-sm text-on-surface mt-space-md font-bold">
-                      Khám phá
-                    </h4>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onChangeTab('bien-soan-stage-2')}
-                    className="mt-space-md w-full py-2.5 px-space-md rounded-full bg-surface-container-lowest hover:bg-secondary-container text-on-surface hover:text-on-secondary-container font-label-md text-label-md shadow-sm transition-all cursor-pointer font-bold"
-                  >
-                    Khám phá →
-                  </button>
-                </div>
-
-                <div className="bg-tertiary-fixed/40 p-space-lg rounded-xl shadow-sm flex flex-col justify-between">
-                  <div>
-                    <div className="w-12 h-12 rounded-full bg-surface-container-lowest text-tertiary flex items-center justify-center shadow-md">
-                      <span className="material-symbols-outlined text-[26px]">extension</span>
-                    </div>
-                    <h4 className="font-headline-sm text-headline-sm text-on-surface mt-space-md font-bold">
-                      Luyện tập
-                    </h4>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onChangeTab('bien-soan-stage-3')}
-                    className="mt-space-md w-full py-2.5 px-space-md rounded-full bg-surface-container-lowest hover:bg-tertiary-container text-on-surface hover:text-on-tertiary-container font-label-md text-label-md shadow-sm transition-all cursor-pointer font-bold"
-                  >
-                    Luyện tập →
-                  </button>
-                </div>
-
-                <div className="bg-surface-container-high p-space-lg rounded-xl shadow-sm flex flex-col justify-between">
-                  <div>
-                    <div className="w-12 h-12 rounded-full bg-surface-container-lowest text-on-surface-variant flex items-center justify-center shadow-md">
-                      <span className="material-symbols-outlined text-[26px]">assignment_turned_in</span>
-                    </div>
-                    <h4 className="font-headline-sm text-headline-sm text-on-surface mt-space-md font-bold">
-                      Vận dụng
-                    </h4>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onChangeTab('bien-soan-stage-4')}
-                    className="mt-space-md w-full py-2.5 px-space-md rounded-full bg-surface-container-lowest hover:bg-inverse-surface text-on-surface hover:text-inverse-on-surface font-label-md text-label-md shadow-sm transition-all cursor-pointer font-bold"
-                  >
-                    Vận dụng →
-                  </button>
-                </div>
-              </div>
             </div>
           )}
 
@@ -5330,6 +4951,17 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       <QuestionMasterInspectorModal
         isOpen={showQuestionInspectorModal}
         onClose={() => setShowQuestionInspectorModal(false)}
+        liveSession={liveSession}
+        onUpdateLiveSession={onUpdateLiveSession}
+        onShowToast={onShowToast}
+      />
+
+      {/* Lecture Slide Manager Modal (Nạp bài giảng PDF, PPTX) */}
+      <LectureSlideManagerModal
+        isOpen={showLectureSlideModal}
+        onClose={() => setShowLectureSlideModal(false)}
+        initialGrade={selectedNotebookGrade}
+        initialPeriod={selectedNotebookPeriod}
         liveSession={liveSession}
         onUpdateLiveSession={onUpdateLiveSession}
         onShowToast={onShowToast}

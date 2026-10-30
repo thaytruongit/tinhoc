@@ -818,13 +818,39 @@ export interface TaggedLessonSubmission {
   pedagogicalEvaluation: string;
 }
 
+export interface LectureSlidePage {
+  slideNumber: number;
+  title: string;
+  subtitle?: string;
+  bulletPoints: string[];
+  highlightNote?: string;
+  imageUrl?: string;
+}
+
+export interface LectureSlideDeck {
+  lessonKey: string;
+  grade: 6 | 7 | 8 | 9;
+  period: number;
+  fileName: string;
+  fileType: 'pdf' | 'pptx';
+  fileSize: string;
+  uploadedAt: string;
+  pdfDataUrl?: string;
+  slides: LectureSlidePage[];
+}
+
 export interface LiveClassroomSession {
   isBroadcasting: boolean;
   activeGrade: 6 | 7 | 8 | 9;
   activePeriod: number;
   activeStage: 1 | 2 | 3 | 4;
+  activeLiveView?: 'slide' | 'hd1' | 'hd2' | 'hd3' | 'hd3-practice' | 'hd4';
   activeClassId: string;
   unlockedStagesByLesson: Record<string, Record<1 | 2 | 3 | 4, boolean>>;
+  unlockedPracticeStage3ByLesson?: Record<string, boolean>;
+  unlockedSlideDeckByLesson?: Record<string, boolean>;
+  activeSlideIndexByLesson?: Record<string, number>;
+  lectureSlidesByLesson?: Record<string, LectureSlideDeck>;
   wheelCall: LiveWheelCallState | null;
   taughtPeriodsByClass?: Record<string, number[]>;
   learnedPeriodsByStudent?: Record<string, string[]>;

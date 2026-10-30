@@ -44,6 +44,7 @@ import { StudentCompanionSelector, type CompanionSelectionMode } from './Student
 import { StudentLiveRoom } from './StudentLiveRoom';
 import { StudentMetricsDashboard } from './StudentMetricsDashboard';
 import { StudentActivityFeed } from './StudentActivityFeed';
+import { BadgeLibraryPanel } from './BadgeLibraryPanel';
 
 export type StudentView = 'trang-chu' | 'tro-ly-ai-cu-vang' | 'huy-hieu' | 'bang-xep-hang' | 'nhat-ky-hoat-dong';
 
@@ -200,51 +201,46 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     }
   }, [isLiveForStudentClass, liveSession?.activePeriod, liveSession?.activeStage]);
 
-  // Check if a period was marked as taught by Teacher for this class OR marked as learned by this Student
+  // When Teacher stops broadcasting Live, automatically close student live room
+  useEffect(() => {
+    if (isInLiveRoom && liveSession && liveSession.isBroadcasting === false) {
+      setIsInLiveRoom(false);
+      setOpenedPeriodNumber(null);
+      onShowToast(
+        '🔔 Tiết Live đã kết thúc! Thầy/Cô đã đánh dấu hoàn thành tiết học — Toàn bộ 4 hoạt động đã được mở khóa để các em tự luyện!'
+      );
+    }
+  }, [isInLiveRoom, liveSession?.isBroadcasting, onShowToast]);
+
+  // Check if a period was marked as taught by Teacher for this student's class
   const isPeriodTaughtByTeacher = (period: number): boolean => {
     const taughtList = liveSession?.taughtPeriodsByClass?.[currentStudent.classId] || [];
     return taughtList.includes(period);
   };
 
-  const isPeriodLearnedByStudent = (period: number): boolean => {
-    const lessonKey = `k${selectedGrade}-tiet-${period}`;
-    const learnedList = liveSession?.learnedPeriodsByStudent?.[currentStudent.id] || [];
-    return learnedList.includes(lessonKey);
-  };
+  // STRICT PEDAGOGICAL POLICY: Students can ONLY open self-study mode when the period has
+  // been taught and marked finished by the Teacher. No student self-marking permitted!
+  const isSelfStudyUnlocked = (period: number): boolean => isPeriodTaughtByTeacher(period);
 
-  const isSelfStudyUnlocked = (period: number): boolean =>
-    isPeriodTaughtByTeacher(period) || isPeriodLearnedByStudent(period);
-
-  const handleToggleStudentLearnedPeriod = (period: number, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    const lessonKey = `k${selectedGrade}-tiet-${period}`;
-    const currentList = liveSession?.learnedPeriodsByStudent?.[currentStudent.id] || [];
-    const alreadyLearned = currentList.includes(lessonKey);
-    const nextList = alreadyLearned
-      ? currentList.filter((k) => k !== lessonKey)
-      : [...currentList, lessonKey];
-
-    if (onUpdateLiveSession) {
-      onUpdateLiveSession((prev) => ({
-        ...prev,
-        learnedPeriodsByStudent: {
-          ...(prev.learnedPeriodsByStudent || {}),
-          [currentStudent.id]: nextList,
-        },
-        unlockedStagesByLesson: !alreadyLearned
-          ? {
-              ...prev.unlockedStagesByLesson,
-              [lessonKey]: { 1: true, 2: true, 3: true, 4: true },
-            }
-          : prev.unlockedStagesByLesson,
-      }));
+  // Strict guard: if student is on an un-taught period in self-study mode, kick back to overview
+  useEffect(() => {
+    if (openedPeriodNumber !== null) {
+      const isLiveNow = isLiveForStudentClass && liveSession?.activePeriod === openedPeriodNumber;
+      if (!isLiveNow && !isPeriodTaughtByTeacher(openedPeriodNumber)) {
+        onShowToast(
+          `🔒 Tiết ${openedPeriodNumber} chưa được Giáo viên dạy trên lớp (chưa đánh dấu hoàn thành). Em chỉ được mở chế độ Tự luyện sau khi Thầy/Cô đã giảng dạy tiết học này!`
+        );
+        setOpenedPeriodNumber(null);
+      }
     }
-    onShowToast(
-      !alreadyLearned
-        ? `✓ Đã đánh dấu "Đã học" Tiết ${period} — Mở khóa toàn bộ Chế độ Tự luyện cho 4 hoạt động!`
-        : `Đã bỏ đánh dấu "Đã học" Tiết ${period}.`
-    );
-  };
+  }, [
+    openedPeriodNumber,
+    isLiveForStudentClass,
+    liveSession?.activePeriod,
+    liveSession?.taughtPeriodsByClass,
+    currentStudent.classId,
+    onShowToast,
+  ]);
 
   const gradePeriods = getPeriodsForGrade(selectedGrade);
 
@@ -1374,7 +1370,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
-                onClick={() => onChangeView(activeView === 'trang-chu' ? 'tro-ly-ai-cu-vang' : 'trang-chu')}
+                onClick={() => onChangeView(activeView === 'tro-ly-ai-cu-vang' ? 'trang-chu' : 'tro-ly-ai-cu-vang')}
                 className={`px-3 py-1.5 rounded-full font-label-sm text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
                   activeView === 'tro-ly-ai-cu-vang'
                     ? 'bg-primary text-on-primary shadow-xs'
@@ -1387,6 +1383,20 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 <span className="hidden sm:inline">
                   {activeView === 'tro-ly-ai-cu-vang' ? 'Bài học' : 'AI Cú Vàng'}
                 </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeView(activeView === 'huy-hieu' ? 'trang-chu' : 'huy-hieu')}
+                className={`px-3 py-1.5 rounded-full font-label-sm text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                  activeView === 'huy-hieu'
+                    ? 'bg-amber-500 text-white shadow-xs'
+                    : 'bg-surface-container text-on-surface hover:bg-surface-container-high'
+                }`}
+                title="Hồ sơ học sinh & Thư viện huy hiệu"
+              >
+                <span className="material-symbols-outlined text-[16px]">workspace_premium</span>
+                <span className="hidden sm:inline">Huy hiệu</span>
               </button>
 
               <button
@@ -1452,7 +1462,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 currentStudent={currentStudent}
                 liveSession={liveSession}
                 currentPeriodSpec={currentPeriodSpec}
-                onOpenPeriod={(p) => setOpenedPeriodNumber(p)}
+                onOpenPeriod={(p) => {
+                  if (!isPeriodTaughtByTeacher(p)) {
+                    onShowToast(
+                      `🔒 Tiết ${p} chưa được Giáo viên dạy trên lớp (chưa đánh dấu hoàn thành). Chế độ Tự luyện chỉ mở sau khi Thầy/Cô đã giảng dạy tiết học này!`
+                    );
+                    return;
+                  }
+                  setOpenedPeriodNumber(p);
+                }}
                 onShowToast={onShowToast}
               />
 
@@ -1474,7 +1492,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 </span>
               </button>
 
-              <div className="flex items-center gap-space-sm pl-space-xs">
+              <div
+                onClick={() => onChangeView('huy-hieu')}
+                className="flex items-center gap-space-sm pl-space-xs cursor-pointer hover:opacity-80 transition-opacity"
+                title="Xem hồ sơ học sinh & thư viện huy hiệu"
+              >
                 <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
                   <span className="material-symbols-outlined text-on-primary text-[18px]">
                     person
@@ -1737,10 +1759,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             {periodsList.map((spec) => {
                               const isLiveLesson =
                                 isLiveForStudentClass && liveSession?.activePeriod === spec.period;
-                              const taughtByTeacher = isPeriodTaughtByTeacher(spec.period);
-                              const learnedByStudent = isPeriodLearnedByStudent(spec.period);
-                              // Self-practice restriction: only unlocked if lesson was taught or learned
-                              const isSelfStudyUnlocked = taughtByTeacher || learnedByStudent;
+                              // STRICT POLICY: Only unlocked if taught and marked completed by the Teacher
+                              const isSelfStudyUnlocked = isPeriodTaughtByTeacher(spec.period);
 
                               return (
                                 <button
@@ -1756,7 +1776,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                     }
                                     if (!isSelfStudyUnlocked) {
                                       onShowToast(
-                                        `🔒 Tiết ${spec.period} chưa được học. Chế độ Tự luyện chỉ mở sau khi đã học trên lớp cùng Giáo viên!`
+                                        `🔒 Tiết ${spec.period} chưa được Giáo viên dạy trên lớp (chưa đánh dấu hoàn thành). Chế độ Tự luyện chỉ mở sau khi Thầy/Cô đã giảng dạy tiết học này!`
                                       );
                                       return;
                                     }
@@ -1881,24 +1901,20 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       )}
 
                       <div className="flex items-center gap-2 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleStudentLearnedPeriod(currentPeriodSpec.period)}
-                          className={`px-3.5 py-1.5 rounded-full font-label-sm text-xs font-bold cursor-pointer flex items-center gap-1 ${
-                            isSelfStudyUnlocked(currentPeriodSpec.period)
-                              ? 'bg-tertiary text-on-tertiary shadow-xs'
-                              : 'bg-surface-container-low text-on-surface hover:bg-secondary-fixed'
-                          }`}
-                        >
-                          <span className="material-symbols-outlined text-[15px]">
-                            {isSelfStudyUnlocked(currentPeriodSpec.period) ? 'task_alt' : 'check_circle'}
+                        {isSelfStudyUnlocked(currentPeriodSpec.period) ? (
+                          <span className="px-3.5 py-1.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs">
+                            <span className="material-symbols-outlined text-[16px] text-emerald-600">verified</span>
+                            <span>Đã học trên lớp (Mở tự luyện)</span>
                           </span>
-                          <span>
-                            {isSelfStudyUnlocked(currentPeriodSpec.period)
-                              ? '✓ Đã học (Mở Tự luyện)'
-                              : 'Đánh dấu Đã học'}
+                        ) : (
+                          <span
+                            className="px-3.5 py-1.5 rounded-full bg-amber-100 text-amber-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs"
+                            title="Chờ giáo viên giảng dạy trên lớp để mở tự luyện"
+                          >
+                            <span className="material-symbols-outlined text-[16px] text-amber-700">lock</span>
+                            <span>Chưa học trên lớp (Khóa tự luyện)</span>
                           </span>
-                        </button>
+                        )}
                         <span className="px-3 py-1 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-label-sm text-xs font-bold">
                           Khối {selectedGrade} • Lớp {currentStudent.classId}
                         </span>
@@ -3155,132 +3171,65 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             </div>
           )}
 
-          {/* ================= MENU 3: HUY HIỆU THÀNH TỰU (ACHIEVEMENT BADGES) ================= */}
+          {/* ================= MENU 3: HỒ SƠ HỌC SINH & THƯ VIỆN HUY HIỆU (FLIP CARDS) ================= */}
           {activeView === 'huy-hieu' && (
             <div className="flex flex-col w-full gap-space-lg pb-space-2xl max-w-5xl mx-auto">
-              <div className="bg-surface-container-lowest rounded-2xl p-6 shadow-md flex flex-col gap-6">
-                <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-outline-variant/20">
-                  <div className="flex items-center gap-3">
-                    <div className="w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-600 flex items-center justify-center shadow-md">
-                      <span className="material-symbols-outlined text-[34px]">military_tech</span>
+              {/* Profile Overview Card */}
+              <div className="bg-gradient-to-r from-sky-50 via-white to-amber-50/50 rounded-3xl p-6 sm:p-8 shadow-xs border border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-sky-500 via-indigo-500 to-amber-500 p-1 shadow-lg">
+                      <div className="w-full h-full rounded-[22px] bg-white flex items-center justify-center font-black text-2xl text-slate-800">
+                        {currentStudent.name.charAt(0)}
+                      </div>
                     </div>
-                    <div>
-                      <h1 className="font-headline-md text-headline-md text-on-surface">
-                        Hồ Sơ Huy Hiệu Thành Tựu • {currentStudent.name}
-                      </h1>
-                      <p className="font-body-sm text-body-sm text-on-surface-variant">
-                        Lớp {currentStudent.classId} • Khối {selectedGrade} • {currentStudent.stars} Sao tích lũy • {currentStudent.xp} XP
-                      </p>
+                    <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-amber-500 text-white flex items-center justify-center border-2 border-white shadow-sm font-bold text-xs">
+                      ★
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-4 py-2 rounded-full bg-amber-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-[18px]">workspace_premium</span>
-                      <span>6 Huy hiệu đã mở khóa</span>
-                    </span>
+
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+                        {currentStudent.name}
+                      </h1>
+                      <span className="px-3 py-0.5 rounded-full bg-sky-100 text-sky-800 font-bold text-xs">
+                        Lớp {currentStudent.classId}
+                      </span>
+                      <span className="px-3 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold text-xs">
+                        Khối {selectedGrade}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Mã học sinh: <strong className="font-mono text-slate-700">{currentStudent.id}</strong> • Bạn cùng máy: <strong className="text-slate-800">{currentStudent.partnerName || 'Chưa ghép cặp'}</strong>
+                    </p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {[
-                    {
-                      id: 'b1',
-                      title: '🌟 Tân Thủ Tin Học',
-                      desc: 'Đạt 5 sao tích lũy đầu tiên trong các hoạt động học tập trên lớp.',
-                      unlocked: currentStudent.stars >= 5,
-                      progress: `${Math.min(5, currentStudent.stars)}/5 sao`,
-                    },
-                    {
-                      id: 'b2',
-                      title: '🚀 Bậc Thầy Kéo Thả',
-                      desc: 'Hoàn thành xuất sắc và chính xác các bài tập Kéo Thả phân loại.',
-                      unlocked: currentStudent.xp >= 500,
-                      progress: `${Math.min(500, currentStudent.xp)}/500 XP`,
-                    },
-                    {
-                      id: 'b3',
-                      title: '⚡ Tia Chớp 25 Giây',
-                      desc: 'Đạt điểm tuyệt đối trong Đấu trường trắc nghiệm phản xạ 25 giây.',
-                      unlocked: currentStudent.avgScore >= 8.5,
-                      progress: `Điểm TB: ${currentStudent.avgScore}`,
-                    },
-                    {
-                      id: 'b4',
-                      title: '🦉 Cú Vàng AI Thông Thái',
-                      desc: 'Tích cực đặt câu hỏi và tương tác học tập với Trợ lý AI Cú Vàng.',
-                      unlocked: true,
-                      progress: 'Đã hoàn thành',
-                    },
-                    {
-                      id: 'b5',
-                      title: '🏆 Siêu Sao Lớp Học',
-                      desc: 'Dẫn đầu hoặc nằm trong Top 3 học sinh xuất sắc nhất của Lớp.',
-                      unlocked: true,
-                      progress: `Lớp ${currentStudent.classId}`,
-                    },
-                    {
-                      id: 'b6',
-                      title: '👑 Vương Miện Khối',
-                      desc: 'Đạt thành tích vượt trội đứng đầu khối học.',
-                      unlocked: currentStudent.xp >= 1200,
-                      progress: `Khối ${selectedGrade}`,
-                    },
-                  ].map((badge) => (
-                    <div
-                      key={badge.id}
-                      onClick={() => {
-                        if (badge.unlocked) {
-                          confetti({
-                            particleCount: 90,
-                            spread: 80,
-                            origin: { y: 0.6 },
-                            colors: ['#38bdf8', '#f59e0b', '#10b981', '#ec4899', '#8b5cf6'],
-                          });
-                          onShowToast(`🎆 Chúc mừng em đã sở hữu Huy hiệu: ${badge.title}!`);
-                        } else {
-                          onShowToast(`🔒 Huy hiệu chưa mở khóa. Tiến độ hiện tại: ${badge.progress}`);
-                        }
-                      }}
-                      className={`p-5 rounded-2xl border flex flex-col justify-between gap-4 transition-all cursor-pointer hover:scale-101 ${
-                        badge.unlocked
-                          ? 'bg-gradient-to-br from-amber-500/10 via-surface-container-lowest to-surface-container-low border-amber-500/40 shadow-sm'
-                          : 'bg-surface-container-low/60 border-outline-variant/20 opacity-60'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex flex-col gap-1">
-                          <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">
-                            {badge.title}
-                          </h3>
-                          <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
-                            {badge.desc}
-                          </p>
-                        </div>
-                        <span
-                          className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                            badge.unlocked
-                              ? 'bg-amber-500 text-white shadow-xs'
-                              : 'bg-surface-container-highest text-on-surface-variant'
-                          }`}
-                        >
-                          <span className="material-symbols-outlined text-[18px]">
-                            {badge.unlocked ? 'verified' : 'lock'}
-                          </span>
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-3 border-t border-outline-variant/20 text-xs font-bold">
-                        <span className={badge.unlocked ? 'text-amber-600' : 'text-on-surface-variant'}>
-                          {badge.unlocked ? '✓ Đã mở khóa' : 'Chưa đạt'}
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-surface-container text-on-surface-variant">
-                          {badge.progress}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                {/* Quick Summary Pill Stats */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex flex-col items-center p-3 rounded-2xl bg-white border border-slate-200/80 shadow-2xs min-w-[90px]">
+                    <span className="text-[11px] text-slate-500 font-semibold">Tổng điểm XP</span>
+                    <span className="text-lg font-black text-sky-700">{currentStudent.xp.toLocaleString()}</span>
+                  </div>
+                  <div className="flex flex-col items-center p-3 rounded-2xl bg-white border border-slate-200/80 shadow-2xs min-w-[90px]">
+                    <span className="text-[11px] text-slate-500 font-semibold">Ngôi sao</span>
+                    <span className="text-lg font-black text-amber-500">⭐ {currentStudent.stars}</span>
+                  </div>
+                  <div className="flex flex-col items-center p-3 rounded-2xl bg-white border border-slate-200/80 shadow-2xs min-w-[90px]">
+                    <span className="text-[11px] text-slate-500 font-semibold">Hạng Lớp</span>
+                    <span className="text-lg font-black text-emerald-600">#{classRank}</span>
+                  </div>
                 </div>
               </div>
+
+              {/* Dedicated Flip-Card Badge Library */}
+              <BadgeLibraryPanel
+                currentStudent={currentStudent}
+                onShowToast={onShowToast}
+                title="Bảng Điều Khiển: Thư Viện Huy Hiệu"
+                subtitle="Hiệu ứng lật thẻ 3D (Flip Card): Chạm hoặc nhấp vào bất kỳ huy hiệu nào để lật sang mặt sau và xem chi tiết yêu cầu, điểm XP, số sao còn thiếu và mẹo sư phạm để mở khóa!"
+              />
             </div>
           )}
 

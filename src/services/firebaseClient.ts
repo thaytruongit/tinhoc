@@ -11,31 +11,62 @@ import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { sanitizeId, sanitizeString } from '../utils/pedagogyEngine';
 
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const firestoreDb = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const googleAuthProvider = new GoogleAuthProvider();
+let app: any = null;
+let authInstance: any = null;
+let firestoreDbInstance: any = null;
+let googleAuthProviderInstance: any = null;
+
+try {
+  if (firebaseConfig && (firebaseConfig as any).apiKey) {
+    app = initializeApp(firebaseConfig);
+    authInstance = getAuth(app);
+    try {
+      firestoreDbInstance = (firebaseConfig as any).firestoreDatabaseId
+        ? getFirestore(app, (firebaseConfig as any).firestoreDatabaseId)
+        : getFirestore(app);
+    } catch {
+      try {
+        firestoreDbInstance = getFirestore(app);
+      } catch {
+        firestoreDbInstance = null;
+      }
+    }
+    googleAuthProviderInstance = new GoogleAuthProvider();
+  }
+} catch (fbInitErr) {
+  console.warn('[CloudPlay Notice] Firebase initialization safely bypassed or using fallback:', fbInitErr);
+}
+
+export const auth = authInstance;
+export const firestoreDb = firestoreDbInstance;
+export const googleAuthProvider = googleAuthProviderInstance;
 
 // Keep Firebase Auth ID token strictly in memory (never in localStorage)
 let inMemoryIdToken: string | null = null;
 
-onAuthStateChanged(auth, async (user) => {
-  if (user) {
-    try {
-      inMemoryIdToken = await user.getIdToken();
-    } catch {
-      inMemoryIdToken = null;
-    }
-  } else {
-    inMemoryIdToken = null;
+if (auth) {
+  try {
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          inMemoryIdToken = await user.getIdToken();
+        } catch {
+          inMemoryIdToken = null;
+        }
+      } else {
+        inMemoryIdToken = null;
+      }
+    });
+  } catch (err) {
+    console.warn('onAuthStateChanged notice:', err);
   }
-});
+}
 
 export async function getAuthBearerHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (auth.currentUser) {
+  if (auth?.currentUser) {
     try {
       inMemoryIdToken = await auth.currentUser.getIdToken();
     } catch {
@@ -49,16 +80,31 @@ export async function getAuthBearerHeaders(): Promise<Record<string, string>> {
 }
 
 export async function signInWithGooglePopup(): Promise<User | null> {
-  const result = await signInWithPopup(auth, googleAuthProvider);
-  if (result.user) {
-    inMemoryIdToken = await result.user.getIdToken();
+  if (!auth || !googleAuthProvider) {
+    console.warn('Firebase Auth/Provider is not configured on this environment.');
+    return null;
   }
-  return result.user;
+  try {
+    const result = await signInWithPopup(auth, googleAuthProvider);
+    if (result.user) {
+      inMemoryIdToken = await result.user.getIdToken();
+    }
+    return result.user;
+  } catch (err) {
+    console.warn('Google Popup sign-in notice:', err);
+    return null;
+  }
 }
 
 export async function signOutFirebase(): Promise<void> {
   inMemoryIdToken = null;
-  await fbSignOut(auth);
+  if (auth) {
+    try {
+      await fbSignOut(auth);
+    } catch {
+      // ignore
+    }
+  }
 }
 
 export { onAuthStateChanged, type User };

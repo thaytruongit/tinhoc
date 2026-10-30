@@ -18,6 +18,7 @@ import {
   ApplicationThreeTasksActivity,
 } from './InteractiveActivities';
 import { PeerReviewModal } from './PeerReviewModal';
+import { getDefaultLectureSlides } from './LectureSlideManagerModal';
 import {
   playStageBroadcastSound,
   triggerSynchronizedCelebration,
@@ -37,6 +38,8 @@ interface StudentLiveRoomProps {
   onSaveSubmission?: (sub: Partial<TaggedLessonSubmission>) => void;
 }
 
+type StudentLiveViewId = 'slide' | 1 | 2 | 3 | 'hd3-practice' | 4;
+
 export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
   currentStudent,
   students,
@@ -48,26 +51,112 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
   onAwardXp,
   onShowToast,
 }) => {
+  const lessonKey = `k${periodSpec.grade}-tiet-${periodSpec.period}`;
   const teacherCurrentStage = (liveSession?.activeStage as 1 | 2 | 3 | 4) || 1;
-  const [activeStage, setActiveStage] = useState<1 | 2 | 3 | 4>(teacherCurrentStage);
+  const teacherActiveView = liveSession?.activeLiveView;
+
+  const resolveInitialView = (): StudentLiveViewId => {
+    if (teacherActiveView === 'slide') return 'slide';
+    if (teacherActiveView === 'hd3-practice') return 'hd3-practice';
+    if (teacherActiveView === 'hd1') return 1;
+    if (teacherActiveView === 'hd2') return 2;
+    if (teacherActiveView === 'hd3') return 3;
+    if (teacherActiveView === 'hd4') return 4;
+    return teacherCurrentStage;
+  };
+
+  const [activeView, setActiveView] = useState<StudentLiveViewId>(resolveInitialView);
   const [stage2SubTab, setStage2SubTab] = useState<'drag' | 'fill' | 'match' | 'short'>('drag');
   const [showPeerReviewModal, setShowPeerReviewModal] = useState(false);
-  const [completedStages, setCompletedStages] = useState<Record<number, boolean>>({});
+  const [completedStages, setCompletedStages] = useState<Record<string, boolean>>({});
 
-  // Track last teacher broadcast stage so whenever Teacher switches activity, Student automatically follows
+  // Slide state synchronized with Teacher
+  const uploadedDeck = liveSession?.lectureSlidesByLesson?.[lessonKey];
+  const slidesList =
+    uploadedDeck?.slides && uploadedDeck.slides.length > 0
+      ? uploadedDeck.slides
+      : getDefaultLectureSlides(periodSpec);
+  const deckFileName =
+    uploadedDeck?.fileName ||
+    `Bai_giang_Khoi_${periodSpec.grade}_Tiet_${periodSpec.period}.pptx`;
+  const deckFileType = uploadedDeck?.fileType || 'pptx';
+  const deckPdfDataUrl = uploadedDeck?.pdfDataUrl;
+  const teacherSlideIndex = liveSession?.activeSlideIndexByLesson?.[lessonKey] || 0;
+  const [studentSlideIndex, setStudentSlideIndex] = useState<number>(teacherSlideIndex);
+
+  useEffect(() => {
+    setStudentSlideIndex(teacherSlideIndex);
+  }, [teacherSlideIndex]);
+
+  // Synchronized lock states for Slide Deck and Stage 3 Practical Activity
+  const isSlideDeckUnlocked =
+    liveSession?.unlockedSlideDeckByLesson?.[lessonKey] ?? true;
+  const isPracticeStage3Unlocked = Boolean(
+    liveSession?.unlockedPracticeStage3ByLesson?.[lessonKey]
+  );
+
+  // Track last teacher broadcast view/stage so whenever Teacher switches activity, Student automatically follows
   const lastTeacherStageRef = useRef<number>(teacherCurrentStage);
+  const lastTeacherViewRef = useRef<string | undefined>(teacherActiveView);
+
+  useEffect(() => {
+    if (teacherActiveView && teacherActiveView !== lastTeacherViewRef.current) {
+      lastTeacherViewRef.current = teacherActiveView;
+      if (teacherActiveView === 'slide') {
+        setActiveView('slide');
+        playStageBroadcastSound();
+        onShowToast(
+          '📢 Giáo viên vừa phát trực tiếp Slide Bài Giảng — Màn hình của em đã tự động chuyển sang Slide Bài Giảng!'
+        );
+        return;
+      }
+      if (teacherActiveView === 'hd3-practice') {
+        setActiveView('hd3-practice');
+        playStageBroadcastSound();
+        onShowToast(
+          '📢 Giáo viên vừa phát trực tiếp Hoạt động 3 (Tiết Thực hành) — Màn hình của em đã tự động mở Thực hành!'
+        );
+        return;
+      }
+      const stageMap: Record<string, 1 | 2 | 3 | 4> = {
+        hd1: 1,
+        hd2: 2,
+        hd3: 3,
+        hd4: 4,
+      };
+      const mapped = stageMap[teacherActiveView];
+      if (mapped) {
+        lastTeacherStageRef.current = mapped;
+        setActiveView(mapped);
+        playStageBroadcastSound();
+        onShowToast(
+          `📢 Giáo viên vừa phát trực tiếp Hoạt động ${mapped} — Màn hình của em đã tự động chuyển sang Hoạt động ${mapped}!`
+        );
+      }
+    }
+  }, [teacherActiveView]);
 
   useEffect(() => {
     const incomingStage = liveSession?.activeStage;
     if (incomingStage && incomingStage !== lastTeacherStageRef.current) {
       lastTeacherStageRef.current = incomingStage;
-      setActiveStage(incomingStage);
+      setActiveView(incomingStage);
       playStageBroadcastSound();
       onShowToast(
         `📢 Giáo viên vừa phát trực tiếp Hoạt động ${incomingStage} — Màn hình của em đã tự động chuyển sang Hoạt động ${incomingStage}!`
       );
     }
   }, [liveSession?.activeStage]);
+
+  // When Teacher exits the live room or ends broadcast, automatically close student live room
+  useEffect(() => {
+    if (liveSession && liveSession.isBroadcasting === false) {
+      onShowToast(
+        '🔔 Tiết Live đã kết thúc! Thầy/Cô đã đánh dấu hoàn thành tiết học — Toàn bộ hoạt động đã được mở khóa để các em tự luyện!'
+      );
+      onExitLiveRoom();
+    }
+  }, [liveSession?.isBroadcasting, onExitLiveRoom, onShowToast]);
 
   // Stage 2 local state
   const [dragSlots, setDragSlots] = useState<Record<number, string | null>>({});
@@ -96,10 +185,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
         name: currentStudent.partnerName || 'Nguyễn Bảo An',
       };
 
-  // A stage is unlocked if:
-  // 1) It is Stage 1, OR
-  // 2) It is unlocked in unlockedStages, OR
-  // 3) It is <= the teacher's current activeStage (so students can ALWAYS go back to previous activities to finish them!)
   const isStageUnlocked = (stage: 1 | 2 | 3 | 4): boolean => {
     return Boolean(
       stage === 1 ||
@@ -108,40 +193,65 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     );
   };
 
-  // Nav items per Image 1
-  const navItems = [
+  const isViewUnlocked = (viewId: StudentLiveViewId): boolean => {
+    if (viewId === 'slide') return isSlideDeckUnlocked;
+    if (viewId === 'hd3-practice') return isPracticeStage3Unlocked;
+    return isStageUnlocked(viewId);
+  };
+
+  const navItems: {
+    id: StudentLiveViewId;
+    label: string;
+    icon: string;
+    points: string;
+  }[] = [
     {
-      id: 1 as const,
+      id: 'slide',
+      label: 'Slide Bài Giảng',
+      icon: 'slideshow',
+      points: 'PDF/PPTX',
+    },
+    {
+      id: 1,
       label: 'Khởi động',
       icon: 'psychology',
       points: '1.0đ',
     },
     {
-      id: 2 as const,
+      id: 2,
       label: 'Khám phá',
       icon: 'menu_book',
       points: '4.0đ',
     },
     {
-      id: 3 as const,
+      id: 3,
       label: 'Luyện tập',
       icon: 'extension',
       points: '3.0đ',
     },
     {
-      id: 4 as const,
+      id: 'hd3-practice',
+      label: 'HĐ 3 (Tiết Thực hành)',
+      icon: 'folder_managed',
+      points: 'Thực hành',
+    },
+    {
+      id: 4,
       label: 'Vận dụng',
       icon: 'assignment_turned_in',
       points: '2.0đ',
     },
   ];
 
-  const markStageCompleted = (stage: 1 | 2 | 3 | 4, xpBonus: number, msg: string) => {
-    setCompletedStages((prev) => ({ ...prev, [stage]: true }));
+  const markStageCompleted = (stageKey: string | number, xpBonus: number, msg: string) => {
+    setCompletedStages((prev) => ({ ...prev, [String(stageKey)]: true }));
     triggerSynchronizedCelebration('xp');
     onAwardXp(xpBonus);
     onShowToast(msg);
   };
+
+  const safeSlideIdx = Math.min(studentSlideIndex, Math.max(0, slidesList.length - 1));
+  const activeSlide = slidesList[safeSlideIdx];
 
   return (
     <div className="flex w-full min-h-screen bg-white text-slate-900">
@@ -159,32 +269,38 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
             <span>Trang chủ</span>
           </button>
 
-          {/* 4 Activities Menu matching Image 1 */}
+          {/* Activities + Slide + Practice Menu */}
           <div className="flex flex-col gap-1.5">
             <span className="px-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
               Tiến trình bài học Live
             </span>
             <nav className="flex flex-col gap-2">
               {navItems.map((item) => {
-                const unlocked = isStageUnlocked(item.id);
-                const isActive = activeStage === item.id;
-                const isTeacherBroadcastingThis = teacherCurrentStage === item.id;
-                const isDone = Boolean(completedStages[item.id]);
+                const unlocked = isViewUnlocked(item.id);
+                const isActive = activeView === item.id;
+                const isTeacherBroadcastingThis =
+                  (item.id === 'slide' && teacherActiveView === 'slide') ||
+                  (item.id === 'hd3-practice' && teacherActiveView === 'hd3-practice') ||
+                  (typeof item.id === 'number' &&
+                    teacherCurrentStage === item.id &&
+                    teacherActiveView !== 'slide' &&
+                    teacherActiveView !== 'hd3-practice');
+                const isDone = Boolean(completedStages[String(item.id)]);
 
                 return (
                   <button
-                    key={item.id}
+                    key={String(item.id)}
                     type="button"
                     onClick={() => {
                       if (!unlocked) {
                         onShowToast(
-                          `🔒 Hoạt động ${item.id} (${item.label}) đang chờ Giáo viên phát hoặc mở khóa!`
+                          `🔒 "${item.label}" đang khóa — Chờ Giáo viên mở khóa trên màn hình điều khiển!`
                         );
                         return;
                       }
-                      setActiveStage(item.id);
+                      setActiveView(item.id);
                     }}
-                    className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl text-left font-bold text-sm transition-all cursor-pointer ${
+                    className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-left font-bold text-sm transition-all cursor-pointer ${
                       isActive
                         ? 'bg-orange-50 text-orange-900 border-2 border-orange-300 shadow-xs'
                         : unlocked
@@ -194,7 +310,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <span
-                        className={`material-symbols-outlined text-[22px] ${
+                        className={`material-symbols-outlined text-[21px] ${
                           isActive
                             ? 'text-orange-600'
                             : unlocked
@@ -225,7 +341,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                           ✓ Xong
                         </span>
                       ) : (
-                        <span className="text-[11px] font-bold text-slate-500">
+                        <span className="text-[10px] font-bold text-slate-500">
                           {item.points}
                         </span>
                       )}
@@ -243,7 +359,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
               <span>Đồng bộ tự động &amp; Quay lại</span>
             </div>
             <p className="text-[11px] text-sky-700 leading-relaxed">
-              Màn hình tự động chuyển khi Giáo viên phát hoạt động mới. Em có thể bấm vào các hoạt động trước để hoàn thiện bài!
+              Màn hình tự động chuyển khi Giáo viên phát Slide hoặc hoạt động mới. Em có thể bấm vào các mục đã mở khóa để hoàn thiện bài!
             </p>
           </div>
         </div>
@@ -292,7 +408,15 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
           <div className="flex items-center gap-3 min-w-0">
             <div className="px-3 py-1 rounded-full bg-red-50 text-red-600 border border-red-200 text-xs font-black flex items-center gap-1.5 shrink-0">
               <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
-              <span>ĐANG HỌC LIVE (HĐ {teacherCurrentStage})</span>
+              <span>
+                ĐANG HỌC LIVE (
+                {teacherActiveView === 'slide'
+                  ? 'Slide Bài Giảng'
+                  : teacherActiveView === 'hd3-practice'
+                  ? 'HĐ 3 Thực Hành'
+                  : `HĐ ${teacherCurrentStage}`}
+                )
+              </span>
             </div>
             <h1 className="text-base sm:text-lg font-black text-slate-900 truncate">
               Khối {periodSpec.grade} • Tiết {periodSpec.period}: {periodSpec.lessonTitle}
@@ -332,98 +456,146 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
           </div>
         </header>
 
-        {/* Content of the active stage */}
+        {/* Content of the active view */}
         <div className="p-6 sm:p-8 max-w-5xl mx-auto w-full flex flex-col gap-5">
-          {/* Banner when viewing a previous activity while Teacher is broadcasting a newer activity */}
-          {activeStage !== teacherCurrentStage && (
-            <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-50 via-orange-50 to-sky-50 border border-amber-200 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
-              <div className="flex items-center gap-2.5">
-                <span className="material-symbols-outlined text-orange-600 text-[22px]">
-                  history_edu
-                </span>
-                <div className="text-xs sm:text-sm text-slate-800">
-                  Em đang xem lại <strong>Hoạt động {activeStage}</strong> để hoàn thiện bài. Giáo viên hiện đang phát{' '}
-                  <strong className="text-red-600">Hoạt động {teacherCurrentStage}</strong>.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveStage(teacherCurrentStage)}
-                className="px-4 py-2 rounded-full bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5 transition-all"
-              >
-                <span className="material-symbols-outlined text-[16px]">sensors</span>
-                <span>Chuyển tới Hoạt động {teacherCurrentStage} cùng Giáo viên →</span>
-              </button>
-            </div>
-          )}
-
-          {/* Quick Previous / Next Activity Navigation Bar for Student */}
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-white px-5 py-3.5 rounded-2xl border border-slate-200/80 shadow-2xs">
-            <div className="flex items-center gap-2">
-              {activeStage > 1 ? (
-                <button
-                  type="button"
-                  onClick={() => setActiveStage((activeStage - 1) as 1 | 2 | 3 | 4)}
-                  className="px-4 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
-                >
-                  <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-                  <span>
-                    Quay lại Hoạt động {activeStage - 1} ({navItems[activeStage - 2].label}) để hoàn thiện
-                  </span>
-                </button>
-              ) : (
-                <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-[16px] text-orange-500">
-                    flag
-                  </span>
-                  <span>Bắt đầu từ Hoạt động 1: Khởi động</span>
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              {activeStage < 4 && isStageUnlocked((activeStage + 1) as 1 | 2 | 3 | 4) && (
-                <button
-                  type="button"
-                  onClick={() => setActiveStage((activeStage + 1) as 1 | 2 | 3 | 4)}
-                  className="px-4 py-2 rounded-full bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
-                >
-                  <span>
-                    Sang Hoạt động {activeStage + 1} ({navItems[activeStage].label})
-                  </span>
-                  <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {!isStageUnlocked(activeStage) ? (
-            /* LOCKED STAGE NOTICE */
+          {!isViewUnlocked(activeView) ? (
+            /* LOCKED ITEM NOTICE */
             <div className="p-12 rounded-3xl bg-white border-2 border-dashed border-slate-200 text-center flex flex-col items-center gap-4 shadow-xs">
               <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">
                 <span className="material-symbols-outlined text-[32px]">lock_clock</span>
               </div>
               <div>
                 <h2 className="text-xl font-bold text-slate-900">
-                  Hoạt động {activeStage}: {navItems.find((n) => n.id === activeStage)?.label} đang chờ Giáo viên mở khóa
+                  {navItems.find((n) => n.id === activeView)?.label} đang chờ Giáo viên mở khóa
                 </h2>
                 <p className="text-sm text-slate-500 max-w-md mt-1">
-                  Thầy/Cô đang điều khiển tiến trình lớp học trực tiếp. Khi thầy/cô chuyển sang hoạt động này, màn hình của em sẽ tự động mở khóa và hiển thị ngay!
+                  Thầy/Cô đang điều khiển tiến trình lớp học trực tiếp. Khi thầy/cô bấm mở khóa mục này, màn hình của em sẽ tự động mở khóa và hiển thị ngay!
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setActiveStage(teacherCurrentStage)}
+                onClick={() => setActiveView(resolveInitialView())}
                 className="px-5 py-2.5 rounded-full bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-sm cursor-pointer"
               >
-                Quay về Hoạt động {teacherCurrentStage} đang mở
+                Quay về mục Giáo viên đang phát
               </button>
             </div>
           ) : (
-            /* UNLOCKED STAGE CONTENT */
             <div className="flex flex-col gap-6">
+              {/* VIEW 0: SLIDE BÀI GIẢNG (PDF/PPTX) ĐỒNG BỘ */}
+              {activeView === 'slide' && (
+                <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-800 flex items-center justify-center">
+                        <span className="material-symbols-outlined text-[22px]">slideshow</span>
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-bold text-slate-900">
+                          Slide Bài Giảng: {deckFileName}
+                        </h2>
+                        <p className="text-xs text-slate-500">
+                          Đồng bộ trực tiếp theo trang trình chiếu của Giáo viên ({deckFileType.toUpperCase()})
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[15px]">lock_open</span>
+                        <span>GV đã mở khóa Slide</span>
+                      </span>
+                      {studentSlideIndex !== teacherSlideIndex && (
+                        <button
+                          type="button"
+                          onClick={() => setStudentSlideIndex(teacherSlideIndex)}
+                          className="px-3 py-1 rounded-full bg-indigo-600 text-white text-xs font-bold cursor-pointer"
+                        >
+                          Đồng bộ về Slide {teacherSlideIndex + 1} của GV
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {deckPdfDataUrl ? (
+                    <div className="w-full h-[540px] rounded-2xl overflow-hidden border border-slate-200 bg-slate-900">
+                      <iframe
+                        src={deckPdfDataUrl}
+                        title={deckFileName}
+                        className="w-full h-full border-0"
+                      />
+                    </div>
+                  ) : activeSlide ? (
+                    <div className="rounded-3xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-7 sm:p-10 shadow-xl min-h-[380px] flex flex-col justify-between relative overflow-hidden">
+                      <div className="relative z-10 flex items-center justify-between border-b border-white/15 pb-4">
+                        <span className="px-3 py-1 rounded-full bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 text-xs font-black uppercase tracking-wider">
+                          Khối {periodSpec.grade} • Tiết {periodSpec.period} • Slide {safeSlideIdx + 1}/{slidesList.length}
+                        </span>
+                        <span className="text-xs text-slate-300 font-semibold">
+                          {deckFileName}
+                        </span>
+                      </div>
+
+                      <div className="relative z-10 my-auto py-6 flex flex-col gap-4">
+                        <div>
+                          <h3 className="text-xl sm:text-2xl font-black text-white leading-tight">
+                            {activeSlide.title}
+                          </h3>
+                          {activeSlide.subtitle && (
+                            <p className="text-sm text-indigo-200 font-semibold mt-1">
+                              {activeSlide.subtitle}
+                            </p>
+                          )}
+                        </div>
+                        <ul className="flex flex-col gap-3 mt-1">
+                          {activeSlide.bulletPoints.map((b: string, i: number) => (
+                            <li
+                              key={i}
+                              className="flex items-start gap-3 text-sm sm:text-base text-slate-100 font-medium leading-relaxed"
+                            >
+                              <span className="w-6 h-6 rounded-full bg-indigo-500 text-white font-black text-xs flex items-center justify-center shrink-0 mt-0.5">
+                                {i + 1}
+                              </span>
+                              <span>{b}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <div className="relative z-10 pt-4 border-t border-white/15 flex flex-wrap items-center justify-between gap-3">
+                        <span className="text-xs text-indigo-200">
+                          {activeSlide.highlightNote || 'Theo dõi bài giảng của Giáo viên trên lớp'}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={safeSlideIdx === 0}
+                            onClick={() => setStudentSlideIndex(Math.max(0, safeSlideIdx - 1))}
+                            className="px-3.5 py-1.5 rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-40 text-white text-xs font-bold cursor-pointer flex items-center gap-1"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                            <span>Trang trước</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={safeSlideIdx >= slidesList.length - 1}
+                            onClick={() =>
+                              setStudentSlideIndex(Math.min(slidesList.length - 1, safeSlideIdx + 1))
+                            }
+                            className="px-3.5 py-1.5 rounded-full bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 text-white text-xs font-bold cursor-pointer flex items-center gap-1"
+                          >
+                            <span>Trang tiếp</span>
+                            <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
               {/* STAGE 1: KHỞI ĐỘNG */}
-              {activeStage === 1 && (
+              {activeView === 1 && (
                 <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-5">
                   <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                     <div className="flex items-center gap-3">
@@ -464,7 +636,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
               )}
 
               {/* STAGE 2: KHÁM PHÁ (WORKSHEET) */}
-              {activeStage === 2 && (
+              {activeView === 2 && (
                 <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-6">
                   <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
                     <div className="flex items-center gap-3">
@@ -573,8 +745,8 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                 </div>
               )}
 
-              {/* STAGE 3: LUYỆN TẬP (ARENA 25S & DRIVE PRACTICAL) */}
-              {activeStage === 3 && (
+              {/* STAGE 3: LUYỆN TẬP (ARENA 25S & SYNCHRONIZED PRACTICAL ACTIVITY) */}
+              {activeView === 3 && (
                 <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-6">
                   <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                     <div className="flex items-center gap-3">
@@ -584,7 +756,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                       <div>
                         <h2 className="text-lg font-bold text-slate-900">Hoạt động 3: Luyện tập</h2>
                         <p className="text-xs text-slate-500">
-                          Đấu trường trắc nghiệm 25s &amp; Nộp sản phẩm thực hành
+                          Đấu trường trắc nghiệm 25s &amp; Hoạt động Thực hành đồng bộ
                         </p>
                       </div>
                     </div>
@@ -616,8 +788,9 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     }}
                   />
 
-                  {periodSpec.lessonType === 'practice' && (
-                    <div className="mt-4 pt-4 border-t border-slate-100">
+                  {/* Synchronized Lock/Unlock Practical Activity inside Stage 3 */}
+                  <div className="mt-4 pt-4 border-t border-slate-100">
+                    {isPracticeStage3Unlocked ? (
                       <GoogleDrivePracticalActivity
                         classId={currentStudent.classId}
                         studentName={currentStudent.name}
@@ -631,19 +804,83 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                         existingSubmissions={[]}
                         onSubmitProduct={() =>
                           markStageCompleted(
-                            3,
+                            'hd3-practice',
                             50,
                             '🎵☁️ Đã nộp sản phẩm thực hành lên Google Drive thành công (+50 XP)!'
                           )
                         }
                       />
+                    ) : (
+                      <div className="p-6 rounded-2xl bg-slate-50 border border-dashed border-slate-200 flex items-center justify-between gap-4 flex-wrap">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">
+                            <span className="material-symbols-outlined text-[20px]">lock</span>
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-800">
+                              Hoạt động 3 (Tiết Thực hành) đang khóa
+                            </h4>
+                            <p className="text-xs text-slate-500">
+                              Khi Giáo viên mở khóa Thực hành trên phòng Live, khu vực nộp bài thực hành sẽ tự động mở!
+                            </p>
+                          </div>
+                        </div>
+                        <span className="px-3 py-1 rounded-full bg-slate-200 text-slate-700 text-xs font-bold">
+                          🔒 Chờ GV mở khóa
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* DEDICATED VIEW: HĐ 3 (TIẾT THỰC HÀNH) ĐỒNG BỘ KHOÁ/MỞ */}
+              {activeView === 'hd3-practice' && (
+                <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-6">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-teal-100 text-teal-800 flex items-center justify-center font-black">
+                        <span className="material-symbols-outlined text-[22px]">folder_managed</span>
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-bold text-slate-900">
+                          Hoạt động 3 (Tiết Thực hành) — Nộp Sản Phẩm Máy Tính
+                        </h2>
+                        <p className="text-xs text-slate-500">
+                          Đã được Giáo viên mở khóa đồng bộ • Nộp bài thực hành trực tiếp lên Cây thư mục lớp {currentStudent.classId}
+                        </p>
+                      </div>
                     </div>
-                  )}
+                    <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[15px]">lock_open</span>
+                      <span>Đang mở khóa</span>
+                    </span>
+                  </div>
+
+                  <GoogleDrivePracticalActivity
+                    classId={currentStudent.classId}
+                    studentName={currentStudent.name}
+                    studentId={currentStudent.id}
+                    studentUsername={currentStudent.username || currentStudent.id}
+                    grade={periodSpec.grade}
+                    period={periodSpec.period}
+                    lessonTitle={periodSpec.lessonTitle}
+                    folderName={`Thư mục Tiết ${periodSpec.period}`}
+                    drivePath={`Google Drive / Lớp ${currentStudent.classId}`}
+                    existingSubmissions={[]}
+                    onSubmitProduct={() =>
+                      markStageCompleted(
+                        'hd3-practice',
+                        50,
+                        '🎵☁️ Đã nộp sản phẩm thực hành lên Google Drive thành công (+50 XP)!'
+                      )
+                    }
+                  />
                 </div>
               )}
 
               {/* STAGE 4: VẬN DỤNG */}
-              {activeStage === 4 && (
+              {activeView === 4 && (
                 <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-6">
                   <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                     <div className="flex items-center gap-3">
