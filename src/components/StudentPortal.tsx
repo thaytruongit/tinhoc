@@ -190,7 +190,34 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       liveSession.activeClassId === currentStudent.classId
   );
 
-  // When Teacher is broadcasting Live to this student's class, lock the student to the Live period
+  const [studentManuallyExitedLive, setStudentManuallyExitedLive] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const handleFsChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  const handleToggleFullscreen = async () => {
+    if (typeof document === 'undefined') return;
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    } catch {
+      setIsFullscreen((prev) => !prev);
+    }
+  };
+
+  // When Teacher is broadcasting Live to this student's class, lock the student to the Live period and open StudentLiveRoom
   useEffect(() => {
     if (isLiveForStudentClass && liveSession?.activePeriod) {
       if (openedPeriodNumber !== liveSession.activePeriod) {
@@ -199,8 +226,25 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       if (liveSession.activeStage) {
         setActiveInlineStage(liveSession.activeStage);
       }
+      if (!studentManuallyExitedLive) {
+        setIsInLiveRoom(true);
+      }
     }
-  }, [isLiveForStudentClass, liveSession?.activePeriod, liveSession?.activeStage]);
+  }, [
+    isLiveForStudentClass,
+    liveSession?.activePeriod,
+    liveSession?.activeStage,
+    liveSession?.activeLiveView,
+    studentManuallyExitedLive,
+  ]);
+
+  // Reset manual exit flag whenever Teacher switches Live view or stage so student re-syncs immediately
+  useEffect(() => {
+    if (isLiveForStudentClass) {
+      setStudentManuallyExitedLive(false);
+      setIsInLiveRoom(true);
+    }
+  }, [isLiveForStudentClass, liveSession?.activeLiveView, liveSession?.activeStage]);
 
   // When Teacher stops broadcasting Live, automatically close student live room
   useEffect(() => {
@@ -896,11 +940,17 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       );
       return;
     }
+    setStudentManuallyExitedLive(false);
     setOpenedPeriodNumber(liveSession.activePeriod);
     setActiveInlineStage(liveSession.activeStage || 1);
+    setIsInLiveRoom(true);
     onChangeView('trang-chu');
     onShowToast(
-      `Đã đồng bộ vào Tiết Live của Lớp ${currentStudent.classId}: Khối ${selectedGrade} • Tiết ${liveSession.activePeriod} (Hoạt động ${liveSession.activeStage})!`
+      `Đã đồng bộ vào Tiết Live của Lớp ${currentStudent.classId}: Khối ${selectedGrade} • Tiết ${liveSession.activePeriod} (${
+        liveSession.activeLiveView === 'slide'
+          ? 'Slide Bài Giảng'
+          : `Hoạt động ${liveSession.activeStage}`
+      })!`
     );
   };
 
@@ -1085,8 +1135,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     sendGeminiChatMessage(tutorInput);
   };
 
-  // DEDICATED STUDENT LIVE ROOM (BRIGHT WHITE THEME, AUTO-FOLLOWS TEACHER BROADCAST STAGE)
-  if (isInLiveRoom && openedPeriodNumber !== null) {
+  // DEDICATED STUDENT LIVE ROOM (BRIGHT WHITE THEME, AUTO-FOLLOWS TEACHER BROADCAST STAGE & SLIDE)
+  if ((isInLiveRoom || (isLiveForStudentClass && !studentManuallyExitedLive)) && openedPeriodNumber !== null) {
     return (
       <StudentLiveRoom
         currentStudent={currentStudent}
@@ -1096,6 +1146,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         unlockedStages={currentPeriodUnlocked}
         companionMode={companionMode}
         onExitLiveRoom={() => {
+          setStudentManuallyExitedLive(true);
           setIsInLiveRoom(false);
           setOpenedPeriodNumber(null);
         }}
@@ -1396,6 +1447,19 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
               <button
                 type="button"
+                onClick={handleToggleFullscreen}
+                aria-label="Phóng to toàn màn hình"
+                className="px-3 py-1.5 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-label-sm text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer border border-indigo-200"
+                title={isFullscreen ? 'Thu nhỏ màn hình (Esc)' : 'Phóng to toàn màn hình để xem bài giảng rõ ràng hơn'}
+              >
+                <span className="material-symbols-outlined text-[16px]">
+                  {isFullscreen ? 'fullscreen_exit' : 'fullscreen'}
+                </span>
+                <span className="hidden sm:inline">{isFullscreen ? 'Thu nhỏ' : 'Phóng to'}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={onToggleDarkMode}
                 aria-label="Chuyển đổi Chế độ tối"
                 className="w-8 h-8 rounded-full bg-surface-container text-on-surface-variant flex items-center justify-center hover:bg-surface-container-high transition-colors cursor-pointer"
@@ -1475,6 +1539,19 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   {currentStudent.xp.toLocaleString()} XP
                 </span>
               </div>
+
+              <button
+                type="button"
+                onClick={handleToggleFullscreen}
+                aria-label="Phóng to toàn màn hình"
+                className="px-3.5 py-1.5 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-label-sm text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border border-indigo-200 shadow-2xs"
+                title={isFullscreen ? 'Thu nhỏ màn hình (Esc)' : 'Phóng to toàn màn hình để xem bài giảng rõ ràng hơn'}
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  {isFullscreen ? 'fullscreen_exit' : 'fullscreen'}
+                </span>
+                <span className="hidden sm:inline">{isFullscreen ? 'Thu nhỏ' : 'Phóng to'}</span>
+              </button>
 
               <button
                 type="button"

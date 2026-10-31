@@ -935,6 +935,10 @@ export interface LectureSlidePage {
   bulletPoints: string[];
   highlightNote?: string;
   imageUrl?: string;
+  videoUrl?: string;
+  videoTitle?: string;
+  storageFileId?: string;
+  compressedSizeKb?: number;
 }
 
 export interface LectureSlideDeck {
@@ -946,6 +950,9 @@ export interface LectureSlideDeck {
   fileSize: string;
   uploadedAt: string;
   pdfDataUrl?: string;
+  storageBucket?: string;
+  totalCompressedKb?: number;
+  defaultVideoUrl?: string;
   slides: LectureSlidePage[];
 }
 
@@ -961,6 +968,31 @@ export interface LiveClassroomSession {
   unlockedSlideDeckByLesson?: Record<string, boolean>;
   activeSlideIndexByLesson?: Record<string, number>;
   lectureSlidesByLesson?: Record<string, LectureSlideDeck>;
+  slideVideoStateByLesson?: Record<
+    string,
+    {
+      isPlaying: boolean;
+      videoUrl: string;
+      videoTitle?: string;
+      updatedAt: string;
+    }
+  >;
+  slideAutoAdvanceStateByLesson?: Record<
+    string,
+    {
+      enabled: boolean;
+      intervalSec: number;
+    }
+  >;
+  arenaCountdownStateByLesson?: Record<
+    string,
+    {
+      isRunning: boolean;
+      durationSec: number;
+      startedAtIso: string;
+      remainingSecOnPause?: number;
+    }
+  >;
   wheelCall: LiveWheelCallState | null;
   taughtPeriodsByClass?: Record<string, number[]>;
   learnedPeriodsByStudent?: Record<string, string[]>;
@@ -970,6 +1002,18 @@ export interface LiveClassroomSession {
   practicalSubmissions?: PracticalProductSubmission[];
   studentDraftsByKey?: Record<string, StudentWorkDraft>;
   taggedSubmissions?: TaggedLessonSubmission[];
+  lastPushNotification?: {
+    id: string;
+    title: string;
+    body: string;
+    stage?: 1 | 2 | 3 | 4 | 'slide' | 'hd3-practice';
+    stageLabel?: string;
+    lessonTitle?: string;
+    classId?: string;
+    grade?: number;
+    period?: number;
+    timestampIso: string;
+  } | null;
   updatedAt: string;
 }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   INITIAL_CLASSES,
   INITIAL_DRIVE_FOLDERS,
@@ -39,7 +39,11 @@ import { QuestionMasterInspectorModal } from './QuestionMasterInspectorModal';
 import { DataBoundary } from './DataBoundary';
 import { SlidePresenterManager } from './SlidePresenterManager';
 import { TeacherLivePresenterRoom } from './TeacherLivePresenterRoom';
-import { LectureSlideManagerModal } from './LectureSlideManagerModal';
+import {
+  getDefaultLectureSlides,
+  LectureSlideManagerModal,
+} from './LectureSlideManagerModal';
+import { resolvePresenterKeyAction } from '../utils/slideAndArenaController';
 
 export type TeacherTab =
   | 'trang-chu'
@@ -124,6 +128,31 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const [showLectureSlideModal, setShowLectureSlideModal] = useState(false);
   const [showResetAcademicYearModal, setShowResetAcademicYearModal] = useState(false);
   const [isResettingAcademicYear, setIsResettingAcademicYear] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const handleFsChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  const handleToggleFullscreen = async () => {
+    if (typeof document === 'undefined') return;
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    } catch {
+      setIsFullscreen((prev) => !prev);
+    }
+  };
 
   const gradePeriods = getPeriodsForGrade(selectedNotebookGrade);
   const selectedPeriodSpec: CurriculumPeriodSpec =
@@ -131,6 +160,134 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const selectedGradeSource =
     NOTEBOOK_GRADE_SOURCES.find((g) => g.grade === selectedNotebookGrade) ||
     NOTEBOOK_GRADE_SOURCES[0];
+
+  // Active lesson slide deck & BroadcastChannel reference for Space / ArrowRight slide navigation in TeacherPortal
+  const slideBroadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  const portalActiveGrade = liveSession?.activeGrade || selectedNotebookGrade;
+  const portalActivePeriod = liveSession?.activePeriod || selectedNotebookPeriod;
+  const portalLessonKey = `k${portalActiveGrade}-tiet-${portalActivePeriod}`;
+  const portalPeriodSpec =
+    getPeriodsForGrade(portalActiveGrade).find((p) => p.period === portalActivePeriod) ||
+    selectedPeriodSpec;
+  const portalSlideDeck = liveSession?.lectureSlidesByLesson?.[portalLessonKey];
+  const portalSlides =
+    portalSlideDeck?.slides && portalSlideDeck.slides.length > 0
+      ? portalSlideDeck.slides
+      : getDefaultLectureSlides(portalPeriodSpec);
+  const portalCurrentSlideIndex =
+    liveSession?.activeSlideIndexByLesson?.[portalLessonKey] ?? 0;
+
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const ch = new BroadcastChannel('cloudplay_realtime_sync');
+    slideBroadcastChannelRef.current = ch;
+    return () => {
+      ch.close();
+      slideBroadcastChannelRef.current = null;
+    };
+  }, []);
+
+  const handlePortalSlideStep = useCallback(
+    (direction: 'next' | 'prev') => {
+      if (portalSlides.length === 0) return;
+      const targetIdx =
+        direction === 'next'
+          ? Math.min(portalSlides.length - 1, portalCurrentSlideIndex + 1)
+          : Math.max(0, portalCurrentSlideIndex - 1);
+
+      const targetClassId = liveSession?.activeClassId || selectedClass;
+      const nowIso = new Date().toISOString();
+
+      // Update liveSession state & persist to backend / localStorage
+      if (onUpdateLiveSession) {
+        onUpdateLiveSession((prev) => ({
+          ...prev,
+          isBroadcasting: true,
+          activeGrade: portalActiveGrade,
+          activePeriod: portalActivePeriod,
+          activeClassId: targetClassId,
+          activeLiveView: 'slide',
+          unlockedSlideDeckByLesson: {
+            ...(prev.unlockedSlideDeckByLesson || {}),
+            [portalLessonKey]: true,
+          },
+          unlockedStagesByLesson: {
+            ...(prev.unlockedStagesByLesson || {}),
+            [portalLessonKey]: {
+              1: false,
+              2: false,
+              3: false,
+              4: false,
+            },
+          },
+          unlockedPracticeStage3ByLesson: {
+            ...(prev.unlockedPracticeStage3ByLesson || {}),
+            [portalLessonKey]: false,
+          },
+          activeSlideIndexByLesson: {
+            ...(prev.activeSlideIndexByLesson || {}),
+            [portalLessonKey]: targetIdx,
+          },
+          updatedAt: nowIso,
+        }));
+      }
+
+      // Broadcast slide state directly via BroadcastChannel to student devices
+      if (slideBroadcastChannelRef.current) {
+        slideBroadcastChannelRef.current.postMessage({
+          type: 'SLIDE_CHANGED',
+          lessonKey: portalLessonKey,
+          grade: portalActiveGrade,
+          period: portalActivePeriod,
+          classId: targetClassId,
+          slideIndex: targetIdx,
+          totalSlides: portalSlides.length,
+          activeLiveView: 'slide',
+          timestampIso: nowIso,
+        });
+      }
+
+      onShowToast(
+        direction === 'next'
+          ? `⏭️ Phím tắt / Bút trình chiếu (Space / →): Chuyển sang Slide ${targetIdx + 1}/${portalSlides.length} (Đã đồng bộ BroadcastChannel tới HS)`
+          : `⏮️ Phím tắt / Bút trình chiếu (←): Lùi về Slide ${targetIdx + 1}/${portalSlides.length} (Đã đồng bộ BroadcastChannel tới HS)`
+      );
+    },
+    [
+      portalSlides.length,
+      portalCurrentSlideIndex,
+      portalActiveGrade,
+      portalActivePeriod,
+      portalLessonKey,
+      liveSession?.activeClassId,
+      selectedClass,
+      onUpdateLiveSession,
+      onShowToast,
+    ]
+  );
+
+  // Keyboard event listener in TeacherPortal supporting 'Space' and 'ArrowRight' (and 'ArrowLeft')
+  useEffect(() => {
+    if (isLivePresenterOpen || showLectureSlideModal) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const target = e.target as HTMLElement | null;
+      const action = resolvePresenterKeyAction(
+        e.key,
+        e.code,
+        target?.tagName,
+        target?.isContentEditable
+      );
+      if (!action) return;
+
+      e.preventDefault();
+      handlePortalSlideStep(action);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isLivePresenterOpen, showLectureSlideModal, handlePortalSlideStep]);
 
   // Classes belonging to the currently selected grade (6, 7, 8, 9)
   const classesForSelectedGrade = classes.filter((c: ClassroomItem) => c.grade === selectedNotebookGrade);
@@ -1562,6 +1719,40 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           </div>
 
           <div className="flex items-center gap-space-sm">
+            {/* Quick Slide Broadcast & Clicker Control Pill in TeacherPortal Header */}
+            <div
+              className="hidden xl:flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-900 dark:text-indigo-200 text-xs font-bold"
+              title="Sử dụng phím Space hoặc mũi tên Phải (→) để chuyển slide bài giảng đồng bộ trực tiếp tới thiết bị học sinh"
+            >
+              <span className="material-symbols-outlined text-[16px] text-indigo-600 dark:text-indigo-400">
+                present_to_all
+              </span>
+              <span>
+                Slide K{portalActiveGrade}•T{portalActivePeriod}:{' '}
+                <strong className="text-indigo-700 dark:text-indigo-300">
+                  {Math.min(portalCurrentSlideIndex + 1, portalSlides.length)}/{portalSlides.length}
+                </strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => handlePortalSlideStep('prev')}
+                disabled={portalCurrentSlideIndex <= 0}
+                className="px-1.5 py-0.5 rounded bg-white/80 dark:bg-slate-800 hover:bg-white text-indigo-700 dark:text-indigo-300 disabled:opacity-40 cursor-pointer border border-indigo-500/20"
+                title="Slide trước (Phím mũi tên Trái ←)"
+              >
+                ←
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePortalSlideStep('next')}
+                disabled={portalCurrentSlideIndex >= portalSlides.length - 1}
+                className="px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-40 cursor-pointer shadow-2xs"
+                title="Chuyển Slide tiếp theo (Phím Space hoặc Mũi tên Phải →)"
+              >
+                Space / →
+              </button>
+            </div>
+
             {liveSession?.isBroadcasting && (
               <button
                 type="button"
@@ -1572,6 +1763,23 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                 <span>Phòng Live ({liveSession.activeClassId || selectedClass})</span>
               </button>
             )}
+
+            <button
+              type="button"
+              onClick={handleToggleFullscreen}
+              aria-label="Phóng to toàn màn hình"
+              className="px-3.5 py-1.5 rounded-full bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 font-label-sm text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer border border-indigo-200 dark:border-indigo-800"
+              title={
+                isFullscreen
+                  ? 'Thu nhỏ màn hình (Esc)'
+                  : 'Phóng to toàn màn hình để tối ưu hiển thị Slide bài giảng trên máy chiếu / màn hình tương tác'
+              }
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                {isFullscreen ? 'fullscreen_exit' : 'fullscreen'}
+              </span>
+              <span>{isFullscreen ? 'Thu nhỏ' : 'Phóng to'}</span>
+            </button>
 
             <button
               type="button"
@@ -1602,12 +1810,10 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
         {/* Main Workspace Stage */}
         <main className="w-full pt-16 bg-surface min-h-screen p-space-lg lg:p-space-xl">
-          {/* TAB 1: TRANG CHỦ GIÁO VIÊN — CHỌN KHỐI 6,7,8,9 -> LỘ TRÌNH 29 TIẾT HỌC -> TIẾN TRÌNH GIẢNG DẠY & ĐỒNG BỘ LIVE */}
+          {/* TAB 1: TRANG CHỦ GIÁO VIÊN — CHỌN KHỐI 6,7,8,9 -> LỘ TRÌNH 29 TIẾT HỌC & ĐỒNG BỘ LIVE */}
           {activeTab === 'trang-chu' && (
             <div className="flex flex-col gap-space-lg">
-              {/* CASE A: 29-PERIOD CURRICULUM ROADMAP GRID (DEFAULT ON TEACHER HOME) — REDESIGNED ACCORDING TO SPEC */}
-              {openedHomePeriod === null ? (
-                <div className="flex flex-col gap-5">
+              <div className="flex flex-col gap-5">
                   {/* SECTION 1: TOP BAR — CHỌN KHỐI (6, 7, 8, 9) & CHỌN LỚP CHI TIẾT */}
                   <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-2xs">
                     {/* Left: Chọn Khối */}
@@ -1876,7 +2082,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                                       applyNotebookBlueprintToAllStages(
                                         buildLessonBlueprintFromPeriod(spec)
                                       );
-                                      setOpenedHomePeriod(spec.period);
+                                      onChangeTab('bien-soan-stage-1');
                                     }}
                                     className="flex items-start justify-between gap-3 cursor-pointer"
                                   >
@@ -1963,227 +2169,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       </DataBoundary>
                     );
                   })()}
-                </div>
-              ) : (
-                /* CASE B: TIẾN TRÌNH GIẢNG DẠY CỦA TIẾT HỌC */
-                <div className="flex flex-col gap-space-lg">
-                  <div className="bg-surface-container-lowest rounded-2xl p-space-lg lg:p-space-xl shadow-md relative overflow-hidden flex flex-col gap-space-md">
-                    <div className="flex flex-wrap items-center justify-between gap-space-sm">
-                      <button
-                        type="button"
-                        onClick={() => setOpenedHomePeriod(null)}
-                        className="px-4 py-2 rounded-full bg-surface-container-low hover:bg-surface-container-high text-on-surface font-label-md text-label-md flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-                        <span>Quay lại Lộ trình 29 tiết học (Khối {selectedNotebookGrade})</span>
-                      </button>
-
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleToggleTaughtPeriodForClass(
-                              selectedNotebookGrade,
-                              selectedNotebookPeriod,
-                              selectedClass
-                            )
-                          }
-                          className={`px-4 py-2.5 rounded-full font-label-md text-label-md font-bold flex items-center gap-1.5 cursor-pointer shadow-sm ${
-                            (liveSession?.taughtPeriodsByClass?.[selectedClass] || []).includes(
-                              selectedNotebookPeriod
-                            )
-                              ? 'bg-tertiary text-on-tertiary'
-                              : 'bg-surface-container-low text-on-surface hover:bg-tertiary-fixed'
-                          }`}
-                        >
-                          <span className="material-symbols-outlined text-[18px]">task_alt</span>
-                          <span>
-                            {(liveSession?.taughtPeriodsByClass?.[selectedClass] || []).includes(
-                              selectedNotebookPeriod
-                            )
-                              ? `✓ Đã dạy Lớp ${selectedClass} (Đã mở Tự luyện)`
-                              : `Đánh dấu Đã dạy cho Lớp ${selectedClass}`}
-                          </span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleBroadcastLivePeriod(
-                              selectedNotebookGrade,
-                              selectedNotebookPeriod,
-                              true,
-                              selectedClass
-                            )
-                          }
-                          className="px-5 py-2.5 rounded-full bg-error text-on-error font-label-lg text-label-lg font-bold shadow-md hover:opacity-95 flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <span className="material-symbols-outlined text-[20px]">sensors</span>
-                          <span>
-                            🔴 Phát Live Tiết {selectedNotebookPeriod} Cho Lớp {selectedClass} (Khối {selectedNotebookGrade})
-                          </span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="px-3 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed-variant font-label-sm text-label-sm font-bold">
-                          Khối {selectedNotebookGrade} • Lớp {selectedClass} • {selectedPeriodSpec.topic}
-                        </span>
-                        <span className="px-3 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-label-sm text-label-sm font-bold">
-                          {selectedPeriodSpec.knowledgeSection}
-                        </span>
-                      </div>
-                      <h2 className="font-headline-lg text-headline-lg text-on-surface mt-1">
-                        TIẾN TRÌNH GIẢNG DẠY — {selectedPeriodSpec.lessonTitle}
-                      </h2>
-                      <p className="font-body-md text-body-md text-on-surface-variant mt-0.5">
-                        <strong>Yêu cầu cần đạt:</strong> {selectedPeriodSpec.yccd}
-                      </p>
-                    </div>
-
-                    {/* Serpentine 4-Activity Teaching Roadmap */}
-                    <div className="relative w-full py-6 px-2 overflow-x-auto">
-                      <div className="min-w-[820px] relative">
-                        <svg
-                          className="w-full h-36 absolute top-8 left-0 pointer-events-none"
-                          fill="none"
-                          viewBox="0 0 960 140"
-                        >
-                          <path
-                            d="M 60 70 C 180 20, 260 120, 380 65 C 500 10, 600 125, 720 70 C 800 35, 870 50, 920 65"
-                            opacity="0.6"
-                            stroke="#cbe6ff"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="18"
-                          />
-                          <path
-                            d="M 60 70 C 180 20, 260 120, 380 65 C 500 10, 600 125, 720 70 C 800 35, 870 50, 920 65"
-                            stroke="#4cb6fd"
-                            strokeDasharray="10 8"
-                            strokeLinecap="round"
-                            strokeWidth="6"
-                          />
-                        </svg>
-
-                        <div className="grid grid-cols-4 gap-4 relative z-10">
-                          {(
-                            [
-                              {
-                                stage: 1 as const,
-                                tab: 'bien-soan-stage-1' as TeacherTab,
-                                icon: 'videocam',
-                                title: 'Hoạt động 1: Khởi động',
-                                desc: 'Mở sẵn cho HS tìm hiểu trước • Video, Ô chữ, Tình huống',
-                                color: 'bg-tertiary-container text-on-tertiary-container',
-                              },
-                              {
-                                stage: 2 as const,
-                                tab: 'bien-soan-stage-2' as TeacherTab,
-                                icon: 'quiz',
-                                title: 'Hoạt động 2: Khám phá',
-                                desc: 'Kéo-Thả, Điền khuyết, Nối cột & Câu hỏi trả lời ngắn',
-                                color: 'bg-secondary-container text-on-secondary-container',
-                              },
-                              {
-                                stage: 3 as const,
-                                tab: 'bien-soan-stage-3' as TeacherTab,
-                                icon: 'sports_esports',
-                                title: 'Hoạt động 3: Luyện tập',
-                                desc: 'Đấu trường Trắc nghiệm 25s & Cây thư mục Google Drive',
-                                color: 'bg-primary-container text-on-primary-container',
-                              },
-                              {
-                                stage: 4 as const,
-                                tab: 'bien-soan-stage-4' as TeacherTab,
-                                icon: 'assignment_turned_in',
-                                title: 'Hoạt động 4: Vận dụng',
-                                desc: 'Dự án thực tế & Chấm Rubrics Thông tư 22',
-                                color: 'bg-surface-container-high text-on-surface',
-                              },
-                            ] as const
-                          ).map((node) => {
-                            const lessonKey = `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`;
-                            const isUnlocked =
-                              node.stage === 1 ||
-                              Boolean(
-                                liveSession?.unlockedStagesByLesson?.[lessonKey]?.[node.stage]
-                              );
-                            return (
-                              <div
-                                key={node.stage}
-                                className="flex flex-col items-center text-center group"
-                              >
-                                <div
-                                  onClick={() => onChangeTab(node.tab)}
-                                  className="relative w-20 h-20 rounded-full bg-surface-container-lowest p-2 shadow-lg group-hover:scale-105 transition-transform flex items-center justify-center cursor-pointer ring-2 ring-secondary/30"
-                                >
-                                  <div
-                                    className={`w-full h-full rounded-full ${node.color} flex items-center justify-center shadow-inner`}
-                                  >
-                                    <span className="material-symbols-outlined text-[30px]">
-                                      {node.icon}
-                                    </span>
-                                  </div>
-                                  <div
-                                    className={`absolute -top-1 -right-1 w-7 h-7 rounded-full flex items-center justify-center shadow-md ${
-                                      isUnlocked
-                                        ? 'bg-tertiary text-on-tertiary'
-                                        : 'bg-inverse-surface text-inverse-on-surface'
-                                    }`}
-                                  >
-                                    <span className="material-symbols-outlined text-[15px]">
-                                      {isUnlocked ? 'lock_open' : 'lock'}
-                                    </span>
-                                  </div>
-                                  <span className="absolute -bottom-2 px-2.5 py-0.5 rounded-full bg-surface-container-highest text-on-surface font-label-sm text-label-sm shadow-sm">
-                                    {node.stage}
-                                  </span>
-                                </div>
-
-                                <h4 className="font-headline-sm text-headline-sm text-on-surface mt-4">
-                                  {node.title}
-                                </h4>
-                                <p className="font-body-sm text-body-sm text-on-surface-variant max-w-[195px] mt-0.5">
-                                  {node.desc}
-                                </p>
-
-                                <div className="flex items-center gap-1.5 mt-2">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      onUnlockStage(
-                                        node.stage,
-                                        selectedNotebookGrade,
-                                        selectedNotebookPeriod
-                                      )
-                                    }
-                                    className="px-3 py-1 rounded-full bg-primary text-on-primary font-label-sm text-label-sm shadow-xs hover:opacity-95 cursor-pointer flex items-center gap-1"
-                                  >
-                                    <span className="material-symbols-outlined text-[14px]">
-                                      {isUnlocked ? 'check_circle' : 'lock_open'}
-                                    </span>
-                                    <span>{isUnlocked ? 'Đã mở cho HS' : 'Mở khóa Live'}</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => onChangeTab(node.tab)}
-                                    className="px-2.5 py-1 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm hover:bg-secondary-fixed cursor-pointer"
-                                  >
-                                    Biên soạn
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           )}
 

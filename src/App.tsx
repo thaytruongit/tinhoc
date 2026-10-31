@@ -256,6 +256,41 @@ export default function App() {
         setSelectedClass(data.classId);
       } else if (data.type === 'LIVE_SESSION_UPDATED' && data.session) {
         setLiveSession(data.session);
+      } else if (
+        data.type === 'SLIDE_CHANGED' &&
+        typeof data.lessonKey === 'string' &&
+        typeof data.slideIndex === 'number'
+      ) {
+        setLiveSession((prev) => ({
+          ...prev,
+          isBroadcasting: true,
+          activeGrade: data.grade || prev.activeGrade,
+          activePeriod: data.period || prev.activePeriod,
+          activeClassId: data.classId || prev.activeClassId,
+          activeLiveView: data.activeLiveView || 'slide',
+          unlockedSlideDeckByLesson: {
+            ...(prev.unlockedSlideDeckByLesson || {}),
+            [data.lessonKey]: true,
+          },
+          unlockedStagesByLesson: {
+            ...(prev.unlockedStagesByLesson || {}),
+            [data.lessonKey]: {
+              1: false,
+              2: false,
+              3: false,
+              4: false,
+            },
+          },
+          unlockedPracticeStage3ByLesson: {
+            ...(prev.unlockedPracticeStage3ByLesson || {}),
+            [data.lessonKey]: false,
+          },
+          activeSlideIndexByLesson: {
+            ...(prev.activeSlideIndexByLesson || {}),
+            [data.lessonKey]: data.slideIndex,
+          },
+          updatedAt: data.timestampIso || new Date().toISOString(),
+        }));
       }
     };
 
