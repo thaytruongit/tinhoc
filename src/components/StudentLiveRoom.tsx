@@ -95,6 +95,51 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
   const [completedStages, setCompletedStages] = useState<Record<string, boolean>>({});
   const [isStudentArenaReady, setIsStudentArenaReady] = useState<boolean>(false);
 
+  const [isFocusMode, setIsFocusMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('cloudplay_student_focus_mode') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleFocusMode = () => {
+    setIsFocusMode((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('cloudplay_student_focus_mode', String(next));
+      } catch {}
+      onShowToast(
+        next
+          ? '🎯 Đã BẬT Chế độ tập trung: Đã ẩn thanh điều hướng để em dồn 100% sự tập trung vào bài tập & slide!'
+          : '👁️ Đã TẮT Chế độ tập trung: Hiển thị lại thanh điều hướng bài học.'
+      );
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        (activeEl && (activeEl as HTMLElement).isContentEditable);
+      if (isInput) return;
+
+      if (e.key === 'f' || e.key === 'F') {
+        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          handleToggleFocusMode();
+        }
+      } else if (e.key === 'Escape' && isFocusMode) {
+        setIsFocusMode(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFocusMode, onShowToast]);
+
   useEffect(() => {
     setIsStudentArenaReady(false);
   }, [lessonKey]);
@@ -503,7 +548,8 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
 
   return (
     <div className="flex w-full min-h-screen bg-white text-slate-900">
-      {/* 1. LEFT VERTICAL SIDEBAR - BRIGHT WHITE THEME MATCHING IMAGE 1 */}
+      {/* 1. LEFT VERTICAL SIDEBAR - BRIGHT WHITE THEME MATCHING IMAGE 1 (HIDDEN IN FOCUS MODE) */}
+      {!isFocusMode && (
       <aside className="w-64 bg-white border-r border-slate-200 p-5 flex flex-col justify-between shrink-0 shadow-xs">
         <div className="flex flex-col gap-6">
           {/* Orange Rounded Pill "Trang chủ" Button from Image 1 */}
@@ -650,6 +696,22 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
           )}
         </div>
       </aside>
+      )}
+
+      {/* Floating restore button when in Focus Mode */}
+      {isFocusMode && (
+        <div className="fixed bottom-4 left-4 z-40">
+          <button
+            type="button"
+            onClick={handleToggleFocusMode}
+            className="px-3.5 py-2 rounded-full bg-slate-900/90 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg backdrop-blur-xs transition-all cursor-pointer border border-slate-700"
+            title="Hiển thị lại menu tiến trình (Phím F hoặc Esc)"
+          >
+            <span className="material-symbols-outlined text-[16px]">visibility</span>
+            <span>Hiện lại menu</span>
+          </button>
+        </div>
+      )}
 
       {/* 2. MAIN LIVE ROOM CONTENT AREA - BRIGHT WHITE STUDENT-FRIENDLY */}
       <main className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-slate-50/40">
@@ -706,6 +768,28 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
               <span>🔔</span>
               <span className="hidden sm:inline">
                 {pushPermissionGranted ? 'Push: Đã bật' : 'Bật Push Thầy Cô'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleToggleFocusMode}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-all ${
+                isFocusMode
+                  ? 'bg-indigo-600 text-white ring-2 ring-indigo-400/50 shadow-sm'
+                  : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+              }`}
+              title={
+                isFocusMode
+                  ? 'Đang bật Chế độ tập trung (Phím F). Bấm để hiển thị lại menu bên trái'
+                  : 'Bật Chế độ tập trung (Ẩn menu bên trái để mở rộng 100% không gian cho câu hỏi & slide) (Phím F)'
+              }
+            >
+              <span className={`material-symbols-outlined text-[16px] ${isFocusMode ? 'animate-pulse' : ''}`}>
+                center_focus_strong
+              </span>
+              <span className="hidden sm:inline">
+                {isFocusMode ? 'Tập trung: Bật' : 'Chế độ tập trung'}
               </span>
             </button>
 

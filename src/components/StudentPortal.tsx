@@ -46,6 +46,7 @@ import { StudentMetricsDashboard } from './StudentMetricsDashboard';
 import { StudentActivityFeed } from './StudentActivityFeed';
 import { BadgeLibraryPanel } from './BadgeLibraryPanel';
 import { VirtualWhiteboardPanel } from './VirtualWhiteboardPanel';
+import { ClassLeaderboardPanel } from './ClassLeaderboardPanel';
 
 export type StudentView = 'trang-chu' | 'tro-ly-ai-cu-vang' | 'huy-hieu' | 'bang-xep-hang' | 'nhat-ky-hoat-dong';
 
@@ -103,14 +104,62 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const [examFilter, setExamFilter] = useState<'ALL' | 'GK1' | 'CK1' | 'GK2' | 'CK2'>('ALL');
   const [lessonDisplayMode, setLessonDisplayMode] = useState<'grid' | 'list'>('grid');
 
-  // Always in Focus Mode (Chế độ tập trung) for students to eliminate distractions
-  const [isFocusMode] = useState<boolean>(true);
+  // Chế độ tập trung (Focus Mode): Cho phép ẩn các bảng điều khiển phụ, thanh bên và các khối thông tin không cần thiết để học sinh tập trung tối đa vào nội dung câu hỏi bài tập
+  const [isFocusMode, setIsFocusMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('cloudplay_student_focus_mode');
+      if (saved !== null) return saved === 'true';
+    } catch {}
+    return false;
+  });
+
+  const handleToggleFocusMode = () => {
+    setIsFocusMode((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('cloudplay_student_focus_mode', String(next));
+      } catch {}
+      onShowToast(
+        next
+          ? '🎯 Đã BẬT Chế độ tập trung: Đã ẩn các bảng điều khiển phụ để em tập trung 100% vào nội dung câu hỏi!'
+          : '👁️ Đã TẮT Chế độ tập trung: Hiển thị lại toàn bộ bảng điều khiển và thông tin lộ trình.'
+      );
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        (activeEl && (activeEl as HTMLElement).isContentEditable);
+      if (isInput) return;
+
+      if (e.key === 'f' || e.key === 'F') {
+        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          handleToggleFocusMode();
+        }
+      } else if (e.key === 'Escape' && isFocusMode) {
+        setIsFocusMode(false);
+        try {
+          localStorage.setItem('cloudplay_student_focus_mode', 'false');
+        } catch {}
+        onShowToast('👁️ Đã thoát Chế độ tập trung.');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFocusMode, onShowToast]);
   const [stage2SubTab, setStage2SubTab] = useState<'drag' | 'fill' | 'match' | 'short'>('drag');
 
-  // 2 Tabs for Student Homepage per user request:
+  // 3 Tabs for Student Homepage:
   // Tab 1: 'hoc-live' (only displays the single active live session period)
   // Tab 2: 'toan-bo-tiet-hoc' (displays all 29 periods with self-study lock restriction)
-  const [homeTab, setHomeTab] = useState<'hoc-live' | 'toan-bo-tiet-hoc'>('hoc-live');
+  // Tab 3: 'bang-xep-hang' (displays the Class XP Leaderboard)
+  const [homeTab, setHomeTab] = useState<'hoc-live' | 'toan-bo-tiet-hoc' | 'bang-xep-hang'>('hoc-live');
   const [studentResultScope, setStudentResultScope] = useState<'ca-nhan' | 'lop' | 'khoi'>('ca-nhan');
   const [isInLiveRoom, setIsInLiveRoom] = useState<boolean>(false);
 
@@ -1367,10 +1416,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         {isFocusMode ? (
           <header className="fixed top-0 left-0 right-0 h-16 bg-surface-container-lowest/95 backdrop-blur-xl border-b border-primary/20 shadow-md z-40 flex items-center justify-between px-4 sm:px-8 gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/25 font-label-sm text-xs font-bold shrink-0">
-                <span className="material-symbols-outlined text-[16px]">center_focus_strong</span>
-                <span>CHẾ ĐỘ TẬP TRUNG</span>
-              </div>
+              <button
+                type="button"
+                onClick={handleToggleFocusMode}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white font-label-sm text-xs font-bold shadow-xs transition-all cursor-pointer ring-2 ring-indigo-400/40"
+                title="Đang bật Chế độ tập trung (Phím F). Bấm để hiển thị lại thanh bên và các bảng điều khiển phụ"
+              >
+                <span className="material-symbols-outlined text-[16px] animate-pulse">center_focus_strong</span>
+                <span>Tập trung: BẬT</span>
+              </button>
               <div className="hidden lg:flex items-center gap-2 text-on-surface min-w-0">
                 <span className="font-headline-sm text-sm font-bold truncate">
                   {openedPeriodNumber !== null
@@ -1560,6 +1614,17 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
               <button
                 type="button"
+                onClick={handleToggleFocusMode}
+                aria-label="Bật Chế độ tập trung"
+                className="px-3.5 py-1.5 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-label-sm text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border border-indigo-200 shadow-2xs"
+                title="Bật Chế độ tập trung để ẩn thanh bên và các bảng điều khiển phụ, dồn 100% chú ý vào câu hỏi (Phím F)"
+              >
+                <span className="material-symbols-outlined text-[18px]">center_focus_strong</span>
+                <span className="hidden sm:inline">Chế độ tập trung</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handleToggleFullscreen}
                 aria-label="Phóng to toàn màn hình"
                 className="px-3.5 py-1.5 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-label-sm text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border border-indigo-200 shadow-2xs"
@@ -1677,6 +1742,19 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         <span className="material-symbols-outlined text-[18px]">calendar_view_month</span>
                         <span>Tab 2: Toàn bộ tiết học (29 tiết)</span>
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setHomeTab('bang-xep-hang')}
+                        className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+                          homeTab === 'bang-xep-hang'
+                            ? 'bg-white text-amber-700 shadow-xs border border-amber-200'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[18px] text-amber-600">leaderboard</span>
+                        <span>Tab 3: Bảng xếp hạng Lớp #{classRank}</span>
+                      </button>
                     </div>
 
                     <button
@@ -1788,6 +1866,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         </div>
                       )}
                     </div>
+                  ) : homeTab === 'bang-xep-hang' ? (
+                    <ClassLeaderboardPanel
+                      currentStudent={currentStudent}
+                      students={students}
+                      classId={currentStudent.classId}
+                      grade={selectedGrade}
+                      onShowToast={onShowToast}
+                      onSelectStudent={onSelectStudentAccount}
+                    />
                   ) : (
                     /* TAB 2: TOÀN BỘ TIẾT HỌC (29 TIẾT CÓ KHÓA TỰ LUYỆN CHỈ MỞ SAU KHI ĐÃ HỌC) */
                     <div className="flex flex-col gap-4">
@@ -2019,6 +2106,26 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         <span className="px-3 py-1 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-label-sm text-xs font-bold">
                           Khối {selectedGrade} • Lớp {currentStudent.classId}
                         </span>
+
+                        <button
+                          type="button"
+                          onClick={handleToggleFocusMode}
+                          className={`px-3.5 py-1.5 rounded-full font-label-sm text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs ${
+                            isFocusMode
+                              ? 'bg-indigo-600 hover:bg-indigo-700 text-white ring-2 ring-indigo-400/40'
+                              : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                          }`}
+                          title={
+                            isFocusMode
+                              ? 'Đang bật Chế độ tập trung (Phím F). Bấm để hiển thị lại bảng điều khiển phụ'
+                              : 'Bật Chế độ tập trung để ẩn thanh bên và các bảng điều khiển phụ, dồn 100% chú ý vào câu hỏi (Phím F)'
+                          }
+                        >
+                          <span className={`material-symbols-outlined text-[16px] ${isFocusMode ? 'animate-pulse' : ''}`}>
+                            center_focus_strong
+                          </span>
+                          <span>{isFocusMode ? '🎯 Tập trung (BẬT)' : '🎯 Chế độ tập trung'}</span>
+                        </button>
                       </div>
                     </div>
 
@@ -2031,7 +2138,27 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       </p>
                     </div>
 
-                    {/* DUAL-MODE STATUS BANNER & AUTO-SAVE CROSS-DEVICE RESUME BAR */}
+                    {/* DUAL-MODE STATUS BANNER & AUTO-SAVE CROSS-DEVICE RESUME BAR (HIDDEN IN FOCUS MODE) */}
+                    {isFocusMode ? (
+                      <div className="pt-2.5 border-t border-outline-variant/20 flex flex-wrap items-center justify-between gap-3 text-xs bg-indigo-50/70 dark:bg-slate-900/60 p-3 rounded-xl border border-indigo-100 dark:border-indigo-900/50">
+                        <div className="flex items-center gap-2 text-indigo-900 dark:text-indigo-200 font-bold">
+                          <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-pulse" />
+                          <span>🎯 Chế độ tập trung đang BẬT: Đã ẩn các bảng điều khiển phụ để em tập trung tối đa vào nội dung câu hỏi.</span>
+                        </div>
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-[11px] text-slate-500 font-medium">
+                            💾 Tự động lưu ({lastAutoSavedAt})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleToggleFocusMode}
+                            className="px-3 py-1 rounded-full bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700 hover:bg-indigo-50 text-xs font-bold cursor-pointer transition-colors shadow-2xs"
+                          >
+                            Hiện lại bảng phụ
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
                     <div className="pt-3 border-t border-outline-variant/20 flex flex-col gap-2.5">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         {/* Dual-Mode Indicator & Switcher */}
@@ -2141,6 +2268,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                           </div>
                         )}
                     </div>
+                  )}
                   </div>
 
                   {/* SERPENTINE 4-HOẠT-ĐỘNG LEARNING ROADMAP (CONDENSED IN FOCUS MODE) */}
@@ -3574,118 +3702,16 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 })()}
 
                 {/* SCOPE 2: KẾT QUẢ CẢ LỚP */}
-                {studentResultScope === 'lop' && (() => {
-                  const classAvgScore =
-                    sortedClass.length > 0
-                      ? sortedClass.reduce((acc, s) => acc + (s.avgScore || 0), 0) / sortedClass.length
-                      : 0;
-                  const classGoodCount = sortedClass.filter((s) => (s.avgScore || 0) >= 8.0).length;
-
-                  return (
-                    <div className="flex flex-col gap-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                        <div className="p-4 rounded-2xl bg-sky-50 border border-sky-200">
-                          <span className="text-xs font-bold text-sky-700 uppercase block">
-                            Sĩ Số Lớp {currentStudent.classId}
-                          </span>
-                          <span className="text-2xl font-black text-sky-950">
-                            {sortedClass.length} học sinh
-                          </span>
-                        </div>
-                        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200">
-                          <span className="text-xs font-bold text-amber-800 uppercase block">
-                            Điểm Trung Bình Cả Lớp
-                          </span>
-                          <span className="text-2xl font-black text-amber-950">
-                            {classAvgScore.toFixed(2)} / 10
-                          </span>
-                        </div>
-                        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200">
-                          <span className="text-xs font-bold text-emerald-800 uppercase block">
-                            Số Học Sinh Đạt Mức Tốt (≥ 8.0đ)
-                          </span>
-                          <span className="text-2xl font-black text-emerald-950">
-                            {classGoodCount} / {sortedClass.length} HS
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="p-5 rounded-2xl bg-surface-container-low border border-outline-variant/30 flex flex-col gap-4">
-                        <div className="flex items-center justify-between">
-                          <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold flex items-center gap-2">
-                            <span className="material-symbols-outlined text-primary">school</span>
-                            <span>Bảng Kết Quả &amp; Xếp Hạng Toàn Lớp {currentStudent.classId}</span>
-                          </h3>
-                          <span className="px-3 py-1 rounded-full bg-primary-fixed text-primary font-bold text-xs">
-                            Hạng của em: #{classRank} / {sortedClass.length}
-                          </span>
-                        </div>
-
-                        <div className="divide-y divide-outline-variant/15 overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-lowest">
-                          {sortedClass.map((st, idx) => {
-                            const isMe = st.id === currentStudent.id;
-                            const isTop1 = idx === 0;
-                            return (
-                              <div
-                                key={st.id}
-                                className={`p-3.5 flex items-center justify-between gap-3 ${
-                                  isTop1
-                                    ? 'bg-amber-50/80 border-l-4 border-amber-400'
-                                    : isMe
-                                    ? 'bg-primary-fixed/20 font-bold'
-                                    : 'hover:bg-surface-container-low/50'
-                                }`}
-                              >
-                                <div className="flex items-center gap-3">
-                                  <span
-                                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${
-                                      idx === 0
-                                        ? 'bg-amber-400 text-amber-950 shadow-xs animate-pulse'
-                                        : idx === 1
-                                        ? 'bg-slate-300 text-slate-800'
-                                        : idx === 2
-                                        ? 'bg-amber-700 text-amber-100'
-                                        : 'bg-surface-container text-on-surface-variant'
-                                    }`}
-                                  >
-                                    {idx + 1}
-                                  </span>
-                                  <div className="flex flex-col">
-                                    <span className="text-sm font-bold text-on-surface flex items-center gap-1.5">
-                                      <span>
-                                        {st.name} {isMe && '(Em)'}
-                                      </span>
-                                      {isTop1 && (
-                                        <span className="px-2 py-0.5 rounded-full bg-amber-400 text-amber-950 text-[10px] font-black">
-                                          👑 TOP PERFORMER
-                                        </span>
-                                      )}
-                                    </span>
-                                    <span className="text-xs text-on-surface-variant">
-                                      Mã: {st.id} • ĐTB: <strong>{Number(st.avgScore || 0).toFixed(1)}đ</strong> • Nhóm {st.groupNumber}
-                                    </span>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-3 text-xs font-bold">
-                                  <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                    {Number(st.avgScore || 0).toFixed(1)} điểm
-                                  </span>
-                                  <span className="flex items-center gap-1 text-amber-600">
-                                    <span className="material-symbols-outlined text-[16px]">star</span>
-                                    <span>{st.stars}</span>
-                                  </span>
-                                  <span className="px-3 py-1 rounded-full bg-primary text-on-primary">
-                                    {st.xp.toLocaleString()} XP
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
+                {studentResultScope === 'lop' && (
+                  <ClassLeaderboardPanel
+                    currentStudent={currentStudent}
+                    students={students}
+                    classId={currentStudent.classId}
+                    grade={selectedGrade}
+                    onShowToast={onShowToast}
+                    onSelectStudent={onSelectStudentAccount}
+                  />
+                )}
 
                 {/* SCOPE 3: KẾT QUẢ CẢ KHỐI */}
                 {studentResultScope === 'khoi' && (() => {
