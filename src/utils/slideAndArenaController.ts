@@ -399,6 +399,10 @@ export function normalizeLiveSession<T extends Record<string, any>>(
       typeof raw.activeClassId === 'string' && raw.activeClassId.trim().length > 0
         ? raw.activeClassId
         : defaultSession.activeClassId || '6A10',
+    activeLiveView:
+      typeof raw.activeLiveView === 'string' && raw.activeLiveView.length > 0
+        ? raw.activeLiveView
+        : defaultSession.activeLiveView || 'waiting',
     unlockedStagesByLesson: mergedUnlockedStages,
     unlockedPracticeStage3ByLesson:
       raw.unlockedPracticeStage3ByLesson &&
@@ -423,6 +427,21 @@ export function normalizeLiveSession<T extends Record<string, any>>(
       raw.whiteboardByLesson && typeof raw.whiteboardByLesson === 'object'
         ? raw.whiteboardByLesson
         : defaultSession.whiteboardByLesson || {},
+    slideAutoAdvanceStateByLesson:
+      raw.slideAutoAdvanceStateByLesson &&
+      typeof raw.slideAutoAdvanceStateByLesson === 'object'
+        ? raw.slideAutoAdvanceStateByLesson
+        : defaultSession.slideAutoAdvanceStateByLesson || {},
+    slideVideoStateByLesson:
+      raw.slideVideoStateByLesson &&
+      typeof raw.slideVideoStateByLesson === 'object'
+        ? raw.slideVideoStateByLesson
+        : defaultSession.slideVideoStateByLesson || {},
+    arenaCountdownStateByLesson:
+      raw.arenaCountdownStateByLesson &&
+      typeof raw.arenaCountdownStateByLesson === 'object'
+        ? raw.arenaCountdownStateByLesson
+        : defaultSession.arenaCountdownStateByLesson || {},
     taughtPeriodsByClass:
       raw.taughtPeriodsByClass && typeof raw.taughtPeriodsByClass === 'object'
         ? raw.taughtPeriodsByClass

@@ -121,9 +121,9 @@ export async function ensureCloudUserProfile(params: {
   groupNumber: number;
   partnerName: string;
 }): Promise<void> {
-  if (!auth.currentUser) return;
-  const safeUid = sanitizeId(params.uid, auth.currentUser.uid);
-  if (safeUid !== auth.currentUser.uid) return;
+  if (!auth?.currentUser) return;
+  const safeUid = sanitizeId(params.uid, auth?.currentUser?.uid || params.uid);
+  if (safeUid !== auth?.currentUser?.uid) return;
 
   try {
     const headers = await getAuthBearerHeaders();

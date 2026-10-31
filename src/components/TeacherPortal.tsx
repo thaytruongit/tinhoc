@@ -1332,7 +1332,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     const key = `k${grade}-tiet-${periodNum}`;
     if (onUpdateLiveSession) {
       onUpdateLiveSession((prev) => {
-        const currentStages = prev.unlockedStagesByLesson[key] || {
+        const currentStages = prev.unlockedStagesByLesson?.[key] || {
           1: true,
           2: false,
           3: false,
@@ -1346,7 +1346,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           activeStage: unlockAll ? 2 : 1,
           activeClassId: targetClass,
           unlockedStagesByLesson: {
-            ...prev.unlockedStagesByLesson,
+            ...(prev.unlockedStagesByLesson || {}),
             [key]: unlockAll
               ? { 1: true, 2: true, 3: true, 4: true }
               : { ...currentStages, 1: true, 2: true },
@@ -1384,10 +1384,10 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         },
         unlockedStagesByLesson: !alreadyTaught
           ? {
-              ...prev.unlockedStagesByLesson,
+              ...(prev.unlockedStagesByLesson || {}),
               [key]: { 1: true, 2: true, 3: true, 4: true },
             }
-          : prev.unlockedStagesByLesson,
+          : prev.unlockedStagesByLesson || {},
       };
     });
     const currentlyTaught = (liveSession?.taughtPeriodsByClass?.[classIdToMark] || []).includes(

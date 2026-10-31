@@ -366,7 +366,14 @@ export default function App() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'classes' },
-        () => {
+        async () => {
+          if (supabase && isSupabaseRealtimeConfigured) {
+            const { data } = await supabase.from('classes').select('*');
+            if (Array.isArray(data) && data.length > 0) {
+              setClasses((prev) => normalizeClassroomList(data, prev));
+              return;
+            }
+          }
           fetch('/api/db/classes')
             .then((res) => (res.ok ? res.json() : null))
             .then((data) => {
@@ -380,7 +387,14 @@ export default function App() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'students' },
-        () => {
+        async () => {
+          if (supabase && isSupabaseRealtimeConfigured) {
+            const { data } = await supabase.from('students').select('*');
+            if (Array.isArray(data) && data.length > 0) {
+              setStudents((prev) => normalizeStudentRosterList(data, prev));
+              return;
+            }
+          }
           fetch('/api/db/students')
             .then((res) => (res.ok ? res.json() : null))
             .then((data) => {
@@ -398,13 +412,20 @@ export default function App() {
     };
   }, []);
 
-  // Poll /api/live-session every 2.5s so cross-browser/cross-window sessions stay synced
+  // Poll /api/live-session every 2.5s with backoff for static hosts like GitHub Pages
   useEffect(() => {
     let active = true;
+    let consecutiveErrors = 0;
     const poll = async () => {
+      if (consecutiveErrors >= 3) return;
       try {
         const res = await fetch('/api/live-session');
-        if (!res.ok || !active) return;
+        if (!res.ok) {
+          consecutiveErrors++;
+          return;
+        }
+        consecutiveErrors = 0;
+        if (!active) return;
         const serverState = await res.json();
         if (serverState && serverState.updatedAt) {
           setLiveSession((prev) => {
@@ -415,7 +436,7 @@ export default function App() {
           });
         }
       } catch {
-        // ignore
+        consecutiveErrors++;
       }
     };
     const timer = window.setInterval(poll, 2500);

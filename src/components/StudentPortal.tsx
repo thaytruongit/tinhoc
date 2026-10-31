@@ -2331,7 +2331,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       period={currentPeriodSpec.period}
                       classId={currentStudent.classId}
                       whiteboardState={
-                        liveSession.whiteboardByLesson[
+                        liveSession?.whiteboardByLesson?.[
                           `k${selectedGrade}-tiet-${currentPeriodSpec.period}`
                         ]
                       }
@@ -2944,6 +2944,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                     : `TỰ LUYỆN Ở NHÀ #${attemptCount}`
                                 }]! Điểm HĐ3: ${earnedPts.toFixed(1)} / 3.0 điểm (+${xpEarned} XP)`
                               );
+                            }}
+                            onReadyStart={() => {
+                              onShowToast('🚀 Đã bắt đầu tính giờ Đấu trường Luyện tập! Chúc em đạt kết quả cao!');
                             }}
                             onShowToast={onShowToast}
                           />
