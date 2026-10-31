@@ -18,7 +18,9 @@ import {
   computeArenaRemainingSeconds,
   formatCountdownMmSs,
   isFileStorageSlideUrl,
+  buildEndSlidePresentationState,
 } from '../utils/slideAndArenaController';
+import { VirtualWhiteboardPanel } from './VirtualWhiteboardPanel';
 
 interface TeacherLivePresenterRoomProps {
   grade: 6 | 7 | 8 | 9;
@@ -99,10 +101,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
 
   const activeStage: 1 | 2 | 3 | 4 = (liveSession?.activeStage as 1 | 2 | 3 | 4) || 1;
   const [activeTab, setActiveTab] = useState<
-    'slide' | 'hd1' | 'hd2' | 'hd3' | 'hd3-practice' | 'hd4' | 'ket-qua'
+    'slide' | 'whiteboard' | 'hd1' | 'hd2' | 'hd3' | 'hd3-practice' | 'hd4' | 'ket-qua'
   >(
     liveSession?.activeLiveView === 'slide'
       ? 'slide'
+      : liveSession?.activeLiveView === 'whiteboard'
+      ? 'whiteboard'
       : liveSession?.activeLiveView === 'hd3-practice'
       ? 'hd3-practice'
       : (`hd${activeStage}` as 'hd1' | 'hd2' | 'hd3' | 'hd4')
@@ -405,6 +409,31 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     setActiveTab('slide');
     onShowToast(
       `📢 Đang phát trực tiếp Slide ${slideIdx + 1}/${slidePages.length} sang Lớp ${classId} — Đã tự động khóa các hoạt động khác để học sinh chỉ xem Slide ảnh!`
+    );
+  };
+
+  // End Slide Presentation: automatically closes lecture slide on Student screens while keeping all activity locks strictly closed!
+  const handleEndSlidePresentation = () => {
+    setIsAutoAdvancing(false);
+    onUpdateLiveSession((prev) => buildEndSlidePresentationState(prev, lessonKey));
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('cloudplay_realtime_sync');
+        ch.postMessage({
+          type: 'SLIDE_ENDED',
+          lessonKey,
+          grade,
+          period,
+          classId,
+          timestampIso: new Date().toISOString(),
+        });
+        ch.close();
+      }
+    } catch {
+      // ignore
+    }
+    onShowToast(
+      `⏹️ Đã kết thúc Slide bài giảng! Slide trên màn hình Học sinh đã tự động đóng và toàn bộ các hoạt động (HĐ 1, 2, 3, 4) vẫn giữ trạng thái KHÓA nghiêm ngặt — Giáo viên mở khóa hoạt động nào học sinh mới được mở hoạt động đó!`
     );
   };
 
@@ -1229,25 +1258,67 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                   )}
                 </div>
 
-                <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-xs">
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-xs gap-1 flex-wrap">
                   <span className="text-[11px] font-semibold text-slate-600">
                     {isSlideUnlocked ? '🔓 Đã mở Slide cho HS' : '🔒 Đang khóa Slide'}
                   </span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleToggleSlideLock();
-                    }}
-                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${
-                      isSlideUnlocked
-                        ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                        : 'bg-rose-100 text-rose-800 hover:bg-rose-200'
-                    }`}
-                  >
-                    {isSlideUnlocked ? 'Khóa lại' : 'Mở khóa'}
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEndSlidePresentation();
+                      }}
+                      className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-900 text-white hover:bg-rose-700 cursor-pointer transition-colors"
+                      title="Kết thúc trình chiếu Slide bài giảng, đóng Slide ở máy HS và giữ nguyên khóa các hoạt động"
+                    >
+                      ⏹️ Kết thúc Slide
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleSlideLock();
+                      }}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${
+                        isSlideUnlocked
+                          ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                          : 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                      }`}
+                    >
+                      {isSlideUnlocked ? 'Khóa lại' : 'Mở khóa'}
+                    </button>
+                  </div>
                 </div>
+              </div>
+
+              {/* 0.5 BẢNG TRẮNG ẢO TIN HỌC (VẼ & GHI CHÚ ĐỒNG BỘ THỜI GIAN THỰC) */}
+              <div
+                onClick={() => setActiveTab('whiteboard')}
+                className={`p-3 rounded-2xl border transition-all flex items-center justify-between cursor-pointer ${
+                  activeTab === 'whiteboard'
+                    ? 'bg-orange-50/90 border-2 border-orange-300 shadow-xs'
+                    : 'bg-white border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="material-symbols-outlined text-[22px] text-orange-600">
+                    draw
+                  </span>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-bold text-slate-900 truncate">
+                      🎨 Bảng trắng ảo (Vẽ &amp; Ghi chú)
+                    </span>
+                    <span className="text-[10px] text-slate-500 truncate">
+                      Vẽ lưu đồ, sơ đồ &amp; đồng bộ trực tiếp sang HS
+                    </span>
+                  </div>
+                </div>
+                {liveSession?.whiteboardByLesson?.[lessonKey]?.isOpen && (
+                  <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[10px] font-black border border-rose-200 animate-pulse">
+                    LIVE
+                  </span>
+                )}
               </div>
 
               {[
@@ -1571,7 +1642,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
 
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
             {/* Quick Broadcaster */}
-            <div className="flex items-center gap-1 p-1 rounded-full bg-slate-100 border border-slate-200">
+            <div className="flex items-center gap-1 p-1 rounded-full bg-slate-100 border border-slate-200 flex-wrap">
               <button
                 type="button"
                 onClick={() => handleBroadcastSlideDeck(currentSlideIndex)}
@@ -1583,6 +1654,25 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
               >
                 Slide Bài giảng
               </button>
+              <button
+                type="button"
+                onClick={handleEndSlidePresentation}
+                className="px-3 py-1 rounded-full text-xs font-bold bg-slate-900 hover:bg-rose-700 text-white transition-all cursor-pointer"
+                title="Kết thúc Slide bài giảng: Tự động đóng Slide trên máy HS và giữ nguyên khóa các hoạt động"
+              >
+                ⏹️ Kết thúc Slide bài giảng
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('whiteboard')}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                  activeTab === 'whiteboard'
+                    ? 'bg-orange-600 text-white shadow-2xs'
+                    : 'text-orange-700 hover:bg-orange-100'
+                }`}
+              >
+                🎨 Bảng trắng ảo
+              </button>
               {([1, 2, 3] as const).map((st) => (
                 <button
                   key={st}
@@ -1591,6 +1681,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                   className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
                     activeStage === st &&
                     liveSession?.activeLiveView !== 'slide' &&
+                    liveSession?.activeLiveView !== 'waiting' &&
                     liveSession?.activeLiveView !== 'hd3-practice'
                       ? 'bg-orange-500 text-white shadow-2xs'
                       : 'text-slate-600 hover:text-slate-900'
@@ -1616,6 +1707,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
                   activeStage === 4 &&
                   liveSession?.activeLiveView !== 'slide' &&
+                  liveSession?.activeLiveView !== 'waiting' &&
                   liveSession?.activeLiveView !== 'hd3-practice'
                     ? 'bg-orange-500 text-white shadow-2xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -1716,11 +1808,29 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
 
                   <button
                     type="button"
+                    onClick={() => setActiveTab('whiteboard')}
+                    className="px-3.5 py-2 rounded-full bg-orange-100 hover:bg-orange-200 text-orange-900 font-bold text-xs cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span>🎨 Bảng trắng ảo</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => handleBroadcastSlideDeck(currentSlideIndex)}
                     className="px-4 py-2 rounded-full bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
                   >
                     <span className="material-symbols-outlined text-[16px]">cast</span>
                     <span>📢 Phát Slide Ảnh &amp; Khóa HĐ khác trên HS</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleEndSlidePresentation}
+                    className="px-4 py-2 rounded-full bg-slate-900 hover:bg-rose-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
+                    title="Kết thúc trình chiếu Slide bài giảng: Tự động đóng Slide trên máy HS, các khóa hoạt động vẫn đóng nghiêm ngặt"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">stop_screen_share</span>
+                    <span>⏹️ Kết thúc Slide bài giảng</span>
                   </button>
                 </div>
               </div>
@@ -2092,6 +2202,32 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 </button>
               </div>
             </div>
+          )}
+
+          {/* TAB 0.5: BẢNG TRẮNG ẢO TIN HỌC (VẼ & GHI CHÚ ĐỒNG BỘ THỜI GIAN THỰC CHO HỌC SINH) */}
+          {activeTab === 'whiteboard' && (
+            <VirtualWhiteboardPanel
+              lessonKey={lessonKey}
+              lessonTitle={periodSpec.lessonTitle}
+              grade={grade}
+              period={period}
+              classId={classId}
+              whiteboardState={liveSession?.whiteboardByLesson?.[lessonKey]}
+              slideBackgroundUrl={activeSlidePage?.imageUrl}
+              readOnly={false}
+              onUpdateWhiteboard={(nextWb) => {
+                onUpdateLiveSession((prev) => ({
+                  ...prev,
+                  whiteboardByLesson: {
+                    ...(prev.whiteboardByLesson || {}),
+                    [lessonKey]: nextWb,
+                  },
+                  updatedAt: new Date().toISOString(),
+                }));
+              }}
+              onClose={() => setActiveTab('slide')}
+              onShowToast={onShowToast}
+            />
           )}
 
           {/* SLIDE PRESENTER + EMBEDDED CLASS LEADERBOARD CHART FOR ACTIVE TAB */}

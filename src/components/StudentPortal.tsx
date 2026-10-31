@@ -45,6 +45,7 @@ import { StudentLiveRoom } from './StudentLiveRoom';
 import { StudentMetricsDashboard } from './StudentMetricsDashboard';
 import { StudentActivityFeed } from './StudentActivityFeed';
 import { BadgeLibraryPanel } from './BadgeLibraryPanel';
+import { VirtualWhiteboardPanel } from './VirtualWhiteboardPanel';
 
 export type StudentView = 'trang-chu' | 'tro-ly-ai-cu-vang' | 'huy-hieu' | 'bang-xep-hang' | 'nhat-ky-hoat-dong';
 
@@ -394,25 +395,42 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     NOTEBOOK_GRADE_SOURCES.find((g) => g.grade === selectedGrade) ||
     NOTEBOOK_GRADE_SOURCES[0];
 
-  // Determine unlocked stages for a given (grade, period)
+  // Determine unlocked stages for a given (grade, period) — strictly synchronized between StudentPortal and StudentLiveRoom
   const getUnlockedStagesForPeriod = (
     grade: 6 | 7 | 8 | 9,
     period: number
   ): Record<1 | 2 | 3 | 4, boolean> => {
-    // If taught by teacher or learned by student -> Self-Study mode unlocks all 4 activities
-    if (isSelfStudyUnlocked(period)) {
+    const key = `k${grade}-tiet-${period}`;
+    const isActiveLiveLesson =
+      liveSession?.activeGrade === grade && liveSession?.activePeriod === period;
+
+    // When Teacher is actively projecting Slide or just ended Slide ('waiting'), all 4 activities are strictly locked
+    if (
+      isActiveLiveLesson &&
+      (liveSession?.activeLiveView === 'slide' || liveSession?.activeLiveView === 'waiting')
+    ) {
+      return { 1: false, 2: false, 3: false, 4: false };
+    }
+
+    const fromSession = liveSession?.unlockedStagesByLesson?.[key];
+    if (fromSession && typeof fromSession === 'object') {
+      return {
+        1: Boolean(fromSession[1]),
+        2: Boolean(fromSession[2]),
+        3: Boolean(fromSession[3]),
+        4: Boolean(fromSession[4]),
+      };
+    }
+
+    if (isSelfStudyUnlocked(period) && !liveSession?.isBroadcasting) {
       return { 1: true, 2: true, 3: true, 4: true };
     }
-    const key = `k${grade}-tiet-${period}`;
-    const fromSession = liveSession?.unlockedStagesByLesson?.[key];
-    // Only unlock stages 2,3,4 from live session if the teacher is broadcasting to this student's class (or already unlocked for this lesson)
-    const allowLiveStages =
-      !liveSession?.isBroadcasting || liveSession.activeClassId === currentStudent.classId;
+
     return {
-      1: true, // Always unlock Stage 1 (Khởi động) for all 29 periods so students can preview ahead
-      2: allowLiveStages && Boolean(fromSession?.[2]),
-      3: allowLiveStages && Boolean(fromSession?.[3]),
-      4: allowLiveStages && Boolean(fromSession?.[4]),
+      1: false,
+      2: false,
+      3: false,
+      4: false,
     };
   };
 
@@ -2242,6 +2260,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             key={node.stage}
                             type="button"
                             onClick={() => {
+                              if (!isUnlocked) {
+                                onShowToast(
+                                  `🔒 ${node.title} đang khóa — Chỉ khi Giáo viên mở khóa hoạt động này thì em mới được mở!`
+                                );
+                              }
                               setActiveInlineStage(node.stage);
                             }}
                             className={`relative flex flex-col items-center z-10 group cursor-pointer transition-transform ${
@@ -2287,7 +2310,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                   isUnlocked ? 'text-tertiary font-bold' : 'text-outline'
                                 }`}
                               >
-                                {isUnlocked ? node.subtitle : 'Chờ GV mở khóa'}
+                                {isUnlocked ? node.subtitle : '🔒 Đang khóa (Chờ GV mở)'}
                               </span>
                             </div>
                           </button>
@@ -2297,6 +2320,26 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   </div>
                   )}
 
+                  {/* SYNCHRONIZED REAL-TIME VIRTUAL WHITEBOARD FROM TEACHER */}
+                  {liveSession?.whiteboardByLesson?.[
+                    `k${selectedGrade}-tiet-${currentPeriodSpec.period}`
+                  ]?.isOpen && (
+                    <VirtualWhiteboardPanel
+                      lessonKey={`k${selectedGrade}-tiet-${currentPeriodSpec.period}`}
+                      lessonTitle={currentPeriodSpec.lessonTitle}
+                      grade={selectedGrade}
+                      period={currentPeriodSpec.period}
+                      classId={currentStudent.classId}
+                      whiteboardState={
+                        liveSession.whiteboardByLesson[
+                          `k${selectedGrade}-tiet-${currentPeriodSpec.period}`
+                        ]
+                      }
+                      readOnly={true}
+                      onShowToast={onShowToast}
+                    />
+                  )}
+
                   {/* ================= INLINE STAGE CONTENT RENDERED DIRECTLY BELOW THE SERPENTINE ROADMAP ================= */}
                   {!currentPeriodUnlocked[activeInlineStage] ? (
                     <div className="bg-surface-container-lowest rounded-2xl p-space-xl shadow-md text-center flex flex-col items-center gap-space-md border-2 border-dashed border-outline-variant">
@@ -2304,49 +2347,27 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         <span className="material-symbols-outlined text-[32px]">lock_clock</span>
                       </div>
                       <h3 className="font-headline-md text-headline-md text-on-surface">
-                        Hoạt động {activeInlineStage} đang chờ Giáo viên mở khóa trực tiếp
+                        🔒 Hoạt động {activeInlineStage} đang khóa đồng bộ theo Giáo viên
                       </h3>
                       <p className="font-body-md text-body-md text-on-surface-variant max-w-xl">
-                        Tất cả 29 tiết học đều mở sẵn <strong>Hoạt động 1: Khởi động</strong> để em tìm
-                        hiểu trước. Khi Thầy Đỗ Mạnh Trường phát Live mở khóa{' '}
-                        <strong>Hoạt động {activeInlineStage}</strong> của tiết này trên Cổng Giáo Viên,
-                        nội dung sẽ lập tức hiển thị tại đây!
+                        Trạng thái mở/khóa hoạt động được đồng bộ nghiêm ngặt giữa{' '}
+                        <strong>Phòng Học Live</strong> và <strong>Lộ Trình Học Tập</strong>. Chỉ khi Giáo viên
+                        mở khóa <strong>Hoạt động {activeInlineStage}</strong> thì em mới được phép truy cập hoạt
+                        động này!
                       </p>
                       <div className="flex flex-wrap items-center justify-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setActiveInlineStage(1)}
-                          className="px-5 py-2.5 rounded-full bg-primary text-on-primary font-label-md text-label-md font-bold shadow-sm cursor-pointer"
-                        >
-                          Vào học Hoạt động 1: Khởi động ngay
-                        </button>
-                        {onUpdateLiveSession && (
+                        {([1, 2, 3, 4] as const).some((s) => currentPeriodUnlocked[s]) && (
                           <button
                             type="button"
                             onClick={() => {
-                              const key = `k${selectedGrade}-tiet-${currentPeriodSpec.period}`;
-                              onUpdateLiveSession((prev) => ({
-                                ...prev,
-                                unlockedStagesByLesson: {
-                                  ...prev.unlockedStagesByLesson,
-                                  [key]: {
-                                    ...(prev.unlockedStagesByLesson[key] || {
-                                      1: true,
-                                      2: false,
-                                      3: false,
-                                      4: false,
-                                    }),
-                                    [activeInlineStage]: true,
-                                  },
-                                },
-                              }));
-                              onShowToast(
-                                `Đã đồng bộ mở khóa Hoạt động ${activeInlineStage} cho ${currentPeriodSpec.lessonTitle}!`
+                              const firstOpen = ([1, 2, 3, 4] as const).find(
+                                (s) => currentPeriodUnlocked[s]
                               );
+                              if (firstOpen) setActiveInlineStage(firstOpen);
                             }}
-                            className="px-5 py-2.5 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-label-md text-label-md font-bold shadow-sm cursor-pointer"
+                            className="px-5 py-2.5 rounded-full bg-primary text-on-primary font-label-md text-label-md font-bold shadow-sm cursor-pointer"
                           >
-                            🔓 Mở khóa nhanh Hoạt động {activeInlineStage} (Chế độ tự luyện)
+                            Chuyển tới Hoạt động đã được Giáo viên mở khóa
                           </button>
                         )}
                       </div>

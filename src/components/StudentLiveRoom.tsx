@@ -37,6 +37,7 @@ import {
   getArenaCountdownVisualState,
   generateFallbackSlideSvgDataUrl,
 } from '../utils/slideAndArenaController';
+import { VirtualWhiteboardPanel } from './VirtualWhiteboardPanel';
 
 interface StudentLiveRoomProps {
   currentStudent: StudentRosterItem;
@@ -68,6 +69,13 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
   const lessonKey = `k${periodSpec.grade}-tiet-${periodSpec.period}`;
   const teacherCurrentStage = (liveSession?.activeStage as 1 | 2 | 3 | 4) || 1;
   const teacherActiveView = liveSession?.activeLiveView;
+  const effectiveUnlockedStages: Record<number, boolean> =
+    liveSession?.unlockedStagesByLesson?.[lessonKey] || unlockedStages || {
+      1: false,
+      2: false,
+      3: false,
+      4: false,
+    };
 
   const resolveInitialView = (): StudentLiveViewId => {
     if (teacherActiveView === 'slide') return 'slide';
@@ -76,13 +84,20 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     if (teacherActiveView === 'hd2') return 2;
     if (teacherActiveView === 'hd3') return 3;
     if (teacherActiveView === 'hd4') return 4;
-    return teacherCurrentStage;
+    if (effectiveUnlockedStages[teacherCurrentStage]) return teacherCurrentStage;
+    const firstUnlocked = ([1, 2, 3, 4] as const).find((s) => Boolean(effectiveUnlockedStages[s]));
+    return firstUnlocked || 1;
   };
 
   const [activeView, setActiveView] = useState<StudentLiveViewId>(resolveInitialView);
   const [stage2SubTab, setStage2SubTab] = useState<'drag' | 'fill' | 'match' | 'short'>('drag');
   const [showPeerReviewModal, setShowPeerReviewModal] = useState(false);
   const [completedStages, setCompletedStages] = useState<Record<string, boolean>>({});
+  const [isStudentArenaReady, setIsStudentArenaReady] = useState<boolean>(false);
+
+  useEffect(() => {
+    setIsStudentArenaReady(false);
+  }, [lessonKey]);
 
   // Slide state synchronized with Teacher
   const uploadedDeck = liveSession?.lectureSlidesByLesson?.[lessonKey];
@@ -102,7 +117,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     setStudentSlideIndex(teacherSlideIndex);
   }, [teacherSlideIndex]);
 
-  // Direct BroadcastChannel listener for instant slide synchronization from TeacherPortal / TeacherLivePresenterRoom
+  // Direct BroadcastChannel listener for instant slide & lock synchronization from TeacherPortal / TeacherLivePresenterRoom
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return;
     const ch = new BroadcastChannel('cloudplay_realtime_sync');
@@ -118,6 +133,13 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
             setActiveView('slide');
           }
         }
+      } else if (data.type === 'SLIDE_ENDED') {
+        if (!data.lessonKey || data.lessonKey === lessonKey) {
+          setActiveView(1);
+          onShowToast(
+            '⏹️ Giáo viên đã kết thúc trình chiếu Slide bài giảng — Các hoạt động đang khóa, chờ Giáo viên mở khóa hoạt động tiếp theo!'
+          );
+        }
       } else if (data.type === 'LIVE_SESSION_UPDATED' && data.session) {
         const nextIdx = data.session.activeSlideIndexByLesson?.[lessonKey];
         if (typeof nextIdx === 'number') {
@@ -125,45 +147,56 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
         }
         if (data.session.activeLiveView === 'slide') {
           setActiveView('slide');
+        } else if (data.session.activeLiveView === 'waiting') {
+          setActiveView(1);
         }
       }
     };
     return () => {
       ch.close();
     };
-  }, [lessonKey]);
+  }, [lessonKey, onShowToast]);
 
   // Synchronized lock states for Slide Deck and Stage 3 Practical Activity
   const isSlideDeckUnlocked =
-    liveSession?.unlockedSlideDeckByLesson?.[lessonKey] ?? true;
+    teacherActiveView === 'waiting'
+      ? false
+      : Boolean(liveSession?.unlockedSlideDeckByLesson?.[lessonKey]);
   const isPracticeStage3Unlocked = Boolean(
     liveSession?.unlockedPracticeStage3ByLesson?.[lessonKey]
   );
+  const whiteboardState = liveSession?.whiteboardByLesson?.[lessonKey];
+  const isWhiteboardOpen = Boolean(whiteboardState?.isOpen || teacherActiveView === 'whiteboard');
 
   // Synchronized Explanation Video state accompanying Slide Image
   const slideVideoState = liveSession?.slideVideoStateByLesson?.[lessonKey];
   const isSlideVideoPlaying = Boolean(slideVideoState?.isPlaying && slideVideoState?.videoUrl);
 
-  // Synchronized Practice Arena Countdown Clock state (when Hoạt động 3 is opened)
+  // Synchronized Practice Arena Countdown Clock state (when Hoạt động 3 is opened AND student clicked Sẵn sàng luyện tập)
   const arenaCountdownState = liveSession?.arenaCountdownStateByLesson?.[lessonKey];
-  const [arenaRemainingSec, setArenaRemainingSec] = useState<number>(() =>
-    computeArenaRemainingSeconds(arenaCountdownState)
-  );
   const arenaDurationSec = Math.max(10, Number(arenaCountdownState?.durationSec) || 300);
+  const [arenaRemainingSec, setArenaRemainingSec] = useState<number>(arenaDurationSec);
   const arenaVisual = getArenaCountdownVisualState(arenaRemainingSec, arenaDurationSec);
 
   useEffect(() => {
+    if (!isStudentArenaReady) {
+      setArenaRemainingSec(arenaDurationSec);
+      return;
+    }
     const tick = () => {
-      setArenaRemainingSec(
-        computeArenaRemainingSeconds(
+      setArenaRemainingSec((prev) => {
+        const synced = computeArenaRemainingSeconds(
           liveSession?.arenaCountdownStateByLesson?.[lessonKey]
-        )
-      );
+        );
+        if (liveSession?.arenaCountdownStateByLesson?.[lessonKey]?.isRunning) {
+          return synced;
+        }
+        return Math.max(0, prev - 1);
+      });
     };
-    tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [liveSession?.arenaCountdownStateByLesson, lessonKey]);
+  }, [isStudentArenaReady, arenaDurationSec, liveSession?.arenaCountdownStateByLesson, lessonKey]);
 
   // Fullscreen ('Phóng to' / 'Thu nhỏ') state for projectors and interactive screens
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -196,12 +229,15 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     }
   };
 
-  // Force activeView to 'slide' whenever Teacher broadcasts Slide Image (locking all other activities)
+  // Force activeView to 'slide' whenever Teacher broadcasts Slide Image, or close 'slide' when Teacher ends Slide
   useEffect(() => {
     if (teacherActiveView === 'slide' && activeView !== 'slide') {
       setActiveView('slide');
+    } else if (teacherActiveView !== 'slide' && !isSlideDeckUnlocked && activeView === 'slide') {
+      const firstOpen = ([1, 2, 3, 4] as const).find((s) => Boolean(effectiveUnlockedStages[s]));
+      setActiveView(firstOpen || 1);
     }
-  }, [teacherActiveView, activeView]);
+  }, [teacherActiveView, isSlideDeckUnlocked, activeView, effectiveUnlockedStages]);
 
   // Track real-time Top Performers in Class
   const rankedLiveStudents = [...students]
@@ -243,7 +279,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     id: string;
     title: string;
     body: string;
-    stage?: 'slide' | 'hd3-practice' | 1 | 2 | 3 | 4;
+    stage?: 'slide' | 'whiteboard' | 'hd3-practice' | 1 | 2 | 3 | 4;
     stageLabel?: string;
     timestampIso: string;
   } | null>(null);
@@ -301,6 +337,14 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
         playStageBroadcastSound();
         onShowToast(
           '📢 Giáo viên vừa phát trực tiếp Slide Bài Giảng — Màn hình của em đã tự động chuyển sang Slide Bài Giảng!'
+        );
+        return;
+      }
+      if (teacherActiveView === 'waiting') {
+        setActiveView(1);
+        playStageBroadcastSound();
+        onShowToast(
+          '⏹️ Giáo viên đã kết thúc trình chiếu Slide Bài Giảng — Các hoạt động vẫn khóa nghiêm ngặt, chờ Giáo viên mở khóa hoạt động tiếp theo!'
         );
         return;
       }
@@ -385,7 +429,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
       teacherActiveView,
       isSlideDeckUnlocked,
       isPracticeStage3Unlocked,
-      unlockedStages,
+      unlockedStages: effectiveUnlockedStages,
       teacherCurrentStage,
     });
   };
@@ -777,6 +821,21 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
             )}
           </div>
 
+          {/* SYNCHRONIZED REAL-TIME VIRTUAL WHITEBOARD FROM TEACHER */}
+          {isWhiteboardOpen && (
+            <VirtualWhiteboardPanel
+              lessonKey={lessonKey}
+              lessonTitle={periodSpec.lessonTitle}
+              grade={periodSpec.grade}
+              period={periodSpec.period}
+              classId={currentStudent.classId}
+              whiteboardState={whiteboardState}
+              slideBackgroundUrl={activeSlideImageSrc}
+              readOnly={true}
+              onShowToast={onShowToast}
+            />
+          )}
+
           {/* GLOBAL REAL-TIME PRACTICE ARENA COUNTDOWN CLOCK BAR WHEN HOẠT ĐỘNG 3 IS UNLOCKED */}
           {isArenaStage3Unlocked && teacherActiveView !== 'slide' && (
             <div className="rounded-2xl bg-gradient-to-r from-purple-950 via-indigo-950 to-slate-900 text-white p-4 shadow-md border border-purple-400/30 flex flex-col gap-2.5">
@@ -793,11 +852,13 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                         ⏱️ ĐỒNG HỒ ĐẾM NGƯỢC ĐẤU TRƯỜNG LUYỆN TẬP (HOẠT ĐỘNG 3)
                       </span>
                       <span className="px-2 py-0.5 rounded-full bg-white/10 text-[10px] font-bold text-amber-200">
-                        {arenaVisual.statusLabel}
+                        {isStudentArenaReady ? arenaVisual.statusLabel : '⏸️ Chờ em bấm Sẵn sàng luyện tập'}
                       </span>
                     </div>
                     <p className="text-xs text-slate-300 mt-0.5">
-                      Đồng bộ thời gian thực trực tiếp từ Giáo viên • Thanh tiến trình tự động đổi màu cảnh báo khi sắp hết giờ
+                      {isStudentArenaReady
+                        ? 'Đang tính giờ làm bài trực tiếp • Thanh tiến trình tự động đổi màu cảnh báo khi sắp hết giờ'
+                        : 'Bấm "🚀 Sẵn sàng luyện tập" trong Hoạt động 3 để bắt đầu tính giờ làm bài!'}
                     </p>
                   </div>
                 </div>
@@ -808,6 +869,19 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                   >
                     {formatCountdownMmSs(arenaRemainingSec)}
                   </div>
+                  {!isStudentArenaReady && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveView(3);
+                        setIsStudentArenaReady(true);
+                        onShowToast('🚀 Đã bắt đầu tính giờ Đấu trường Luyện tập!');
+                      }}
+                      className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs cursor-pointer shadow-xs transition-colors"
+                    >
+                      🚀 Sẵn sàng luyện tập
+                    </button>
+                  )}
                   {activeView !== 3 && (
                     <button
                       type="button"
@@ -857,9 +931,11 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    if (activePushAlert.stage) {
+                    if (activePushAlert.stage && activePushAlert.stage !== 'whiteboard') {
                       setActiveView(activePushAlert.stage);
                       onShowToast(`🚀 Đã chuyển sang ${activePushAlert.stageLabel}!`);
+                    } else if (activePushAlert.stage === 'whiteboard') {
+                      onShowToast('🎨 Đang hiển thị Bảng trắng ảo từ Giáo viên!');
                     }
                     setActivePushAlert(null);
                   }}
@@ -900,26 +976,32 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
             </div>
           )}
           {!isViewUnlocked(activeView) ? (
-            /* LOCKED ITEM NOTICE */
+            /* LOCKED ITEM NOTICE — STRICT TEACHER LOCK ENFORCEMENT */
             <div className="p-12 rounded-3xl bg-white border-2 border-dashed border-slate-200 text-center flex flex-col items-center gap-4 shadow-xs">
               <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">
                 <span className="material-symbols-outlined text-[32px]">lock_clock</span>
               </div>
               <div>
                 <h2 className="text-xl font-bold text-slate-900">
-                  {navItems.find((n) => n.id === activeView)?.label} đang chờ Giáo viên mở khóa
+                  {teacherActiveView === 'waiting'
+                    ? '⏹️ Đã kết thúc Slide bài giảng — Các hoạt động đang khóa nghiêm ngặt'
+                    : `${navItems.find((n) => n.id === activeView)?.label} đang chờ Giáo viên mở khóa`}
                 </h2>
                 <p className="text-sm text-slate-500 max-w-md mt-1">
-                  Thầy/Cô đang điều khiển tiến trình lớp học trực tiếp. Khi thầy/cô bấm mở khóa mục này, màn hình của em sẽ tự động mở khóa và hiển thị ngay!
+                  {teacherActiveView === 'waiting'
+                    ? 'Giáo viên đã đóng Slide bài giảng. Toàn bộ các hoạt động 1, 2, 3, 4 hiện đang khóa nghiêm ngặt — khi Giáo viên bấm mở khóa hoạt động nào thì màn hình của em mới được mở hoạt động đó!'
+                    : 'Thầy/Cô đang điều khiển tiến trình lớp học trực tiếp. Khi thầy/cô bấm mở khóa mục này, màn hình của em sẽ tự động mở khóa và hiển thị ngay!'}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setActiveView(resolveInitialView())}
-                className="px-5 py-2.5 rounded-full bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-sm cursor-pointer"
-              >
-                Quay về mục Giáo viên đang phát
-              </button>
+              {teacherActiveView !== 'waiting' && (
+                <button
+                  type="button"
+                  onClick={() => setActiveView(resolveInitialView())}
+                  className="px-5 py-2.5 rounded-full bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-sm cursor-pointer"
+                >
+                  Quay về mục Giáo viên đang phát
+                </button>
+              )}
             </div>
           ) : (
             <div className="flex flex-col gap-6">
@@ -1314,6 +1396,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                         'Đáp án chính xác theo sách giáo khoa.',
                     }))}
                     lessonContext={`Tiết ${periodSpec.period}: ${periodSpec.lessonTitle}`}
+                    onReadyStart={() => setIsStudentArenaReady(true)}
                     onShowToast={onShowToast}
                     onFinish={(earned) => {
                       const bonus = Math.max(20, Math.round(earned * 20));

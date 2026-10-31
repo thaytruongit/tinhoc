@@ -43,7 +43,11 @@ import {
   getDefaultLectureSlides,
   LectureSlideManagerModal,
 } from './LectureSlideManagerModal';
-import { resolvePresenterKeyAction } from '../utils/slideAndArenaController';
+import {
+  resolvePresenterKeyAction,
+  buildEndSlidePresentationState,
+} from '../utils/slideAndArenaController';
+import { VirtualWhiteboardPanel } from './VirtualWhiteboardPanel';
 
 export type TeacherTab =
   | 'trang-chu'
@@ -126,6 +130,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   >('ALL');
   const [isLivePresenterOpen, setIsLivePresenterOpen] = useState(false);
   const [showLectureSlideModal, setShowLectureSlideModal] = useState(false);
+  const [showWhiteboardModal, setShowWhiteboardModal] = useState(false);
   const [showResetAcademicYearModal, setShowResetAcademicYearModal] = useState(false);
   const [isResettingAcademicYear, setIsResettingAcademicYear] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -266,9 +271,36 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     ]
   );
 
+  const handleEndSlideFromPortal = useCallback(() => {
+    if (onUpdateLiveSession) {
+      onUpdateLiveSession((prev) => buildEndSlidePresentationState(prev, portalLessonKey));
+    }
+    if (slideBroadcastChannelRef.current) {
+      slideBroadcastChannelRef.current.postMessage({
+        type: 'SLIDE_ENDED',
+        lessonKey: portalLessonKey,
+        grade: portalActiveGrade,
+        period: portalActivePeriod,
+        classId: liveSession?.activeClassId || selectedClass,
+        timestampIso: new Date().toISOString(),
+      });
+    }
+    onShowToast(
+      `⏹️ Đã kết thúc Slide bài giảng! Slide trên máy HS đã tự động đóng và các hoạt động (HĐ 1, 2, 3, 4) vẫn giữ khóa nghiêm ngặt!`
+    );
+  }, [
+    onUpdateLiveSession,
+    portalLessonKey,
+    portalActiveGrade,
+    portalActivePeriod,
+    liveSession?.activeClassId,
+    selectedClass,
+    onShowToast,
+  ]);
+
   // Keyboard event listener in TeacherPortal supporting 'Space' and 'ArrowRight' (and 'ArrowLeft')
   useEffect(() => {
-    if (isLivePresenterOpen || showLectureSlideModal) return;
+    if (isLivePresenterOpen || showLectureSlideModal || showWhiteboardModal) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
@@ -1673,6 +1705,15 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
               <button
                 type="button"
+                onClick={() => setShowWhiteboardModal(true)}
+                className="w-full text-left flex items-center gap-space-sm px-space-md py-2.5 rounded-lg font-label-md text-label-md bg-orange-500/15 text-orange-800 dark:text-orange-300 hover:bg-orange-500/25 font-bold transition-all cursor-pointer border border-orange-500/30"
+              >
+                <span className="material-symbols-outlined text-[20px]">draw</span>
+                <span className="truncate">🎨 Bảng trắng ảo (Đồng bộ HS)</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setShowBulkImportModal(true)}
                 className="w-full text-left flex items-center gap-space-sm px-space-md py-2.5 rounded-lg font-label-md text-label-md bg-blue-500/10 text-blue-700 dark:text-blue-300 hover:bg-blue-500/20 font-bold transition-all cursor-pointer border border-blue-500/25"
               >
@@ -1751,7 +1792,25 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               >
                 Space / →
               </button>
+              <button
+                type="button"
+                onClick={handleEndSlideFromPortal}
+                className="px-2 py-0.5 rounded bg-slate-900 hover:bg-rose-700 text-white cursor-pointer shadow-2xs"
+                title="Kết thúc Slide bài giảng: Tự động đóng Slide trên máy HS và giữ nguyên khóa các hoạt động"
+              >
+                ⏹️ Kết thúc Slide
+              </button>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setShowWhiteboardModal(true)}
+              className="px-3.5 py-1.5 rounded-full bg-orange-500 hover:bg-orange-600 text-white font-label-sm text-xs font-extrabold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+              title="Mở Bảng trắng ảo để vẽ, ghi chú trực tiếp và đồng bộ thời gian thực sang màn hình học sinh"
+            >
+              <span className="material-symbols-outlined text-[16px]">draw</span>
+              <span>🎨 Bảng trắng ảo</span>
+            </button>
 
             {liveSession?.isBroadcasting && (
               <button
@@ -5732,6 +5791,40 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         onUpdateLiveSession={onUpdateLiveSession}
         onShowToast={onShowToast}
       />
+
+      {/* Virtual Whiteboard Modal (Bảng trắng ảo vẽ & ghi chú đồng bộ thời gian thực cho HS) */}
+      {showWhiteboardModal && (
+        <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="w-full max-w-6xl my-auto">
+            <VirtualWhiteboardPanel
+              lessonKey={portalLessonKey}
+              lessonTitle={portalPeriodSpec.lessonTitle}
+              grade={portalActiveGrade}
+              period={portalActivePeriod}
+              classId={liveSession?.activeClassId || selectedClass}
+              whiteboardState={liveSession?.whiteboardByLesson?.[portalLessonKey]}
+              slideBackgroundUrl={
+                portalSlides[Math.min(portalCurrentSlideIndex, portalSlides.length - 1)]?.imageUrl
+              }
+              readOnly={false}
+              onUpdateWhiteboard={(nextWb) => {
+                if (onUpdateLiveSession) {
+                  onUpdateLiveSession((prev) => ({
+                    ...prev,
+                    whiteboardByLesson: {
+                      ...(prev.whiteboardByLesson || {}),
+                      [portalLessonKey]: nextWb,
+                    },
+                    updatedAt: new Date().toISOString(),
+                  }));
+                }
+              }}
+              onClose={() => setShowWhiteboardModal(false)}
+              onShowToast={onShowToast}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

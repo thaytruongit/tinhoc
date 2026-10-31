@@ -1106,6 +1106,7 @@ interface QuizArena25sProps {
     explanation: string;
   }>;
   onFinish?: (score: number) => void;
+  onReadyStart?: () => void;
   onShowToast: (msg: string) => void;
   learningMode?: 'IN_CLASS_LIVE' | 'HOME_SELF_PACED';
   lessonContext?: string;
@@ -1114,10 +1115,12 @@ interface QuizArena25sProps {
 export const QuizArena25sActivity: React.FC<QuizArena25sProps> = ({
   questions,
   onFinish,
+  onReadyStart,
   onShowToast,
   learningMode = 'HOME_SELF_PACED',
   lessonContext = 'Tin học GDPT 2018',
 }) => {
+  const [isReadyToStart, setIsReadyToStart] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedOpt, setSelectedOpt] = useState<'A' | 'B' | 'C' | 'D' | null>(null);
   const [answersHistory, setAnswersHistory] = useState<
@@ -1134,6 +1137,7 @@ export const QuizArena25sActivity: React.FC<QuizArena25sProps> = ({
 
   // Reset quiz when question bank changes (e.g., when switching period/grade)
   useEffect(() => {
+    setIsReadyToStart(false);
     setCurrentIndex(0);
     setSelectedOpt(null);
     setAnswersHistory({});
@@ -1149,9 +1153,9 @@ export const QuizArena25sActivity: React.FC<QuizArena25sProps> = ({
   const maxStage3Points =
     Math.round(questions.reduce((acc, q) => acc + (q.points ?? 0.5), 0) * 100) / 100 || 0;
 
-  // 25s Countdown timer
+  // 25s Countdown timer — ONLY runs after student clicks "Sẵn sàng luyện tập"
   useEffect(() => {
-    if (isConfirmed || isCompleted || !currentQ) return;
+    if (!isReadyToStart || isConfirmed || isCompleted || !currentQ) return;
 
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
@@ -1165,7 +1169,7 @@ export const QuizArena25sActivity: React.FC<QuizArena25sProps> = ({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [currentIndex, isConfirmed, isCompleted, selectedOpt, currentQ]);
+  }, [isReadyToStart, currentIndex, isConfirmed, isCompleted, selectedOpt, currentQ]);
 
   const handleConfirmAnswer = () => {
     if (isConfirmed || isCompleted || !currentQ) return;
@@ -1208,6 +1212,7 @@ export const QuizArena25sActivity: React.FC<QuizArena25sProps> = ({
   };
 
   const handleRestart = () => {
+    setIsReadyToStart(true);
     setCurrentIndex(0);
     setSelectedOpt(null);
     setAnswersHistory({});
@@ -1218,6 +1223,7 @@ export const QuizArena25sActivity: React.FC<QuizArena25sProps> = ({
     setEarnedPoints(0);
     setIsCompleted(false);
     setAiScaffoldingReply('');
+    onReadyStart?.();
   };
 
   const handleAskAiWhyWrong = async () => {
@@ -1264,6 +1270,55 @@ export const QuizArena25sActivity: React.FC<QuizArena25sProps> = ({
         <h3 className="font-headline-sm text-base font-bold text-on-surface">
           Chưa có câu hỏi trắc nghiệm 25s cho tiết học này
         </h3>
+      </div>
+    );
+  }
+
+  if (!isReadyToStart) {
+    return (
+      <div className="flex flex-col items-center justify-center p-8 rounded-3xl bg-gradient-to-br from-indigo-950 via-purple-950 to-slate-900 text-white border-2 border-purple-400/40 shadow-xl text-center gap-5">
+        <div className="w-16 h-16 rounded-2xl bg-amber-400/20 border border-amber-300/40 text-amber-300 flex items-center justify-center text-3xl shadow-md">
+          ⚡
+        </div>
+        <div className="max-w-lg flex flex-col gap-1.5">
+          <span className="text-xs font-extrabold uppercase tracking-widest text-amber-300">
+            ĐẤU TRƯỜNG TRẮC NGHIỆM TỐC ĐỘ 25 GIÂY / CÂU
+          </span>
+          <h3 className="text-xl sm:text-2xl font-black text-white">
+            Em đã sẵn sàng bước vào Đấu trường Luyện tập?
+          </h3>
+          <p className="text-xs sm:text-sm text-purple-200 leading-relaxed">
+            Bài luyện tập gồm <strong className="text-white">{questions.length} câu hỏi</strong> (Tổng điểm:{' '}
+            <strong className="text-amber-300">{maxStage3Points.toFixed(1)} điểm</strong>). Đồng hồ đếm ngược{' '}
+            <strong className="text-emerald-300">chỉ bắt đầu tính giờ</strong> sau khi em bấm nút{' '}
+            <strong className="text-white">"Sẵn sàng luyện tập"</strong> bên dưới!
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-bold text-purple-100">
+          <span className="px-3 py-1.5 rounded-xl bg-white/10 border border-white/15">
+            ⏱️ 25 giây / câu hỏi
+          </span>
+          <span className="px-3 py-1.5 rounded-xl bg-white/10 border border-white/15">
+            🎯 {questions.length} câu trắc nghiệm
+          </span>
+          <span className="px-3 py-1.5 rounded-xl bg-white/10 border border-white/15">
+            🏆 Tích lũy chuỗi Streak &amp; XP
+          </span>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            setIsReadyToStart(true);
+            setTimeLeft(25);
+            onReadyStart?.();
+            onShowToast('🚀 Đã bắt đầu tính giờ Đấu trường Luyện tập! Chúc em đạt điểm tối đa!');
+          }}
+          className="px-7 py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 hover:from-amber-500 hover:to-rose-600 text-slate-950 font-black text-sm sm:text-base shadow-lg hover:scale-105 transition-all cursor-pointer flex items-center gap-2"
+        >
+          <span>🚀 Sẵn sàng luyện tập (Bắt đầu tính giờ)</span>
+        </button>
       </div>
     );
   }

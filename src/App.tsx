@@ -27,6 +27,12 @@ import {
   ACHIEVEMENT_BADGES,
   triggerSynchronizedCelebration,
 } from './utils/soundEffects';
+import {
+  normalizeLiveSession,
+  normalizeStudentRosterList,
+  normalizeClassroomList,
+  buildEndSlidePresentationState,
+} from './utils/slideAndArenaController';
 
 type AppMode = 'login' | 'student' | 'teacher';
 
@@ -44,7 +50,7 @@ export default function App() {
       const saved = localStorage.getItem('cloudplay_classes_v4');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        return normalizeClassroomList(parsed, INITIAL_CLASSES);
       }
     } catch {
       // ignore
@@ -57,9 +63,7 @@ export default function App() {
       const saved = localStorage.getItem('cloudplay_students_roster_v4');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
+        return normalizeStudentRosterList(parsed, INITIAL_STUDENTS);
       }
     } catch {
       // ignore
@@ -73,16 +77,7 @@ export default function App() {
       const saved = localStorage.getItem('cloudplay_live_session_v4');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object' && parsed.unlockedStagesByLesson) {
-          return {
-            ...defaultSession,
-            ...parsed,
-            verifiedLessonsMap: {
-              ...defaultSession.verifiedLessonsMap,
-              ...(parsed.verifiedLessonsMap || {}),
-            },
-          } as LiveClassroomSession;
-        }
+        return normalizeLiveSession(parsed, defaultSession);
       }
     } catch {
       // ignore
@@ -129,10 +124,14 @@ export default function App() {
     students[0] ||
     INITIAL_STUDENTS[0];
 
-  const activeLessonKey = `k${liveSession.activeGrade}-tiet-${liveSession.activePeriod}`;
-  const unlockedStages: Record<number, boolean> = liveSession.unlockedStagesByLesson[
-    activeLessonKey
-  ] || { 1: true, 2: false, 3: false, 4: false };
+  const activeLessonKey = `k${liveSession?.activeGrade || 6}-tiet-${liveSession?.activePeriod || 1}`;
+  const unlockedStages: Record<number, boolean> =
+    liveSession?.unlockedStagesByLesson?.[activeLessonKey] || {
+      1: false,
+      2: false,
+      3: false,
+      4: false,
+    };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -185,34 +184,55 @@ export default function App() {
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Fetch initial classes, students, and liveSession from backend database on startup
+  // Fetch initial classes, students, and liveSession from backend database (or directly from Supabase on GitHub Pages)
   useEffect(() => {
     async function fetchBackendData() {
       setIsLoading(true);
       try {
         const [clsRes, stRes, liveRes] = await Promise.all([
-          fetch('/api/db/classes').then((r) => r.json()).catch(() => null),
-          fetch('/api/db/students').then((r) => r.json()).catch(() => null),
-          fetch('/api/live-session').then((r) => r.json()).catch(() => null),
+          fetch('/api/db/classes')
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+          fetch('/api/db/students')
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+          fetch('/api/live-session')
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
         ]);
         if (clsRes?.ok && Array.isArray(clsRes.classes) && clsRes.classes.length > 0) {
-          setClasses(clsRes.classes);
+          setClasses((prev) => normalizeClassroomList(clsRes.classes, prev));
+        } else if (supabase && isSupabaseRealtimeConfigured) {
+          const { data: sbClasses } = await supabase.from('classes').select('*');
+          if (Array.isArray(sbClasses) && sbClasses.length > 0) {
+            setClasses((prev) => normalizeClassroomList(sbClasses, prev));
+          }
         }
+
         if (stRes?.ok && Array.isArray(stRes.students) && stRes.students.length > 0) {
-          setStudents(stRes.students);
+          setStudents((prev) => normalizeStudentRosterList(stRes.students, prev));
+        } else if (supabase && isSupabaseRealtimeConfigured) {
+          const { data: sbStudents } = await supabase.from('students').select('*');
+          if (Array.isArray(sbStudents) && sbStudents.length > 0) {
+            setStudents((prev) => normalizeStudentRosterList(sbStudents, prev));
+          }
         }
-        if (liveRes && typeof liveRes === 'object' && liveRes.unlockedStagesByLesson) {
-          const defaultSession = createDefaultLiveSession();
-          setLiveSession((prev) => ({
-            ...defaultSession,
-            ...prev,
-            ...liveRes,
-            verifiedLessonsMap: {
-              ...defaultSession.verifiedLessonsMap,
-              ...(prev.verifiedLessonsMap || {}),
-              ...(liveRes.verifiedLessonsMap || {}),
-            },
-          }));
+
+        if (liveRes && typeof liveRes === 'object') {
+          setLiveSession((prev) => normalizeLiveSession(liveRes, prev));
+        } else if (supabase && isSupabaseRealtimeConfigured) {
+          const { data: sbLiveRow } = await supabase
+            .from('live_classroom_states')
+            .select('state_json')
+            .eq('session_key', 'global_live_session')
+            .maybeSingle();
+          if (sbLiveRow?.state_json) {
+            const parsed =
+              typeof sbLiveRow.state_json === 'string'
+                ? JSON.parse(sbLiveRow.state_json)
+                : sbLiveRow.state_json;
+            setLiveSession((prev) => normalizeLiveSession(parsed, prev));
+          }
         }
       } catch (err) {
         console.warn('Backend db fetch notice:', err);
@@ -226,12 +246,10 @@ export default function App() {
   // Listen to BroadcastChannel & storage events for instant cross-tab sync
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'cloudplay_live_session_v3' && e.newValue) {
+      if ((e.key === 'cloudplay_live_session_v3' || e.key === 'cloudplay_live_session_v4') && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
-          if (parsed && parsed.unlockedStagesByLesson) {
-            setLiveSession(parsed);
-          }
+          setLiveSession((prev) => normalizeLiveSession(parsed, prev));
         } catch {
           // ignore
         }
@@ -249,13 +267,28 @@ export default function App() {
       const data = event.data;
       if (!data || typeof data !== 'object') return;
       if (data.type === 'ROSTER_UPDATED' && Array.isArray(data.students)) {
-        setStudents(data.students);
+        setStudents((prev) => normalizeStudentRosterList(data.students, prev));
       } else if (data.type === 'CLASSES_UPDATED' && Array.isArray(data.classes)) {
-        setClasses(data.classes);
+        setClasses((prev) => normalizeClassroomList(data.classes, prev));
       } else if (data.type === 'CLASS_CHANGED' && typeof data.classId === 'string') {
         setSelectedClass(data.classId);
       } else if (data.type === 'LIVE_SESSION_UPDATED' && data.session) {
-        setLiveSession(data.session);
+        setLiveSession((prev) => normalizeLiveSession(data.session, prev));
+      } else if (
+        data.type === 'WHITEBOARD_UPDATED' &&
+        typeof data.lessonKey === 'string' &&
+        data.whiteboardState
+      ) {
+        setLiveSession((prev) => ({
+          ...prev,
+          whiteboardByLesson: {
+            ...(prev.whiteboardByLesson || {}),
+            [data.lessonKey]: data.whiteboardState,
+          },
+          updatedAt: new Date().toISOString(),
+        }));
+      } else if (data.type === 'SLIDE_ENDED' && typeof data.lessonKey === 'string') {
+        setLiveSession((prev) => buildEndSlidePresentationState(prev, data.lessonKey));
       } else if (
         data.type === 'SLIDE_CHANGED' &&
         typeof data.lessonKey === 'string' &&
@@ -310,20 +343,23 @@ export default function App() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'live_classroom_states' },
         (payload) => {
-          if (payload.new && (payload.new as any).state_json) {
-            try {
-              const parsed = JSON.parse((payload.new as any).state_json);
-              if (parsed && parsed.updatedAt) {
-                setLiveSession((prev) => {
-                  if (new Date(parsed.updatedAt).getTime() > new Date(prev.updatedAt).getTime()) {
-                    return parsed;
-                  }
-                  return prev;
-                });
-              }
-            } catch {
-              // ignore
+          const row = payload.new as any;
+          if (!row || !row.state_json) return;
+          // Ignore diagnostic or keep-alive heartbeat rows so they never corrupt liveSession!
+          if (row.session_key && row.session_key !== 'global_live_session') return;
+          try {
+            const parsed =
+              typeof row.state_json === 'string' ? JSON.parse(row.state_json) : row.state_json;
+            if (parsed && parsed.updatedAt) {
+              setLiveSession((prev) => {
+                if (new Date(parsed.updatedAt).getTime() > new Date(prev.updatedAt).getTime()) {
+                  return normalizeLiveSession(parsed, prev);
+                }
+                return prev;
+              });
             }
+          } catch {
+            // ignore
           }
         }
       )
@@ -332,10 +368,10 @@ export default function App() {
         { event: '*', schema: 'public', table: 'classes' },
         () => {
           fetch('/api/db/classes')
-            .then((res) => res.json())
+            .then((res) => (res.ok ? res.json() : null))
             .then((data) => {
-              if (data.ok && Array.isArray(data.classes) && data.classes.length > 0) {
-                setClasses(data.classes);
+              if (data?.ok && Array.isArray(data.classes) && data.classes.length > 0) {
+                setClasses((prev) => normalizeClassroomList(data.classes, prev));
               }
             })
             .catch(() => {});
@@ -346,10 +382,10 @@ export default function App() {
         { event: '*', schema: 'public', table: 'students' },
         () => {
           fetch('/api/db/students')
-            .then((res) => res.json())
+            .then((res) => (res.ok ? res.json() : null))
             .then((data) => {
-              if (data.ok && Array.isArray(data.students) && data.students.length > 0) {
-                setStudents(data.students);
+              if (data?.ok && Array.isArray(data.students) && data.students.length > 0) {
+                setStudents((prev) => normalizeStudentRosterList(data.students, prev));
               }
             })
             .catch(() => {});
@@ -373,7 +409,7 @@ export default function App() {
         if (serverState && serverState.updatedAt) {
           setLiveSession((prev) => {
             if (new Date(serverState.updatedAt).getTime() > new Date(prev.updatedAt).getTime()) {
-              return serverState as LiveClassroomSession;
+              return normalizeLiveSession(serverState, prev);
             }
             return prev;
           });
@@ -393,12 +429,16 @@ export default function App() {
     updater: (prev: LiveClassroomSession) => LiveClassroomSession
   ) => {
     setLiveSession((prev) => {
-      const next: LiveClassroomSession = {
-        ...updater(prev),
-        updatedAt: new Date().toISOString(),
-      };
+      const next: LiveClassroomSession = normalizeLiveSession(
+        {
+          ...updater(prev),
+          updatedAt: new Date().toISOString(),
+        },
+        prev
+      );
       try {
         localStorage.setItem('cloudplay_live_session_v3', JSON.stringify(next));
+        localStorage.setItem('cloudplay_live_session_v4', JSON.stringify(next));
       } catch {
         // ignore
       }
@@ -413,6 +453,19 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(next),
       }).catch(() => {});
+      if (supabase && isSupabaseRealtimeConfigured) {
+        supabase
+          .from('live_classroom_states')
+          .upsert(
+            {
+              session_key: 'global_live_session',
+              state_json: JSON.stringify(next),
+              updated_at: next.updatedAt,
+            },
+            { onConflict: 'session_key' }
+          )
+          .then(() => {});
+      }
       return next;
     });
   };

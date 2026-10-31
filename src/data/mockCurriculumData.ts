@@ -956,18 +956,60 @@ export interface LectureSlideDeck {
   slides: LectureSlidePage[];
 }
 
+export interface WhiteboardPoint {
+  x: number; // normalized 0..1000
+  y: number; // normalized 0..562.5 (16:9 canvas)
+}
+
+export interface WhiteboardStroke {
+  id: string;
+  tool: 'pen' | 'highlighter' | 'line' | 'arrow' | 'rect' | 'circle' | 'eraser';
+  color: string;
+  width: number;
+  points: WhiteboardPoint[];
+}
+
+export interface WhiteboardTextNote {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  fontSize?: number;
+}
+
+export interface LessonWhiteboardState {
+  isOpen: boolean;
+  mode?: 'standalone' | 'slide-overlay';
+  background?: 'grid' | 'chalkboard' | 'plain' | 'slide';
+  backgroundMode?: 'grid' | 'chalkboard' | 'slide';
+  strokes: WhiteboardStroke[];
+  textNotes: WhiteboardTextNote[];
+  title?: string;
+  updatedAt: string;
+}
+
 export interface LiveClassroomSession {
   isBroadcasting: boolean;
   activeGrade: 6 | 7 | 8 | 9;
   activePeriod: number;
   activeStage: 1 | 2 | 3 | 4;
-  activeLiveView?: 'slide' | 'hd1' | 'hd2' | 'hd3' | 'hd3-practice' | 'hd4';
+  activeLiveView?:
+    | 'slide'
+    | 'waiting'
+    | 'whiteboard'
+    | 'hd1'
+    | 'hd2'
+    | 'hd3'
+    | 'hd3-practice'
+    | 'hd4';
   activeClassId: string;
   unlockedStagesByLesson: Record<string, Record<1 | 2 | 3 | 4, boolean>>;
   unlockedPracticeStage3ByLesson?: Record<string, boolean>;
   unlockedSlideDeckByLesson?: Record<string, boolean>;
   activeSlideIndexByLesson?: Record<string, number>;
   lectureSlidesByLesson?: Record<string, LectureSlideDeck>;
+  whiteboardByLesson?: Record<string, LessonWhiteboardState>;
   slideVideoStateByLesson?: Record<
     string,
     {
@@ -1006,7 +1048,7 @@ export interface LiveClassroomSession {
     id: string;
     title: string;
     body: string;
-    stage?: 1 | 2 | 3 | 4 | 'slide' | 'hd3-practice';
+    stage?: 1 | 2 | 3 | 4 | 'slide' | 'hd3-practice' | 'whiteboard';
     stageLabel?: string;
     lessonTitle?: string;
     classId?: string;

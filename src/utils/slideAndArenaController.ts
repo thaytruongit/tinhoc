@@ -46,8 +46,10 @@ export function resolvePresenterKeyAction(
 
 /**
  * Determines whether a student live room view is unlocked.
- * CRITICAL RULE: When the teacher is actively broadcasting a slide image (teacherActiveView === 'slide'),
+ * CRITICAL RULE 1: When the teacher is actively broadcasting a slide image (teacherActiveView === 'slide'),
  * ALL other activities (1, 2, 3, 'hd3-practice', 4) are locked so ONLY the slide is available.
+ * CRITICAL RULE 2: Strict pedagogical lock — when Slide ends or during Live class, an activity (1, 2, 3, 4)
+ * is ONLY unlocked if unlockedStages[viewId] is explicitly true.
  */
 export function isStudentLiveViewUnlocked(params: {
   viewId: 'slide' | 1 | 2 | 3 | 'hd3-practice' | 4;
@@ -55,7 +57,7 @@ export function isStudentLiveViewUnlocked(params: {
   isSlideDeckUnlocked: boolean;
   isPracticeStage3Unlocked: boolean;
   unlockedStages: Record<number, boolean>;
-  teacherCurrentStage: number;
+  teacherCurrentStage?: number;
 }): boolean {
   const {
     viewId,
@@ -63,7 +65,6 @@ export function isStudentLiveViewUnlocked(params: {
     isSlideDeckUnlocked,
     isPracticeStage3Unlocked,
     unlockedStages,
-    teacherCurrentStage,
   } = params;
 
   // When teacher broadcasts slide image, lock all other activities
@@ -72,16 +73,14 @@ export function isStudentLiveViewUnlocked(params: {
   }
 
   if (viewId === 'slide') {
-    return isSlideDeckUnlocked;
+    return Boolean(isSlideDeckUnlocked);
   }
 
   if (viewId === 'hd3-practice') {
-    return isPracticeStage3Unlocked;
+    return Boolean(isPracticeStage3Unlocked);
   }
 
-  return Boolean(
-    viewId === 1 || unlockedStages[viewId] || viewId <= teacherCurrentStage
-  );
+  return Boolean(unlockedStages?.[viewId]);
 }
 
 /**
@@ -283,4 +282,245 @@ export function generateFallbackSlideSvgDataUrl(params: {
 
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
+
+/**
+ * Builds the updated session state when the Teacher clicks "Kết thúc Slide bài giảng":
+ * - Automatically closes the Slide presentation (unlockedSlideDeckByLesson[lessonKey] = false)
+ * - Exits 'slide' broadcast mode (activeLiveView = 'waiting')
+ * - Stops slide auto-advance and explanation video playback
+ * - Keeps all activity locks closed ({ 1: false, 2: false, 3: false, 4: false }) so only activities
+ *   explicitly unlocked by the Teacher afterwards can be opened by students.
+ */
+export function buildEndSlidePresentationState<T extends Record<string, any>>(
+  prev: T,
+  lessonKey: string
+): T {
+  const prevVideo = prev.slideVideoStateByLesson?.[lessonKey];
+  const prevAuto = prev.slideAutoAdvanceStateByLesson?.[lessonKey];
+  return {
+    ...prev,
+    activeLiveView: 'waiting',
+    unlockedSlideDeckByLesson: {
+      ...(prev.unlockedSlideDeckByLesson || {}),
+      [lessonKey]: false,
+    },
+    unlockedStagesByLesson: {
+      ...(prev.unlockedStagesByLesson || {}),
+      [lessonKey]: {
+        1: false,
+        2: false,
+        3: false,
+        4: false,
+      },
+    },
+    unlockedPracticeStage3ByLesson: {
+      ...(prev.unlockedPracticeStage3ByLesson || {}),
+      [lessonKey]: false,
+    },
+    slideVideoStateByLesson: prevVideo
+      ? {
+          ...(prev.slideVideoStateByLesson || {}),
+          [lessonKey]: {
+            ...prevVideo,
+            isPlaying: false,
+            updatedAt: new Date().toISOString(),
+          },
+        }
+      : prev.slideVideoStateByLesson,
+    slideAutoAdvanceStateByLesson: prevAuto
+      ? {
+          ...(prev.slideAutoAdvanceStateByLesson || {}),
+          [lessonKey]: {
+            ...prevAuto,
+            enabled: false,
+          },
+        }
+      : prev.slideAutoAdvanceStateByLesson,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Safely normalizes any LiveClassroomSession object loaded from PostgreSQL / Supabase / localStorage
+ * so missing or null nested maps never cause a white-screen TypeError during render.
+ */
+export function normalizeLiveSession<T extends Record<string, any>>(
+  raw: any,
+  defaultSession: T
+): T {
+  if (!raw || typeof raw !== 'object') {
+    return defaultSession;
+  }
+  // Reject diagnostic or keep-alive payloads that are not actual LiveClassroomSession objects
+  if ('testMessage' in raw || 'pingCount' in raw || 'scheduleCron' in raw) {
+    return defaultSession;
+  }
+
+  const mergedUnlockedStages: Record<string, Record<1 | 2 | 3 | 4, boolean>> = {
+    ...(defaultSession.unlockedStagesByLesson || {}),
+  };
+  if (raw.unlockedStagesByLesson && typeof raw.unlockedStagesByLesson === 'object') {
+    for (const [k, val] of Object.entries(raw.unlockedStagesByLesson)) {
+      if (val && typeof val === 'object') {
+        const st = val as Record<string, any>;
+        mergedUnlockedStages[k] = {
+          1: Boolean(st[1]),
+          2: Boolean(st[2]),
+          3: Boolean(st[3]),
+          4: Boolean(st[4]),
+        };
+      }
+    }
+  }
+
+  const rawGrade = Number(raw.activeGrade);
+  const safeGrade = ([6, 7, 8, 9].includes(rawGrade)
+    ? rawGrade
+    : defaultSession.activeGrade || 6) as 6 | 7 | 8 | 9;
+  const rawPeriod = Number(raw.activePeriod);
+  const safePeriod =
+    rawPeriod >= 1 && rawPeriod <= 29 ? rawPeriod : defaultSession.activePeriod || 1;
+  const rawStage = Number(raw.activeStage);
+  const safeStage = ([1, 2, 3, 4].includes(rawStage)
+    ? rawStage
+    : defaultSession.activeStage || 1) as 1 | 2 | 3 | 4;
+
+  return {
+    ...defaultSession,
+    ...raw,
+    isBroadcasting:
+      typeof raw.isBroadcasting === 'boolean'
+        ? raw.isBroadcasting
+        : Boolean(defaultSession.isBroadcasting),
+    activeGrade: safeGrade,
+    activePeriod: safePeriod,
+    activeStage: safeStage,
+    activeClassId:
+      typeof raw.activeClassId === 'string' && raw.activeClassId.trim().length > 0
+        ? raw.activeClassId
+        : defaultSession.activeClassId || '6A10',
+    unlockedStagesByLesson: mergedUnlockedStages,
+    unlockedPracticeStage3ByLesson:
+      raw.unlockedPracticeStage3ByLesson &&
+      typeof raw.unlockedPracticeStage3ByLesson === 'object'
+        ? raw.unlockedPracticeStage3ByLesson
+        : defaultSession.unlockedPracticeStage3ByLesson || {},
+    unlockedSlideDeckByLesson:
+      raw.unlockedSlideDeckByLesson &&
+      typeof raw.unlockedSlideDeckByLesson === 'object'
+        ? raw.unlockedSlideDeckByLesson
+        : defaultSession.unlockedSlideDeckByLesson || {},
+    activeSlideIndexByLesson:
+      raw.activeSlideIndexByLesson &&
+      typeof raw.activeSlideIndexByLesson === 'object'
+        ? raw.activeSlideIndexByLesson
+        : defaultSession.activeSlideIndexByLesson || {},
+    lectureSlidesByLesson:
+      raw.lectureSlidesByLesson && typeof raw.lectureSlidesByLesson === 'object'
+        ? raw.lectureSlidesByLesson
+        : defaultSession.lectureSlidesByLesson || {},
+    whiteboardByLesson:
+      raw.whiteboardByLesson && typeof raw.whiteboardByLesson === 'object'
+        ? raw.whiteboardByLesson
+        : defaultSession.whiteboardByLesson || {},
+    taughtPeriodsByClass:
+      raw.taughtPeriodsByClass && typeof raw.taughtPeriodsByClass === 'object'
+        ? raw.taughtPeriodsByClass
+        : defaultSession.taughtPeriodsByClass || {},
+    learnedPeriodsByStudent:
+      raw.learnedPeriodsByStudent && typeof raw.learnedPeriodsByStudent === 'object'
+        ? raw.learnedPeriodsByStudent
+        : defaultSession.learnedPeriodsByStudent || {},
+    customWorksheetsByLesson:
+      raw.customWorksheetsByLesson && typeof raw.customWorksheetsByLesson === 'object'
+        ? raw.customWorksheetsByLesson
+        : defaultSession.customWorksheetsByLesson || {},
+    verifiedLessonsMap: {
+      ...(defaultSession.verifiedLessonsMap || {}),
+      ...(raw.verifiedLessonsMap && typeof raw.verifiedLessonsMap === 'object'
+        ? raw.verifiedLessonsMap
+        : {}),
+    },
+    updatedAt:
+      typeof raw.updatedAt === 'string' && raw.updatedAt.length > 0
+        ? raw.updatedAt
+        : new Date().toISOString(),
+  };
+}
+
+/**
+ * Normalizes student roster rows from either camelCase API or snake_case PostgreSQL/Supabase tables.
+ */
+export function normalizeStudentRosterList<T extends Record<string, any> = Record<string, any>>(
+  rawList: any,
+  fallbackList: T[] = []
+): T[] {
+  if (!Array.isArray(rawList) || rawList.length === 0) {
+    return fallbackList;
+  }
+  const normalized = rawList
+    .filter((item) => item && typeof item === 'object' && (item.id || item.student_code))
+    .map((r) => {
+      const id = String(r.id || r.student_code || '61008');
+      const classId = String(r.classId || r.class_id || '6A10');
+      const rawGrade = Number(r.grade) || Number(classId.charAt(0)) || 6;
+      const grade = ([6, 7, 8, 9].includes(rawGrade) ? rawGrade : 6) as 6 | 7 | 8 | 9;
+      return {
+        id,
+        username: String(r.username || id),
+        dob: String(r.dob || '15/05/2013'),
+        stationNumber: String(r.stationNumber || r.station_number || '01'),
+        name: String(r.name || r.fullName || r.full_name || r.display_name || 'Học sinh CloudPlay'),
+        classId,
+        grade,
+        passwordDefault: String(r.passwordDefault || r.password_default || '12345'),
+        xp: Number.isFinite(Number(r.xp)) ? Number(r.xp) : 100,
+        streakDays: Number.isFinite(Number(r.streakDays ?? r.streak_days))
+          ? Number(r.streakDays ?? r.streak_days)
+          : 1,
+        stars: Number.isFinite(Number(r.stars)) ? Number(r.stars) : 3,
+        groupNumber: (Number(r.groupNumber ?? r.group_number) || 1) as 1 | 2 | 3 | 4,
+        partnerName: String(r.partnerName || r.partner_name || 'Bạn cùng bàn Cloud'),
+        partnerId: String(r.partnerId || r.partner_id || '61008'),
+        avgScore: Number.isFinite(Number(r.avgScore ?? r.avg_score))
+          ? Number(r.avgScore ?? r.avg_score)
+          : 8.5,
+        submissionStatus: (r.submissionStatus ||
+          r.submission_status ||
+          'Chưa nộp') as 'Đã nộp' | 'Đang làm' | 'Chưa nộp',
+      } as unknown as T;
+    });
+  return normalized.length > 0 ? normalized : fallbackList;
+}
+
+/**
+ * Normalizes classroom rows from either camelCase API or snake_case PostgreSQL/Supabase tables.
+ */
+export function normalizeClassroomList<T extends Record<string, any> = Record<string, any>>(
+  rawList: any,
+  fallbackList: T[] = []
+): T[] {
+  if (!Array.isArray(rawList) || rawList.length === 0) {
+    return fallbackList;
+  }
+  const normalized = rawList
+    .filter((item) => item && typeof item === 'object' && item.id)
+    .map((c) => {
+      const id = String(c.id);
+      const rawGrade = Number(c.grade) || Number(id.charAt(0)) || 6;
+      const grade = ([6, 7, 8, 9].includes(rawGrade) ? rawGrade : 6) as 6 | 7 | 8 | 9;
+      return {
+        id,
+        name: String(c.name || `Lớp ${id}`),
+        grade,
+        schoolYear: String(c.schoolYear || c.school_year || '2024 - 2025'),
+        roomName: String(c.roomName || c.room_name || 'Phòng Lab Cloud'),
+        studentCount: Number.isFinite(Number(c.studentCount ?? c.student_count))
+          ? Number(c.studentCount ?? c.student_count)
+          : 40,
+      } as unknown as T;
+    });
+  return normalized.length > 0 ? normalized : fallbackList;
+}
+
 

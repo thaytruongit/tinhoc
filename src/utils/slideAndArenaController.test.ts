@@ -9,6 +9,10 @@ import {
   isFileStorageSlideUrl,
   getArenaCountdownVisualState,
   generateFallbackSlideSvgDataUrl,
+  buildEndSlidePresentationState,
+  normalizeLiveSession,
+  normalizeStudentRosterList,
+  normalizeClassroomList,
 } from './slideAndArenaController';
 
 test('resolvePresenterKeyAction handles Space, ArrowRight, PageDown, ArrowLeft, PageUp for wireless clicker', () => {
@@ -24,8 +28,8 @@ test('resolvePresenterKeyAction handles Space, ArrowRight, PageDown, ArrowLeft, 
   assert.equal(resolvePresenterKeyAction('ArrowRight', 'ArrowRight', 'DIV', true), null);
 });
 
-test('isStudentLiveViewUnlocked locks all other activities when teacher broadcasts slide', () => {
-  const baseParams = {
+test('isStudentLiveViewUnlocked locks all other activities when teacher broadcasts slide and enforces strict per-activity lock after slide ends', () => {
+  const slideBroadcastParams = {
     teacherActiveView: 'slide',
     isSlideDeckUnlocked: true,
     isPracticeStage3Unlocked: true,
@@ -33,12 +37,48 @@ test('isStudentLiveViewUnlocked locks all other activities when teacher broadcas
     teacherCurrentStage: 3,
   };
 
-  assert.equal(isStudentLiveViewUnlocked({ ...baseParams, viewId: 'slide' }), true);
-  assert.equal(isStudentLiveViewUnlocked({ ...baseParams, viewId: 1 }), false);
-  assert.equal(isStudentLiveViewUnlocked({ ...baseParams, viewId: 2 }), false);
-  assert.equal(isStudentLiveViewUnlocked({ ...baseParams, viewId: 3 }), false);
-  assert.equal(isStudentLiveViewUnlocked({ ...baseParams, viewId: 'hd3-practice' }), false);
-  assert.equal(isStudentLiveViewUnlocked({ ...baseParams, viewId: 4 }), false);
+  assert.equal(isStudentLiveViewUnlocked({ ...slideBroadcastParams, viewId: 'slide' }), true);
+  assert.equal(isStudentLiveViewUnlocked({ ...slideBroadcastParams, viewId: 1 }), false);
+  assert.equal(isStudentLiveViewUnlocked({ ...slideBroadcastParams, viewId: 2 }), false);
+  assert.equal(isStudentLiveViewUnlocked({ ...slideBroadcastParams, viewId: 3 }), false);
+  assert.equal(isStudentLiveViewUnlocked({ ...slideBroadcastParams, viewId: 'hd3-practice' }), false);
+  assert.equal(isStudentLiveViewUnlocked({ ...slideBroadcastParams, viewId: 4 }), false);
+
+  // When teacher ends slide presentation: slide closes and all activities remain locked until explicitly unlocked
+  const endedSession = buildEndSlidePresentationState(
+    {
+      activeLiveView: 'slide',
+      unlockedSlideDeckByLesson: { 'k6-tiet-1': true },
+      unlockedStagesByLesson: { 'k6-tiet-1': { 1: false, 2: false, 3: false, 4: false } },
+      unlockedPracticeStage3ByLesson: { 'k6-tiet-1': false },
+      updatedAt: '2026-05-01T10:00:00.000Z',
+    },
+    'k6-tiet-1'
+  );
+
+  assert.equal(endedSession.activeLiveView, 'waiting');
+  assert.equal(endedSession.unlockedSlideDeckByLesson['k6-tiet-1'], false);
+  const afterSlideEndParams = {
+    teacherActiveView: endedSession.activeLiveView,
+    isSlideDeckUnlocked: endedSession.unlockedSlideDeckByLesson['k6-tiet-1'],
+    isPracticeStage3Unlocked: endedSession.unlockedPracticeStage3ByLesson['k6-tiet-1'],
+    unlockedStages: endedSession.unlockedStagesByLesson['k6-tiet-1'],
+    teacherCurrentStage: 1,
+  };
+  assert.equal(isStudentLiveViewUnlocked({ ...afterSlideEndParams, viewId: 'slide' }), false);
+  assert.equal(isStudentLiveViewUnlocked({ ...afterSlideEndParams, viewId: 1 }), false);
+  assert.equal(isStudentLiveViewUnlocked({ ...afterSlideEndParams, viewId: 2 }), false);
+  assert.equal(isStudentLiveViewUnlocked({ ...afterSlideEndParams, viewId: 3 }), false);
+  assert.equal(isStudentLiveViewUnlocked({ ...afterSlideEndParams, viewId: 4 }), false);
+
+  // When teacher unlocks only Hoạt động 2, only viewId 2 is unlocked
+  const onlyStage2Params = {
+    ...afterSlideEndParams,
+    unlockedStages: { 1: false, 2: true, 3: false, 4: false },
+  };
+  assert.equal(isStudentLiveViewUnlocked({ ...onlyStage2Params, viewId: 1 }), false);
+  assert.equal(isStudentLiveViewUnlocked({ ...onlyStage2Params, viewId: 2 }), true);
+  assert.equal(isStudentLiveViewUnlocked({ ...onlyStage2Params, viewId: 3 }), false);
 });
 
 test('computeArenaRemainingSeconds and formatCountdownMmSs calculate accurate countdown', () => {
@@ -88,4 +128,34 @@ test('file storage helpers detect file storage URLs, estimate base64 bytes, and 
   });
   assert.equal(svgUrl.startsWith('data:image/svg+xml;utf8,'), true);
 });
+
+test('normalizeLiveSession, normalizeStudentRosterList, and normalizeClassroomList protect against malformed DB payloads', () => {
+  const defaultSess = {
+    isBroadcasting: false,
+    activeGrade: 6,
+    activePeriod: 1,
+    activeStage: 1,
+    activeClassId: '6A10',
+    unlockedStagesByLesson: { 'k6-tiet-1': { 1: true, 2: false, 3: false, 4: false } },
+    verifiedLessonsMap: { 'k6-tiet-1': true },
+    updatedAt: '2026-05-01T00:00:00.000Z',
+  };
+
+  // Rejects diagnostic payload
+  const fromDiag = normalizeLiveSession({ testMessage: 'diag', updatedAt: '2026-05-02T00:00:00.000Z' }, defaultSess);
+  assert.equal(fromDiag.unlockedStagesByLesson['k6-tiet-1'][1], true);
+
+  // Normalizes snake_case students from Supabase
+  const normStudents = normalizeStudentRosterList([
+    { id: '61001', full_name: 'Bùi Minh Anh', class_id: '6A10', xp: 250 },
+  ]);
+  assert.equal(normStudents[0].name, 'Bùi Minh Anh');
+  assert.equal(normStudents[0].classId, '6A10');
+
+  const normClasses = normalizeClassroomList([
+    { id: '6A10', name: 'Lớp 6A10', grade: 6, school_year: '2025-2026' },
+  ]);
+  assert.equal(normClasses[0].schoolYear, '2025-2026');
+});
+
 
