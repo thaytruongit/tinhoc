@@ -199,8 +199,10 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         direction === 'next'
           ? Math.min(portalSlides.length - 1, portalCurrentSlideIndex + 1)
           : Math.max(0, portalCurrentSlideIndex - 1);
+      if (targetIdx === portalCurrentSlideIndex) return;
 
       const targetClassId = liveSession?.activeClassId || selectedClass;
+      const syncVer = Date.now();
       const nowIso = new Date().toISOString();
 
       // Update liveSession state & persist to backend / localStorage
@@ -233,9 +235,27 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             ...(prev.activeSlideIndexByLesson || {}),
             [portalLessonKey]: targetIdx,
           },
+          slideSyncVersionByLesson: {
+            ...(prev.slideSyncVersionByLesson || {}),
+            [portalLessonKey]: syncVer,
+          },
           updatedAt: nowIso,
         }));
       }
+
+      fetch('/api/live-session/slide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lessonKey: portalLessonKey,
+          slideIndex: targetIdx,
+          slideSyncVersion: syncVer,
+          activeLiveView: 'slide',
+          grade: portalActiveGrade,
+          period: portalActivePeriod,
+          classId: targetClassId,
+        }),
+      }).catch(() => {});
 
       // Broadcast slide state directly via BroadcastChannel to student devices
       if (slideBroadcastChannelRef.current) {
@@ -246,6 +266,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           period: portalActivePeriod,
           classId: targetClassId,
           slideIndex: targetIdx,
+          slideSyncVersion: syncVer,
           totalSlides: portalSlides.length,
           activeLiveView: 'slide',
           timestampIso: nowIso,
@@ -254,8 +275,8 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
       onShowToast(
         direction === 'next'
-          ? `⏭️ Phím tắt / Bút trình chiếu (Space / →): Chuyển sang Slide ${targetIdx + 1}/${portalSlides.length} (Đã đồng bộ BroadcastChannel tới HS)`
-          : `⏮️ Phím tắt / Bút trình chiếu (←): Lùi về Slide ${targetIdx + 1}/${portalSlides.length} (Đã đồng bộ BroadcastChannel tới HS)`
+          ? `⏭️ Phím tắt / Bút trình chiếu (Space / →): Chuyển sang Slide ${targetIdx + 1}/${portalSlides.length} (Đã đồng bộ tới HS)`
+          : `⏮️ Phím tắt / Bút trình chiếu (←): Lùi về Slide ${targetIdx + 1}/${portalSlides.length} (Đã đồng bộ tới HS)`
       );
     },
     [
@@ -342,12 +363,21 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     onShowToast,
   ]);
 
-  // Keyboard event listener in TeacherPortal supporting 'Space' and 'ArrowRight' (and 'ArrowLeft')
+  // Keyboard event listener in TeacherPortal supporting 'Space' and 'ArrowRight' (and 'ArrowLeft') ONLY when actively broadcasting slides
   useEffect(() => {
-    if (isLivePresenterOpen || showLectureSlideModal || showLiveProgressModal) return;
+    if (
+      isLivePresenterOpen ||
+      showLectureSlideModal ||
+      showLiveProgressModal ||
+      !liveSession?.isBroadcasting ||
+      liveSession?.activeLiveView !== 'slide' ||
+      portalSlides.length === 0
+    ) {
+      return;
+    }
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
+      if (e.defaultPrevented || e.repeat) return;
       const target = e.target as HTMLElement | null;
       const action = resolvePresenterKeyAction(
         e.key,
@@ -357,13 +387,25 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       );
       if (!action) return;
 
+      if (target && target.tagName === 'BUTTON') {
+        target.blur();
+      }
       e.preventDefault();
+      e.stopPropagation();
       handlePortalSlideStep(action);
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isLivePresenterOpen, showLectureSlideModal, handlePortalSlideStep]);
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
+  }, [
+    isLivePresenterOpen,
+    showLectureSlideModal,
+    showLiveProgressModal,
+    liveSession?.isBroadcasting,
+    liveSession?.activeLiveView,
+    portalSlides.length,
+    handlePortalSlideStep,
+  ]);
 
   // Classes belonging to the currently selected grade (6, 7, 8, 9)
   const classesForSelectedGrade = classes.filter((c: ClassroomItem) => c.grade === selectedNotebookGrade);

@@ -23,6 +23,7 @@ import {
 import { LiveStudentProgressTracker } from './LiveStudentProgressTracker';
 import { ActivityCompletionVisualizer } from './ActivityCompletionVisualizer';
 import { buildInteractiveHtmlSlideTemplate } from '../utils/realtimeProgressAnalytics';
+import { insertHtmlSlideIntoDeck } from '../utils/slideDeckManager';
 
 interface TeacherLivePresenterRoomProps {
   grade: 6 | 7 | 8 | 9;
@@ -70,11 +71,15 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
   const existingSlideDeck = liveSession?.lectureSlidesByLesson?.[lessonKey];
   const slidePages =
     existingSlideDeck?.slides || getDefaultLectureSlides(periodSpec);
+  const safeCurrentSlideIndex =
+    slidePages.length > 0
+      ? Math.max(0, Math.min(currentSlideIndex, slidePages.length - 1))
+      : 0;
   const activeSlidePage =
-    slidePages[Math.min(currentSlideIndex, slidePages.length - 1)] ||
-    slidePages[0];
+    slidePages.length > 0 ? slidePages[safeCurrentSlideIndex] : undefined;
 
   const [showSlideUploadModal, setShowSlideUploadModal] = useState(false);
+  const [quickHtmlInsertPos, setQuickHtmlInsertPos] = useState<number>(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
@@ -340,10 +345,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
   };
 
   // Broadcast Slide Bài Giảng to Student Live Room — LOCKS ALL OTHER ACTIVITIES SO ONLY SLIDE IMAGE IS SHOWN
-  const handleBroadcastSlideDeck = (slideIdx = currentSlideIndex) => {
+  const handleBroadcastSlideDeck = (slideIdx = safeCurrentSlideIndex) => {
     playStageBroadcastSound();
+    const syncVer = Date.now();
+    const nowIso = new Date().toISOString();
     const pushPayload = {
-      id: `push-${Date.now()}`,
+      id: `push-${syncVer}`,
       title: `📢 PUSH NOTIFICATION: TRÌNH CHIẾU SLIDE BÀI GIẢNG!`,
       body: `Thầy Đỗ Mạnh Trường đang trình chiếu Slide #${slideIdx + 1} bài học "${periodSpec.lessonTitle}" cho Lớp ${classId}. Các hoạt động khác đã tạm khóa để tập trung xem Slide!`,
       stage: 'slide' as const,
@@ -352,7 +359,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
       classId,
       grade,
       period,
-      timestampIso: new Date().toISOString(),
+      timestampIso: nowIso,
     };
 
     onUpdateLiveSession((prev) => ({
@@ -384,9 +391,26 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
         ...(prev.activeSlideIndexByLesson || {}),
         [lessonKey]: slideIdx,
       },
+      slideSyncVersionByLesson: {
+        ...(prev.slideSyncVersionByLesson || {}),
+        [lessonKey]: syncVer,
+      },
       lastPushNotification: pushPayload,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
     }));
+    fetch('/api/live-session/slide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lessonKey,
+        slideIndex: slideIdx,
+        slideSyncVersion: syncVer,
+        activeLiveView: 'slide',
+        grade,
+        period,
+        classId,
+      }),
+    }).catch(() => {});
     try {
       if (typeof BroadcastChannel !== 'undefined') {
         const ch = new BroadcastChannel('cloudplay_realtime_sync');
@@ -397,9 +421,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
           period,
           classId,
           slideIndex: slideIdx,
+          slideSyncVersion: syncVer,
           totalSlides: slidePages.length,
           activeLiveView: 'slide',
-          timestampIso: new Date().toISOString(),
+          timestampIso: nowIso,
         });
         ch.close();
       }
@@ -408,7 +433,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     }
     setActiveTab('slide');
     onShowToast(
-      `📢 Đang phát trực tiếp Slide ${slideIdx + 1}/${slidePages.length} sang Lớp ${classId} — Đã tự động khóa các hoạt động khác để học sinh chỉ xem Slide ảnh!`
+      `📢 Đang phát trực tiếp Slide ${slideIdx + 1}/${Math.max(1, slidePages.length)} sang Lớp ${classId} — Đã tự động khóa các hoạt động khác để học sinh chỉ xem Slide!`
     );
   };
 
@@ -437,9 +462,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     );
   };
 
-  // Change current slide index and sync with students via state and BroadcastChannel
+  // Change current slide index and sync with students via monotonic slideSyncVersion and BroadcastChannel
   const handleChangeSlideIndex = (nextIdx: number) => {
+    if (slidePages.length === 0) return;
     const bounded = Math.max(0, Math.min(slidePages.length - 1, nextIdx));
+    const syncVer = Date.now();
+    const nowIso = new Date().toISOString();
     setAutoAdvanceCountdownSec(autoAdvanceIntervalSec);
     onUpdateLiveSession((prev) => ({
       ...prev,
@@ -447,8 +475,25 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
         ...(prev.activeSlideIndexByLesson || {}),
         [lessonKey]: bounded,
       },
-      updatedAt: new Date().toISOString(),
+      slideSyncVersionByLesson: {
+        ...(prev.slideSyncVersionByLesson || {}),
+        [lessonKey]: syncVer,
+      },
+      updatedAt: nowIso,
     }));
+    fetch('/api/live-session/slide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lessonKey,
+        slideIndex: bounded,
+        slideSyncVersion: syncVer,
+        activeLiveView: 'slide',
+        grade,
+        period,
+        classId,
+      }),
+    }).catch(() => {});
     try {
       if (typeof BroadcastChannel !== 'undefined') {
         const ch = new BroadcastChannel('cloudplay_realtime_sync');
@@ -459,9 +504,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
           period,
           classId,
           slideIndex: bounded,
+          slideSyncVersion: syncVer,
           totalSlides: slidePages.length,
           activeLiveView: 'slide',
-          timestampIso: new Date().toISOString(),
+          timestampIso: nowIso,
         });
         ch.close();
       }
@@ -482,7 +528,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     const targetTitle =
       overrideTitle ||
       defaultSlideVideoTitle ||
-      `Video giải thích Slide #${currentSlideIndex + 1}`;
+      `Video giải thích Slide #${safeCurrentSlideIndex + 1}`;
 
     onUpdateLiveSession((prev) => ({
       ...prev,
@@ -501,7 +547,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     onShowToast(
       nextPlaying
         ? `🎬 Đang phát đồng bộ Video giải thích kiến thức đi kèm Slide #${
-            currentSlideIndex + 1
+            safeCurrentSlideIndex + 1
           } sang màn hình học sinh!`
         : `⏸️ Đã tắt phát Video giải thích kiến thức đi kèm Slide.`
     );
@@ -509,17 +555,22 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
 
   // Auto-advance timer effect for Teacher Slide Controller
   useEffect(() => {
-    if (!isAutoAdvancing || activeTab !== 'slide') return;
+    if (!isAutoAdvancing || activeTab !== 'slide' || slidePages.length <= 1) return;
     const interval = setInterval(() => {
       setAutoAdvanceCountdownSec((prev) => {
         if (prev <= 1) {
           const nextSlideIdx =
-            currentSlideIndex + 1 < slidePages.length ? currentSlideIndex + 1 : 0;
+            safeCurrentSlideIndex + 1 < slidePages.length ? safeCurrentSlideIndex + 1 : 0;
+          const syncVer = Date.now();
           onUpdateLiveSession((sess) => ({
             ...sess,
             activeSlideIndexByLesson: {
               ...(sess.activeSlideIndexByLesson || {}),
               [lessonKey]: nextSlideIdx,
+            },
+            slideSyncVersionByLesson: {
+              ...(sess.slideSyncVersionByLesson || {}),
+              [lessonKey]: syncVer,
             },
             updatedAt: new Date().toISOString(),
           }));
@@ -532,7 +583,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
   }, [
     isAutoAdvancing,
     activeTab,
-    currentSlideIndex,
+    safeCurrentSlideIndex,
     slidePages.length,
     autoAdvanceIntervalSec,
     lessonKey,
@@ -541,8 +592,9 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
 
   // Wireless Presenter Clicker & Keyboard Navigation (Space, ArrowRight, PageDown / ArrowLeft, PageUp)
   useEffect(() => {
-    if (activeTab !== 'slide' || showSlideUploadModal) return;
+    if (activeTab !== 'slide' || showSlideUploadModal || slidePages.length === 0) return;
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
       const target = e.target as HTMLElement | null;
       const action = resolvePresenterKeyAction(
         e.key,
@@ -552,10 +604,16 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
       );
       if (!action) return;
 
+      // Critical fix: blur any focused <button> so pressing Space does NOT also trigger button onClick on keyup!
+      if (target && target.tagName === 'BUTTON') {
+        target.blur();
+      }
       e.preventDefault();
+      e.stopPropagation();
+
       if (action === 'next') {
-        const nextIdx = Math.min(slidePages.length - 1, currentSlideIndex + 1);
-        if (nextIdx !== currentSlideIndex) {
+        const nextIdx = Math.min(slidePages.length - 1, safeCurrentSlideIndex + 1);
+        if (nextIdx !== safeCurrentSlideIndex) {
           handleChangeSlideIndex(nextIdx);
           onShowToast(
             `⏭️ Bút trình chiếu / Phím tắt: Chuyển sang Slide ${nextIdx + 1}/${
@@ -564,8 +622,8 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
           );
         }
       } else if (action === 'prev') {
-        const prevIdx = Math.max(0, currentSlideIndex - 1);
-        if (prevIdx !== currentSlideIndex) {
+        const prevIdx = Math.max(0, safeCurrentSlideIndex - 1);
+        if (prevIdx !== safeCurrentSlideIndex) {
           handleChangeSlideIndex(prevIdx);
           onShowToast(
             `⏮️ Bút trình chiếu / Phím tắt: Quay lại Slide ${prevIdx + 1}/${
@@ -576,9 +634,9 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, showSlideUploadModal, currentSlideIndex, slidePages.length]);
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
+  }, [activeTab, showSlideUploadModal, safeCurrentSlideIndex, slidePages.length]);
 
   // Toggle Stage 3 Practical Activity (Hoạt động 3 - Tiết Thực hành) lock/unlock synchronized with Student Live Room
   const handleTogglePracticeStage3Lock = () => {
@@ -1805,63 +1863,194 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                   <button
                     type="button"
                     onClick={() => setShowSlideUploadModal(true)}
-                    className="px-3.5 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs cursor-pointer flex items-center gap-1.5"
+                    className="px-3.5 py-2 rounded-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-2xs"
                   >
                     <span className="material-symbols-outlined text-[16px]">upload_file</span>
-                    <span>Nạp Slide (PDF / PPTX / HTML)</span>
+                    <span>Nạp / Sửa / Xoá Slide (PDF, PPTX, HTML, Video, Ảnh)</span>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const htmlDoc = buildInteractiveHtmlSlideTemplate({
-                        grade,
-                        period,
-                        lessonTitle: periodSpec.lessonTitle,
-                        topic: periodSpec.topic,
-                        yccd: periodSpec.yccd,
-                      });
-                      const updatedSlides = slidePages.map((sl, idx) =>
-                        idx === currentSlideIndex ? { ...sl, htmlContent: htmlDoc } : sl
-                      );
-                      onUpdateLiveSession((prev) => ({
-                        ...prev,
-                        activeLiveView: 'slide',
-                        lectureSlidesByLesson: {
-                          ...(prev.lectureSlidesByLesson || {}),
-                          [lessonKey]: {
-                            lessonKey,
-                            grade,
-                            period,
-                            fileName: `Slide_Web_Tuong_Tac_K${grade}_T${period}.html`,
-                            fileType: 'html',
-                            fileSize: `${Math.max(1, Math.round(htmlDoc.length / 1024))} KB`,
-                            uploadedAt: new Date().toLocaleTimeString('vi-VN', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            }),
-                            storageBucket: 'slide-storage-1gb',
-                            totalCompressedKb: Math.max(1, Math.round(htmlDoc.length / 1024)),
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-sky-50 border border-sky-200">
+                    <span className="text-[11px] font-bold text-sky-900">Vị trí chèn Mô phỏng:</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={slidePages.length + 1}
+                      value={quickHtmlInsertPos}
+                      onChange={(e) =>
+                        setQuickHtmlInsertPos(
+                          Math.max(1, Math.min(slidePages.length + 1, Number(e.target.value) || 1))
+                        )
+                      }
+                      aria-label="Vị trí chèn slide mô phỏng HTML"
+                      className="w-12 px-1.5 py-0.5 rounded-lg bg-white border border-sky-300 text-xs font-black text-sky-900 text-center"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const htmlDoc = buildInteractiveHtmlSlideTemplate({
+                          grade,
+                          period,
+                          lessonTitle: periodSpec.lessonTitle,
+                          topic: periodSpec.topic,
+                          yccd: periodSpec.yccd,
+                        });
+                        const { slides: nextSlides, insertedZeroBasedIndex } = insertHtmlSlideIntoDeck(
+                          slidePages,
+                          {
+                            slideNumber: 1,
+                            title: `Mô phỏng tương tác: ${periodSpec.lessonTitle}`,
+                            subtitle: `Khối ${grade} • Tiết ${period} (Slide Mô phỏng HTML)`,
+                            bulletPoints: [
+                              'Slide mô phỏng HTML tương tác tạo riêng biệt theo vị trí chỉ định.',
+                            ],
+                            highlightNote: `Slide Mô phỏng HTML tại vị trí #${quickHtmlInsertPos}`,
                             htmlContent: htmlDoc,
-                            slides: updatedSlides,
+                            embedMode: 'simulation-single',
                           },
-                        },
-                        unlockedSlideDeckByLesson: {
-                          ...(prev.unlockedSlideDeckByLesson || {}),
-                          [lessonKey]: true,
-                        },
-                        updatedAt: new Date().toISOString(),
-                      }));
-                      onShowToast(
-                        `🌐 Đã nhúng trực tiếp HTML Slide Web tương tác vào bài giảng Khối ${grade} • Tiết ${period} và đồng bộ sang màn hình Học sinh!`
-                      );
-                    }}
-                    className="px-3.5 py-2 rounded-full bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-2xs"
-                    title="Nhúng nhanh Slide HTML tương tác trực tiếp vào bài giảng hiện tại"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">code</span>
-                    <span>🌐 Nhúng HTML Slide Web</span>
-                  </button>
+                          'simulation-single',
+                          quickHtmlInsertPos
+                        );
+                        const syncVer = Date.now();
+                        const nextDeck = {
+                          lessonKey,
+                          grade,
+                          period,
+                          fileName:
+                            existingSlideDeck?.fileName ||
+                            `Slide_Mo_Phong_HTML_K${grade}_T${period}.html`,
+                          fileType: (existingSlideDeck?.fileType || 'html') as any,
+                          fileSize: `${Math.max(1, Math.round(htmlDoc.length / 1024))} KB`,
+                          uploadedAt: new Date().toLocaleTimeString('vi-VN', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          }),
+                          storageBucket: 'slide-storage-1gb' as const,
+                          totalCompressedKb: Math.max(1, Math.round(htmlDoc.length / 1024)),
+                          isUserUploaded: true,
+                          slides: nextSlides,
+                        };
+                        fetch('/api/db/slides', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ lessonKey, deck: nextDeck }),
+                        }).catch(() => {});
+                        onUpdateLiveSession((prev) => ({
+                          ...prev,
+                          activeLiveView: 'slide',
+                          lectureSlidesByLesson: {
+                            ...(prev.lectureSlidesByLesson || {}),
+                            [lessonKey]: nextDeck,
+                          },
+                          activeSlideIndexByLesson: {
+                            ...(prev.activeSlideIndexByLesson || {}),
+                            [lessonKey]: insertedZeroBasedIndex,
+                          },
+                          slideSyncVersionByLesson: {
+                            ...(prev.slideSyncVersionByLesson || {}),
+                            [lessonKey]: syncVer,
+                          },
+                          unlockedSlideDeckByLesson: {
+                            ...(prev.unlockedSlideDeckByLesson || {}),
+                            [lessonKey]: true,
+                          },
+                          updatedAt: new Date().toISOString(),
+                        }));
+                        setQuickHtmlInsertPos(nextSlides.length + 1);
+                        onShowToast(
+                          `🧪 Đã tạo thêm 1 Slide Mô phỏng HTML riêng biệt tại vị trí Slide #${
+                            insertedZeroBasedIndex + 1
+                          }/${nextSlides.length} và đồng bộ CSDL!`
+                        );
+                      }}
+                      className="px-2.5 py-1 rounded-full bg-sky-600 hover:bg-sky-700 text-white font-bold text-[11px] cursor-pointer flex items-center gap-1"
+                      title="Tự động tạo thêm 1 slide mô phỏng HTML riêng biệt chèn vào đúng vị trí đã điền"
+                    >
+                      <span>🧪 +1 Slide Mô phỏng</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const htmlDoc = buildInteractiveHtmlSlideTemplate({
+                          grade,
+                          period,
+                          lessonTitle: periodSpec.lessonTitle,
+                          topic: periodSpec.topic,
+                          yccd: periodSpec.yccd,
+                        });
+                        const { slides: nextSlides, insertedZeroBasedIndex } = insertHtmlSlideIntoDeck(
+                          slidePages,
+                          {
+                            slideNumber: 1,
+                            title: `Bộ Slide Web HTML: ${periodSpec.lessonTitle}`,
+                            subtitle: `Khối ${grade} • Tiết ${period} (Chèn ở cuối bài giảng)`,
+                            bulletPoints: [
+                              'Bộ Slide Web HTML hoàn chỉnh được chèn tự động vào vị trí cuối bài giảng.',
+                            ],
+                            highlightNote: 'Bộ Slide Web HTML ở vị trí cuối bài giảng',
+                            htmlContent: htmlDoc,
+                            embedMode: 'full-deck-end',
+                          },
+                          'full-deck-end'
+                        );
+                        const syncVer = Date.now();
+                        const nextDeck = {
+                          lessonKey,
+                          grade,
+                          period,
+                          fileName:
+                            existingSlideDeck?.fileName ||
+                            `Bo_Slide_Web_K${grade}_T${period}.html`,
+                          fileType: (existingSlideDeck?.fileType || 'html') as any,
+                          fileSize: `${Math.max(1, Math.round(htmlDoc.length / 1024))} KB`,
+                          uploadedAt: new Date().toLocaleTimeString('vi-VN', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          }),
+                          storageBucket: 'slide-storage-1gb' as const,
+                          totalCompressedKb: Math.max(1, Math.round(htmlDoc.length / 1024)),
+                          isUserUploaded: true,
+                          slides: nextSlides,
+                        };
+                        fetch('/api/db/slides', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ lessonKey, deck: nextDeck }),
+                        }).catch(() => {});
+                        onUpdateLiveSession((prev) => ({
+                          ...prev,
+                          activeLiveView: 'slide',
+                          lectureSlidesByLesson: {
+                            ...(prev.lectureSlidesByLesson || {}),
+                            [lessonKey]: nextDeck,
+                          },
+                          activeSlideIndexByLesson: {
+                            ...(prev.activeSlideIndexByLesson || {}),
+                            [lessonKey]: insertedZeroBasedIndex,
+                          },
+                          slideSyncVersionByLesson: {
+                            ...(prev.slideSyncVersionByLesson || {}),
+                            [lessonKey]: syncVer,
+                          },
+                          unlockedSlideDeckByLesson: {
+                            ...(prev.unlockedSlideDeckByLesson || {}),
+                            [lessonKey]: true,
+                          },
+                          updatedAt: new Date().toISOString(),
+                        }));
+                        setQuickHtmlInsertPos(nextSlides.length + 1);
+                        onShowToast(
+                          `📚 Đã chèn Bộ Slide Web HTML vào vị trí cuối bài giảng (Slide #${
+                            insertedZeroBasedIndex + 1
+                          }/${nextSlides.length}) và đồng bộ CSDL!`
+                        );
+                      }}
+                      className="px-2.5 py-1 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] cursor-pointer flex items-center gap-1"
+                      title="Chèn cả bộ Slide Web HTML vào vị trí cuối cùng của bài giảng"
+                    >
+                      <span>📚 +Chèn Bộ Slide Web (Cuối bài)</span>
+                    </button>
+                  </div>
 
                   <button
                     type="button"
@@ -1887,11 +2076,11 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
 
                   <button
                     type="button"
-                    onClick={() => handleBroadcastSlideDeck(currentSlideIndex)}
+                    onClick={() => handleBroadcastSlideDeck(safeCurrentSlideIndex)}
                     className="px-4 py-2 rounded-full bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
                   >
                     <span className="material-symbols-outlined text-[16px]">cast</span>
-                    <span>📢 Phát Slide Ảnh &amp; Khóa HĐ khác trên HS</span>
+                    <span>📢 Phát Slide &amp; Khóa HĐ khác trên HS</span>
                   </button>
 
                   <button
@@ -2063,7 +2252,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                         if (!customVideoUrlInput.trim()) return;
                         handleToggleExplanationVideo(
                           customVideoUrlInput.trim(),
-                          `Video giải thích Slide #${currentSlideIndex + 1}`,
+                          `Video giải thích Slide #${safeCurrentSlideIndex + 1}`,
                           true
                         );
                         setCustomVideoUrlInput('');
@@ -2083,7 +2272,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     settings_remote
                   </span>
                   <span className="font-bold">
-                    Hỗ trợ Bút trình chiếu (Wireless Clicker) &amp; Phím tắt:
+                    Hỗ trợ Bút trình chiếu (Wireless Clicker) &amp; Phím tắt (Đồng bộ chống nhảy loạn):
                   </span>
                   <span className="px-2 py-0.5 rounded bg-white/15 text-amber-300 font-black">
                     Phím Space
@@ -2106,216 +2295,280 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 )}
               </div>
 
-              {/* Main Slide Image + Optional Synchronized Explanation Video Side-by-Side */}
-              <div
-                className={`grid grid-cols-1 ${
-                  isExplanationVideoPlaying ? 'lg:grid-cols-12' : ''
-                } gap-4 items-start`}
-              >
-                <div className={isExplanationVideoPlaying ? 'lg:col-span-7' : 'w-full'}>
-                  {(activeSlidePage?.htmlContent ||
-                    existingSlideDeck?.htmlContent ||
-                    activeSlidePage?.htmlEmbedUrl ||
-                    existingSlideDeck?.htmlEmbedUrl) ? (
-                    <div className="flex flex-col gap-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs">
-                        <span className="px-3 py-1 rounded-full bg-sky-500/25 border border-sky-400/40 text-sky-300 font-bold">
-                          🌐 HTML Slide Web #{activeSlidePage.slideNumber} / {slidePages.length}:{' '}
-                          {existingSlideDeck?.fileName || activeSlidePage.title}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-emerald-300 font-bold flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                            {isSlideUnlocked
-                              ? `Học sinh Lớp ${classId} đang xem đồng bộ HTML Slide Web này`
-                              : `Đang khóa Slide trên màn hình học sinh`}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setShowSlideUploadModal(true)}
-                            className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] cursor-pointer"
-                          >
-                            Sửa mã HTML / URL
-                          </button>
-                        </div>
-                      </div>
-                      <div className="w-full rounded-3xl overflow-hidden border-2 border-sky-400/70 shadow-xl bg-slate-950">
-                        {activeSlidePage?.htmlContent || existingSlideDeck?.htmlContent ? (
-                          <iframe
-                            srcDoc={activeSlidePage?.htmlContent || existingSlideDeck?.htmlContent}
-                            title={`HTML Slide ${activeSlidePage.slideNumber}`}
-                            sandbox="allow-scripts allow-forms"
-                            className="w-full h-[500px] border-0 bg-slate-950"
-                          />
-                        ) : (
-                          <iframe
-                            src={activeSlidePage?.htmlEmbedUrl || existingSlideDeck?.htmlEmbedUrl}
-                            title={`Web Slide URL ${activeSlidePage.slideNumber}`}
-                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                            className="w-full h-[500px] border-0 bg-white"
-                          />
-                        )}
-                      </div>
-                    </div>
-                  ) : activeSlidePage?.imageUrl ? (
-                    <div className="flex flex-col gap-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs">
-                        <span className="px-3 py-1 rounded-full bg-orange-500/25 border border-orange-400/40 text-orange-300 font-bold">
-                          Ảnh Slide #{activeSlidePage.slideNumber} / {slidePages.length}:{' '}
-                          {activeSlidePage.title}
-                        </span>
-                        <span className="text-emerald-300 font-bold flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                          {isFileStorageSlideUrl(activeSlidePage.imageUrl)
-                            ? `File Storage 1GB • Đang đồng bộ Lớp ${classId}`
-                            : isSlideUnlocked
-                            ? `Học sinh Lớp ${classId} đang xem đồng bộ Ảnh Slide này`
-                            : `Đang khóa Slide trên màn hình học sinh`}
-                        </span>
-                      </div>
-                      <div className="w-full rounded-3xl overflow-hidden border-2 border-slate-200 shadow-xl bg-slate-950 flex items-center justify-center">
-                        <img
-                          src={activeSlidePage.imageUrl}
-                          alt={`Slide ${activeSlidePage.slideNumber}: ${activeSlidePage.title}`}
-                          className="w-full max-h-[500px] object-contain"
-                        />
-                      </div>
-                    </div>
-                  ) : existingSlideDeck?.pdfDataUrl ? (
-                    <iframe
-                      src={existingSlideDeck.pdfDataUrl}
-                      title={existingSlideDeck.fileName}
-                      className="w-full h-[500px] rounded-2xl border border-slate-200 shadow-inner bg-slate-100"
-                    />
-                  ) : (
-                    <div className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white p-8 sm:p-10 shadow-xl flex flex-col justify-between min-h-[380px]">
-                      <div className="flex items-center justify-between gap-2 border-b border-white/15 pb-4">
-                        <span className="px-3.5 py-1 rounded-full bg-orange-500/20 border border-orange-400/40 text-orange-300 text-xs font-bold">
-                          Slide {activeSlidePage.slideNumber} / {slidePages.length}
-                        </span>
-                        <span className="text-xs text-emerald-300 font-bold flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                          {isSlideUnlocked
-                            ? `Học sinh Lớp ${classId} đang xem đồng bộ Slide này`
-                            : `Đang khóa Slide trên màn hình học sinh`}
-                        </span>
-                      </div>
-
-                      <div className="my-6 flex flex-col gap-4">
-                        <div>
-                          <h3 className="text-2xl sm:text-3xl font-black text-white leading-snug">
-                            {activeSlidePage.title}
-                          </h3>
-                          {activeSlidePage.subtitle && (
-                            <p className="text-sm sm:text-base text-sky-300 font-semibold mt-1">
-                              {activeSlidePage.subtitle}
-                            </p>
-                          )}
-                        </div>
-
-                        <ul className="flex flex-col gap-3 mt-2">
-                          {activeSlidePage.bulletPoints.map((pt, i) => (
-                            <li
-                              key={i}
-                              className="flex items-start gap-3 text-sm sm:text-base text-slate-100"
-                            >
-                              <span className="w-6 h-6 rounded-full bg-sky-500/30 text-sky-300 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
-                                {i + 1}
+              {/* Main Slide Image / HTML / Video + Optional Synchronized Explanation Video Side-by-Side */}
+              {slidePages.length === 0 || !activeSlidePage ? (
+                <div className="rounded-3xl border-2 border-dashed border-slate-300 bg-slate-50 p-10 text-center flex flex-col items-center justify-center gap-4 min-h-[340px]">
+                  <div className="w-16 h-16 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center">
+                    <span className="material-symbols-outlined text-[34px]">co_present</span>
+                  </div>
+                  <div className="max-w-xl">
+                    <h3 className="text-lg font-black text-slate-900">
+                      Tiết học hiện chưa có Slide (Đã xoá trắng dữ liệu Slide Demo)
+                    </h3>
+                    <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                      Hãy nạp tệp <strong>PDF, PPTX</strong> (hệ thống tự động chuyển toàn bộ các trang thành ảnh lưu vào CSDL), nạp <strong>Ảnh, Video</strong> hoặc <strong>Nhúng HTML Slide Web</strong> (1 slide mô phỏng theo vị trí chỉ định hoặc cả bộ slide web ở cuối bài giảng).
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowSlideUploadModal(true)}
+                      className="px-5 py-2.5 rounded-full bg-orange-500 hover:bg-orange-600 text-white font-black text-xs cursor-pointer shadow-sm flex items-center gap-1.5"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">upload_file</span>
+                      <span>📂 Mở Trình Nạp &amp; Quản Lý Slide (PDF / PPTX / HTML / Video / Ảnh)</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div
+                    className={`grid grid-cols-1 ${
+                      isExplanationVideoPlaying ? 'lg:grid-cols-12' : ''
+                    } gap-4 items-start`}
+                  >
+                    <div className={isExplanationVideoPlaying ? 'lg:col-span-7' : 'w-full'}>
+                      {activeSlidePage.htmlContent || activeSlidePage.htmlEmbedUrl ? (
+                        <div className="flex flex-col gap-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs">
+                            <span className="px-3 py-1 rounded-full bg-sky-500/25 border border-sky-400/40 text-sky-300 font-bold">
+                              🌐 HTML Slide Web #{activeSlidePage.slideNumber} / {slidePages.length}:{' '}
+                              {activeSlidePage.title}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-emerald-300 font-bold flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                                {isSlideUnlocked
+                                  ? `Học sinh Lớp ${classId} đang xem đồng bộ HTML Slide Web này`
+                                  : `Đang khóa Slide trên màn hình học sinh`}
                               </span>
-                              <span className="leading-relaxed">{pt}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                              <button
+                                type="button"
+                                onClick={() => setShowSlideUploadModal(true)}
+                                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] cursor-pointer"
+                              >
+                                Sửa / Xoá Slide
+                              </button>
+                            </div>
+                          </div>
+                          <div className="w-full rounded-3xl overflow-hidden border-2 border-sky-400/70 shadow-xl bg-slate-950">
+                            {activeSlidePage.htmlContent ? (
+                              <iframe
+                                srcDoc={activeSlidePage.htmlContent}
+                                title={`HTML Slide ${activeSlidePage.slideNumber}`}
+                                sandbox="allow-scripts allow-forms"
+                                className="w-full h-[500px] border-0 bg-slate-950"
+                              />
+                            ) : (
+                              <iframe
+                                src={activeSlidePage.htmlEmbedUrl}
+                                title={`Web Slide URL ${activeSlidePage.slideNumber}`}
+                                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                                className="w-full h-[500px] border-0 bg-white"
+                              />
+                            )}
+                          </div>
+                        </div>
+                      ) : activeSlidePage.videoUrl ? (
+                        <div className="flex flex-col gap-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs">
+                            <span className="px-3 py-1 rounded-full bg-purple-500/25 border border-purple-400/40 text-purple-300 font-bold">
+                              🎬 Video Slide #{activeSlidePage.slideNumber} / {slidePages.length}:{' '}
+                              {activeSlidePage.title}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setShowSlideUploadModal(true)}
+                              className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] cursor-pointer"
+                            >
+                              Sửa / Xoá Slide
+                            </button>
+                          </div>
+                          <div className="w-full rounded-3xl overflow-hidden border-2 border-purple-400/70 shadow-xl bg-black flex items-center justify-center">
+                            <video
+                              key={activeSlidePage.videoUrl}
+                              src={activeSlidePage.videoUrl}
+                              controls
+                              className="w-full max-h-[500px] object-contain"
+                            />
+                          </div>
+                        </div>
+                      ) : activeSlidePage.imageUrl ? (
+                        <div className="flex flex-col gap-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs">
+                            <span className="px-3 py-1 rounded-full bg-orange-500/25 border border-orange-400/40 text-orange-300 font-bold">
+                              🖼️ Ảnh Slide #{activeSlidePage.slideNumber} / {slidePages.length}:{' '}
+                              {activeSlidePage.title}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-emerald-300 font-bold flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                                {isFileStorageSlideUrl(activeSlidePage.imageUrl)
+                                  ? `File Storage 1GB • Đang đồng bộ Lớp ${classId}`
+                                  : isSlideUnlocked
+                                  ? `Học sinh Lớp ${classId} đang xem đồng bộ Ảnh Slide này`
+                                  : `Đang khóa Slide trên màn hình học sinh`}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setShowSlideUploadModal(true)}
+                                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] cursor-pointer"
+                              >
+                                Sửa / Xoá Slide
+                              </button>
+                            </div>
+                          </div>
+                          <div className="w-full rounded-3xl overflow-hidden border-2 border-slate-200 shadow-xl bg-slate-950 flex items-center justify-center">
+                            <img
+                              src={activeSlidePage.imageUrl}
+                              alt={`Slide ${activeSlidePage.slideNumber}: ${activeSlidePage.title}`}
+                              className="w-full max-h-[500px] object-contain"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white p-8 sm:p-10 shadow-xl flex flex-col justify-between min-h-[380px]">
+                          <div className="flex items-center justify-between gap-2 border-b border-white/15 pb-4">
+                            <span className="px-3.5 py-1 rounded-full bg-orange-500/20 border border-orange-400/40 text-orange-300 text-xs font-bold">
+                              Slide {activeSlidePage.slideNumber} / {slidePages.length}
+                            </span>
+                            <span className="text-xs text-emerald-300 font-bold flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                              {isSlideUnlocked
+                                ? `Học sinh Lớp ${classId} đang xem đồng bộ Slide này`
+                                : `Đang khóa Slide trên màn hình học sinh`}
+                            </span>
+                          </div>
 
-                      {activeSlidePage.highlightNote && (
-                        <div className="p-4 rounded-2xl bg-white/10 border border-white/15 text-xs sm:text-sm text-amber-200 flex items-center gap-2">
-                          <span className="material-symbols-outlined text-[20px] text-amber-300">
-                            lightbulb
-                          </span>
-                          <span>{activeSlidePage.highlightNote}</span>
+                          <div className="my-6 flex flex-col gap-4">
+                            <div>
+                              <h3 className="text-2xl sm:text-3xl font-black text-white leading-snug">
+                                {activeSlidePage.title}
+                              </h3>
+                              {activeSlidePage.subtitle && (
+                                <p className="text-sm sm:text-base text-sky-300 font-semibold mt-1">
+                                  {activeSlidePage.subtitle}
+                                </p>
+                              )}
+                            </div>
+
+                            <ul className="flex flex-col gap-3 mt-2">
+                              {(activeSlidePage.bulletPoints || []).map((pt, i) => (
+                                <li
+                                  key={i}
+                                  className="flex items-start gap-3 text-sm sm:text-base text-slate-100"
+                                >
+                                  <span className="w-6 h-6 rounded-full bg-sky-500/30 text-sky-300 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
+                                    {i + 1}
+                                  </span>
+                                  <span className="leading-relaxed">{pt}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          {activeSlidePage.highlightNote && (
+                            <div className="p-4 rounded-2xl bg-white/10 border border-white/15 text-xs sm:text-sm text-amber-200 flex items-center gap-2">
+                              <span className="material-symbols-outlined text-[20px] text-amber-300">
+                                lightbulb
+                              </span>
+                              <span>{activeSlidePage.highlightNote}</span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
 
-                {/* Synchronized Explanation Video Player Column */}
-                {isExplanationVideoPlaying && (
-                  <div className="lg:col-span-5 rounded-3xl bg-slate-950 text-white p-4 border-2 border-indigo-500/40 shadow-xl flex flex-col gap-3">
-                    <div className="flex items-center justify-between gap-2 pb-2 border-b border-white/10">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping shrink-0" />
-                        <span className="text-xs font-black text-indigo-300 truncate">
-                          🎬 ĐANG PHÁT VIDEO GIẢI THÍCH KÈM SLIDE #{activeSlidePage.slideNumber}
-                        </span>
+                    {/* Synchronized Explanation Video Player Column */}
+                    {isExplanationVideoPlaying && (
+                      <div className="lg:col-span-5 rounded-3xl bg-slate-950 text-white p-4 border-2 border-indigo-500/40 shadow-xl flex flex-col gap-3">
+                        <div className="flex items-center justify-between gap-2 pb-2 border-b border-white/10">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping shrink-0" />
+                            <span className="text-xs font-black text-indigo-300 truncate">
+                              🎬 ĐANG PHÁT VIDEO GIẢI THÍCH KÈM SLIDE #{activeSlidePage.slideNumber}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleExplanationVideo(undefined, undefined, false)}
+                            className="px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold text-white cursor-pointer shrink-0"
+                          >
+                            Đóng Video
+                          </button>
+                        </div>
+
+                        <video
+                          key={savedVideoState?.videoUrl || defaultSlideVideoUrl}
+                          src={savedVideoState?.videoUrl || defaultSlideVideoUrl}
+                          controls
+                          autoPlay
+                          className="w-full rounded-2xl bg-black aspect-video object-contain"
+                        />
+
+                        <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-xs text-slate-300 flex flex-col gap-1">
+                          <strong className="text-white">
+                            {savedVideoState?.videoTitle || defaultSlideVideoTitle}
+                          </strong>
+                          <span>
+                            Video giải thích kiến thức này đang hiển thị đồng bộ ngay bên cạnh Slide ảnh trên màn hình học sinh Lớp {classId}.
+                          </span>
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleToggleExplanationVideo(undefined, undefined, false)}
-                        className="px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold text-white cursor-pointer shrink-0"
-                      >
-                        Đóng Video
-                      </button>
-                    </div>
-
-                    <video
-                      key={savedVideoState?.videoUrl || defaultSlideVideoUrl}
-                      src={savedVideoState?.videoUrl || defaultSlideVideoUrl}
-                      controls
-                      autoPlay
-                      className="w-full rounded-2xl bg-black aspect-video object-contain"
-                    />
-
-                    <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-xs text-slate-300 flex flex-col gap-1">
-                      <strong className="text-white">
-                        {savedVideoState?.videoTitle || defaultSlideVideoTitle}
-                      </strong>
-                      <span>
-                        Video giải thích kiến thức này đang hiển thị đồng bộ ngay bên cạnh Slide ảnh trên màn hình học sinh Lớp {classId}.
-                      </span>
-                    </div>
+                    )}
                   </div>
-                )}
-              </div>
 
-              {/* Synchronized Slide Navigation Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <button
-                  type="button"
-                  disabled={currentSlideIndex <= 0}
-                  onClick={() => handleChangeSlideIndex(currentSlideIndex - 1)}
-                  className="px-5 py-2.5 rounded-full bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-800 text-xs font-bold cursor-pointer"
-                >
-                  ← Slide trước (Phím ←)
-                </button>
-
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {slidePages.map((s, idx) => (
+                  {/* Synchronized Slide Navigation Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                     <button
-                      key={s.slideNumber}
                       type="button"
-                      onClick={() => handleChangeSlideIndex(idx)}
-                      className={`w-9 h-9 rounded-full text-xs font-bold cursor-pointer transition-all ${
-                        currentSlideIndex === idx
-                          ? 'bg-orange-500 text-white shadow-sm'
-                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                      }`}
+                      disabled={safeCurrentSlideIndex <= 0}
+                      onMouseUp={(e) => e.currentTarget.blur()}
+                      onClick={(e) => {
+                        e.currentTarget.blur();
+                        handleChangeSlideIndex(safeCurrentSlideIndex - 1);
+                      }}
+                      className="px-5 py-2.5 rounded-full bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-800 text-xs font-bold cursor-pointer"
                     >
-                      {s.slideNumber}
+                      ← Slide trước (Phím ←)
                     </button>
-                  ))}
-                </div>
 
-                <button
-                  type="button"
-                  disabled={currentSlideIndex >= slidePages.length - 1}
-                  onClick={() => handleChangeSlideIndex(currentSlideIndex + 1)}
-                  className="px-5 py-2.5 rounded-full bg-sky-600 hover:bg-sky-700 disabled:opacity-40 text-white text-xs font-bold cursor-pointer shadow-xs"
-                >
-                  Slide tiếp theo (Space / Phím →)
-                </button>
-              </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {slidePages.map((s, idx) => (
+                        <button
+                          key={s.slideNumber}
+                          type="button"
+                          onMouseUp={(e) => e.currentTarget.blur()}
+                          onClick={(e) => {
+                            e.currentTarget.blur();
+                            handleChangeSlideIndex(idx);
+                          }}
+                          className={`w-9 h-9 rounded-full text-xs font-bold cursor-pointer transition-all ${
+                            safeCurrentSlideIndex === idx
+                              ? 'bg-orange-500 text-white shadow-sm'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          {s.slideNumber}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={safeCurrentSlideIndex >= slidePages.length - 1}
+                      onMouseUp={(e) => e.currentTarget.blur()}
+                      onClick={(e) => {
+                        e.currentTarget.blur();
+                        handleChangeSlideIndex(safeCurrentSlideIndex + 1);
+                      }}
+                      className="px-5 py-2.5 rounded-full bg-sky-600 hover:bg-sky-700 disabled:opacity-40 text-white text-xs font-bold cursor-pointer shadow-xs"
+                    >
+                      Slide tiếp theo (Space / Phím →)
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
 

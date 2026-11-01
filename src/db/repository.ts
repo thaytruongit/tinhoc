@@ -10,6 +10,7 @@ import {
   students,
   curriculumData,
   studentProgress,
+  lectureSlides,
 } from './schema.ts';
 
 export async function ensureDatabaseTablesExist() {
@@ -141,12 +142,26 @@ export async function ensureDatabaseTablesExist() {
         updated_at TIMESTAMP DEFAULT NOW(),
         CONSTRAINT student_progress_unique UNIQUE (student_id, lesson_key, stage_id)
       );
+
+      CREATE TABLE IF NOT EXISTS lecture_slides (
+        id SERIAL PRIMARY KEY,
+        lesson_key TEXT NOT NULL UNIQUE,
+        grade INTEGER NOT NULL,
+        period INTEGER NOT NULL,
+        file_name TEXT NOT NULL,
+        file_type TEXT NOT NULL DEFAULT 'image',
+        file_size TEXT NOT NULL DEFAULT '0 KB',
+        storage_bucket TEXT NOT NULL DEFAULT 'slide-storage-1gb',
+        total_compressed_kb INTEGER NOT NULL DEFAULT 0,
+        slides_json TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
     `);
 
     // Enable Supabase Realtime publishing for new tables if publication exists
     try {
       await client.query(`
-        ALTER PUBLICATION supabase_realtime ADD TABLE classes, students, curriculum_data, student_progress;
+        ALTER PUBLICATION supabase_realtime ADD TABLE classes, students, curriculum_data, student_progress, lecture_slides;
       `);
     } catch {
       // publication may already contain tables or require superuser, ignore warning
@@ -921,4 +936,117 @@ export async function deleteClassFromDb(classId: string) {
     return false;
   }
 }
+
+// -----------------------------------------------------------------------------
+// Lecture Slides CRUD (Dedicated table for smooth slide image read/write sync)
+// -----------------------------------------------------------------------------
+export async function upsertLectureSlideDeckToDb(deck: {
+  lessonKey: string;
+  grade: number;
+  period: number;
+  fileName: string;
+  fileType: string;
+  fileSize?: string;
+  storageBucket?: string;
+  totalCompressedKb?: number;
+  slidesJson: string;
+}) {
+  try {
+    const res = await db
+      .insert(lectureSlides)
+      .values({
+        lessonKey: deck.lessonKey,
+        grade: deck.grade,
+        period: deck.period,
+        fileName: deck.fileName,
+        fileType: deck.fileType || 'image',
+        fileSize: deck.fileSize || '0 KB',
+        storageBucket: deck.storageBucket || 'slide-storage-1gb',
+        totalCompressedKb: deck.totalCompressedKb || 0,
+        slidesJson: deck.slidesJson,
+      })
+      .onConflictDoUpdate({
+        target: lectureSlides.lessonKey,
+        set: {
+          fileName: deck.fileName,
+          fileType: deck.fileType || 'image',
+          fileSize: deck.fileSize || '0 KB',
+          storageBucket: deck.storageBucket || 'slide-storage-1gb',
+          totalCompressedKb: deck.totalCompressedKb || 0,
+          slidesJson: deck.slidesJson,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return res[0] || null;
+  } catch (err: any) {
+    const msg = String(err?.message || '');
+    if (msg.includes('relation') && msg.includes('does not exist')) {
+      try {
+        await ensureDatabaseTablesExist();
+        const retry = await db
+          .insert(lectureSlides)
+          .values({
+            lessonKey: deck.lessonKey,
+            grade: deck.grade,
+            period: deck.period,
+            fileName: deck.fileName,
+            fileType: deck.fileType || 'image',
+            fileSize: deck.fileSize || '0 KB',
+            storageBucket: deck.storageBucket || 'slide-storage-1gb',
+            totalCompressedKb: deck.totalCompressedKb || 0,
+            slidesJson: deck.slidesJson,
+          })
+          .onConflictDoUpdate({
+            target: lectureSlides.lessonKey,
+            set: {
+              fileName: deck.fileName,
+              fileType: deck.fileType || 'image',
+              fileSize: deck.fileSize || '0 KB',
+              storageBucket: deck.storageBucket || 'slide-storage-1gb',
+              totalCompressedKb: deck.totalCompressedKb || 0,
+              slidesJson: deck.slidesJson,
+              updatedAt: new Date(),
+            },
+          })
+          .returning();
+        return retry[0] || null;
+      } catch (retryErr) {
+        console.warn('upsertLectureSlideDeckToDb fallback:', retryErr);
+        return null;
+      }
+    }
+    console.warn('upsertLectureSlideDeckToDb notice:', err.message || err);
+    return null;
+  }
+}
+
+export async function getAllLectureSlideDecksFromDb() {
+  try {
+    return await db.select().from(lectureSlides);
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteLectureSlideDeckFromDb(lessonKey: string) {
+  try {
+    await db.delete(lectureSlides).where(eq(lectureSlides.lessonKey, lessonKey));
+    return true;
+  } catch (err) {
+    console.warn('deleteLectureSlideDeckFromDb notice:', err);
+    return false;
+  }
+}
+
+export async function deleteAllLectureSlideDecksFromDb() {
+  try {
+    await db.delete(lectureSlides);
+    return true;
+  } catch (err) {
+    console.warn('deleteAllLectureSlideDecksFromDb notice:', err);
+    return false;
+  }
+}
+
 

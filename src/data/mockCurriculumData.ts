@@ -941,6 +941,7 @@ export interface LectureSlidePage {
   videoTitle?: string;
   storageFileId?: string;
   compressedSizeKb?: number;
+  embedMode?: 'simulation-single' | 'full-deck-end';
 }
 
 export interface LectureSlideDeck {
@@ -948,7 +949,7 @@ export interface LectureSlideDeck {
   grade: 6 | 7 | 8 | 9;
   period: number;
   fileName: string;
-  fileType: 'pdf' | 'pptx' | 'html';
+  fileType: 'pdf' | 'pptx' | 'html' | 'video' | 'image';
   fileSize: string;
   uploadedAt: string;
   pdfDataUrl?: string;
@@ -957,6 +958,7 @@ export interface LectureSlideDeck {
   storageBucket?: string;
   totalCompressedKb?: number;
   defaultVideoUrl?: string;
+  isUserUploaded?: boolean;
   slides: LectureSlidePage[];
 }
 
@@ -1012,6 +1014,7 @@ export interface LiveClassroomSession {
   unlockedPracticeStage3ByLesson?: Record<string, boolean>;
   unlockedSlideDeckByLesson?: Record<string, boolean>;
   activeSlideIndexByLesson?: Record<string, number>;
+  slideSyncVersionByLesson?: Record<string, number>;
   lectureSlidesByLesson?: Record<string, LectureSlideDeck>;
   whiteboardByLesson?: Record<string, LessonWhiteboardState>;
   slideVideoStateByLesson?: Record<
@@ -1325,6 +1328,9 @@ export function createDefaultLiveSession(): LiveClassroomSession {
     activeStage: 1,
     activeClassId: '6A10',
     unlockedStagesByLesson: createDefaultUnlockedMap(),
+    lectureSlidesByLesson: {},
+    activeSlideIndexByLesson: {},
+    slideSyncVersionByLesson: {},
     wheelCall: null,
     taughtPeriodsByClass: {
       '6A10': [1],

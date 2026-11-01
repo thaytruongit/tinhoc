@@ -1,3 +1,8 @@
+import {
+  resolveMonotonicSlideSyncState,
+  isLegacyDemoSlideDeck,
+} from './slideDeckManager';
+
 export type PresenterKeyAction = 'next' | 'prev' | null;
 
 /**
@@ -414,15 +419,39 @@ export function normalizeLiveSession<T extends Record<string, any>>(
       typeof raw.unlockedSlideDeckByLesson === 'object'
         ? raw.unlockedSlideDeckByLesson
         : defaultSession.unlockedSlideDeckByLesson || {},
-    activeSlideIndexByLesson:
-      raw.activeSlideIndexByLesson &&
-      typeof raw.activeSlideIndexByLesson === 'object'
-        ? raw.activeSlideIndexByLesson
-        : defaultSession.activeSlideIndexByLesson || {},
-    lectureSlidesByLesson:
-      raw.lectureSlidesByLesson && typeof raw.lectureSlidesByLesson === 'object'
-        ? raw.lectureSlidesByLesson
-        : defaultSession.lectureSlidesByLesson || {},
+    ...(() => {
+      const syncResolved = resolveMonotonicSlideSyncState({
+        currentSlideIndices: defaultSession.activeSlideIndexByLesson || {},
+        currentSyncVersions: defaultSession.slideSyncVersionByLesson || {},
+        incomingSlideIndices:
+          raw.activeSlideIndexByLesson &&
+          typeof raw.activeSlideIndexByLesson === 'object'
+            ? raw.activeSlideIndexByLesson
+            : {},
+        incomingSyncVersions:
+          raw.slideSyncVersionByLesson &&
+          typeof raw.slideSyncVersionByLesson === 'object'
+            ? raw.slideSyncVersionByLesson
+            : {},
+      });
+      return {
+        activeSlideIndexByLesson: syncResolved.activeSlideIndexByLesson,
+        slideSyncVersionByLesson: syncResolved.slideSyncVersionByLesson,
+      };
+    })(),
+    lectureSlidesByLesson: (() => {
+      const sourceDecks =
+        raw.lectureSlidesByLesson && typeof raw.lectureSlidesByLesson === 'object'
+          ? raw.lectureSlidesByLesson
+          : defaultSession.lectureSlidesByLesson || {};
+      const cleanedDecks: Record<string, any> = {};
+      for (const [k, deck] of Object.entries(sourceDecks)) {
+        if (deck && !isLegacyDemoSlideDeck(deck)) {
+          cleanedDecks[k] = deck;
+        }
+      }
+      return cleanedDecks;
+    })(),
     whiteboardByLesson:
       raw.whiteboardByLesson && typeof raw.whiteboardByLesson === 'object'
         ? raw.whiteboardByLesson

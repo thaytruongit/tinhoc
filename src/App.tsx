@@ -79,7 +79,9 @@ export default function App() {
   const [liveSession, setLiveSession] = useState<LiveClassroomSession>(() => {
     const defaultSession = createDefaultLiveSession();
     try {
-      const saved = localStorage.getItem('cloudplay_live_session_v4');
+      localStorage.removeItem('cloudplay_live_session_v3');
+      localStorage.removeItem('cloudplay_live_session_v4');
+      const saved = localStorage.getItem('cloudplay_live_session_v5');
       if (saved) {
         const parsed = JSON.parse(saved);
         return normalizeLiveSession(parsed, defaultSession);
@@ -123,6 +125,7 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
   const broadcastRef = useRef<BroadcastChannel | null>(null);
+  const lastLocalMutationAtRef = useRef<number>(0);
 
   const currentStudent =
     students.find((s) => s.id === currentStudentId) ||
@@ -181,7 +184,7 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('cloudplay_live_session_v4', JSON.stringify(liveSession));
+      localStorage.setItem('cloudplay_live_session_v5', JSON.stringify(liveSession));
     } catch {
       // ignore
     }
@@ -189,12 +192,12 @@ export default function App() {
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Fetch initial classes, students, and liveSession from backend database (or directly from Supabase on GitHub Pages)
+  // Fetch initial classes, students, liveSession, and dedicated DB slides from backend database
   useEffect(() => {
     async function fetchBackendData() {
       setIsLoading(true);
       try {
-        const [clsRes, stRes, liveRes] = await Promise.all([
+        const [clsRes, stRes, liveRes, slidesRes] = await Promise.all([
           fetch('/api/db/classes')
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
@@ -202,6 +205,9 @@ export default function App() {
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
           fetch('/api/live-session')
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+          fetch('/api/db/slides')
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
         ]);
@@ -224,7 +230,19 @@ export default function App() {
         }
 
         if (liveRes && typeof liveRes === 'object') {
-          setLiveSession((prev) => normalizeLiveSession(liveRes, prev));
+          setLiveSession((prev) => {
+            const normalized = normalizeLiveSession(liveRes, prev);
+            if (slidesRes?.ok && slidesRes.decks && typeof slidesRes.decks === 'object') {
+              return {
+                ...normalized,
+                lectureSlidesByLesson: {
+                  ...normalized.lectureSlidesByLesson,
+                  ...slidesRes.decks,
+                },
+              };
+            }
+            return normalized;
+          });
         } else if (supabase && isSupabaseRealtimeConfigured) {
           const { data: sbLiveRow } = await supabase
             .from('live_classroom_states')
@@ -251,7 +269,7 @@ export default function App() {
   // Listen to BroadcastChannel & storage events for instant cross-tab sync
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
-      if ((e.key === 'cloudplay_live_session_v3' || e.key === 'cloudplay_live_session_v4') && e.newValue) {
+      if (e.key === 'cloudplay_live_session_v5' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
           setLiveSession((prev) => normalizeLiveSession(parsed, prev));
@@ -303,42 +321,56 @@ export default function App() {
           };
         });
       } else if (data.type === 'SLIDE_ENDED' && typeof data.lessonKey === 'string') {
+        lastLocalMutationAtRef.current = Date.now();
         setLiveSession((prev) => buildEndSlidePresentationState(prev, data.lessonKey));
       } else if (
         data.type === 'SLIDE_CHANGED' &&
         typeof data.lessonKey === 'string' &&
         typeof data.slideIndex === 'number'
       ) {
-        setLiveSession((prev) => ({
-          ...prev,
-          isBroadcasting: true,
-          activeGrade: data.grade || prev.activeGrade,
-          activePeriod: data.period || prev.activePeriod,
-          activeClassId: data.classId || prev.activeClassId,
-          activeLiveView: data.activeLiveView || 'slide',
-          unlockedSlideDeckByLesson: {
-            ...(prev.unlockedSlideDeckByLesson || {}),
-            [data.lessonKey]: true,
-          },
-          unlockedStagesByLesson: {
-            ...(prev.unlockedStagesByLesson || {}),
-            [data.lessonKey]: {
-              1: false,
-              2: false,
-              3: false,
-              4: false,
+        lastLocalMutationAtRef.current = Date.now();
+        setLiveSession((prev) => {
+          const incomingVer =
+            typeof data.slideSyncVersion === 'number' ? data.slideSyncVersion : Date.now();
+          const currentVer = prev.slideSyncVersionByLesson?.[data.lessonKey] ?? 0;
+          if (incomingVer < currentVer) {
+            return prev;
+          }
+          return {
+            ...prev,
+            isBroadcasting: true,
+            activeGrade: data.grade || prev.activeGrade,
+            activePeriod: data.period || prev.activePeriod,
+            activeClassId: data.classId || prev.activeClassId,
+            activeLiveView: data.activeLiveView || 'slide',
+            unlockedSlideDeckByLesson: {
+              ...(prev.unlockedSlideDeckByLesson || {}),
+              [data.lessonKey]: true,
             },
-          },
-          unlockedPracticeStage3ByLesson: {
-            ...(prev.unlockedPracticeStage3ByLesson || {}),
-            [data.lessonKey]: false,
-          },
-          activeSlideIndexByLesson: {
-            ...(prev.activeSlideIndexByLesson || {}),
-            [data.lessonKey]: data.slideIndex,
-          },
-          updatedAt: data.timestampIso || new Date().toISOString(),
-        }));
+            unlockedStagesByLesson: {
+              ...(prev.unlockedStagesByLesson || {}),
+              [data.lessonKey]: {
+                1: false,
+                2: false,
+                3: false,
+                4: false,
+              },
+            },
+            unlockedPracticeStage3ByLesson: {
+              ...(prev.unlockedPracticeStage3ByLesson || {}),
+              [data.lessonKey]: false,
+            },
+            activeSlideIndexByLesson: {
+              ...(prev.activeSlideIndexByLesson || {}),
+              [data.lessonKey]: data.slideIndex,
+            },
+            slideSyncVersionByLesson: {
+              ...(prev.slideSyncVersionByLesson || {}),
+              [data.lessonKey]: incomingVer,
+            },
+            updatedAt: data.timestampIso || new Date().toISOString(),
+          };
+        });
       }
     };
 
@@ -375,6 +407,7 @@ export default function App() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'live_classroom_states' },
         (payload) => {
+          if (Date.now() - lastLocalMutationAtRef.current < 2800) return;
           const row = payload.new as any;
           if (!row || !row.state_json) return;
           // Ignore diagnostic or keep-alive heartbeat rows so they never corrupt liveSession!
@@ -450,6 +483,8 @@ export default function App() {
     let consecutiveErrors = 0;
     const poll = async () => {
       if (consecutiveErrors >= 3) return;
+      if (Date.now() - lastLocalMutationAtRef.current < 2800) return;
+      const pollStartAt = Date.now();
       try {
         const res = await fetch('/api/live-session');
         if (!res.ok) {
@@ -458,6 +493,10 @@ export default function App() {
         }
         consecutiveErrors = 0;
         if (!active) return;
+        // If a local mutation occurred while this poll request was in-flight, discard stale response!
+        if (pollStartAt < lastLocalMutationAtRef.current || Date.now() - lastLocalMutationAtRef.current < 2800) {
+          return;
+        }
         const serverState = await res.json();
         if (serverState && serverState.updatedAt) {
           setLiveSession((prev) => {
@@ -481,6 +520,7 @@ export default function App() {
   const updateAndBroadcastLiveSession = (
     updater: (prev: LiveClassroomSession) => LiveClassroomSession
   ) => {
+    lastLocalMutationAtRef.current = Date.now();
     setLiveSession((prev) => {
       const next: LiveClassroomSession = normalizeLiveSession(
         {
@@ -490,8 +530,7 @@ export default function App() {
         prev
       );
       try {
-        localStorage.setItem('cloudplay_live_session_v3', JSON.stringify(next));
-        localStorage.setItem('cloudplay_live_session_v4', JSON.stringify(next));
+        localStorage.setItem('cloudplay_live_session_v5', JSON.stringify(next));
       } catch {
         // ignore
       }

@@ -41,12 +41,20 @@ import {
   deleteStudentFromDb,
   deleteStudentsByClassFromDb,
   deleteClassFromDb,
+  upsertLectureSlideDeckToDb,
+  getAllLectureSlideDecksFromDb,
+  deleteLectureSlideDeckFromDb,
+  deleteAllLectureSlideDecksFromDb,
 } from './src/db/repository.ts';
 import { healthCheckDb } from './src/lib/db.ts';
 import {
   generate29PeriodsDocxBuffer,
   parse29PeriodsFromDocxText,
 } from './src/utils/docxTemplateGenerator.ts';
+import {
+  resolveMonotonicSlideSyncState,
+  isLegacyDemoSlideDeck,
+} from './src/utils/slideDeckManager.ts';
 
 dotenv.config();
 
@@ -612,6 +620,9 @@ async function startServer() {
     activeStage: 1,
     activeClassId: '6A10',
     unlockedStagesByLesson: defaultUnlockedStagesByLesson,
+    lectureSlidesByLesson: {},
+    activeSlideIndexByLesson: {},
+    slideSyncVersionByLesson: {},
     wheelCall: null,
     taughtPeriodsByClass: { '6A10': [1], '7A10': [1] },
     learnedPeriodsByStudent: { '61008': ['k6-tiet-1'], '71001': ['k7-tiet-1'] },
@@ -741,9 +752,17 @@ async function startServer() {
           for (const [k, v] of Object.entries(rawCustomMap)) {
             sanitizedMap[k] = sanitizeWorksheetRecord(v, k);
           }
+          const rawSlidesMap = (parsed.lectureSlidesByLesson || {}) as Record<string, any>;
+          const cleanedSlidesMap: Record<string, any> = {};
+          for (const [k, deck] of Object.entries(rawSlidesMap)) {
+            if (deck && !isLegacyDemoSlideDeck(deck)) {
+              cleanedSlidesMap[k] = deck;
+            }
+          }
           liveClassroomSession = {
             ...liveClassroomSession,
             ...parsed,
+            lectureSlidesByLesson: cleanedSlidesMap,
             customWorksheetsByLesson: sanitizedMap,
             verifiedLessonsMap: {
               ...defaultVerifiedLessonsMap,
@@ -751,6 +770,23 @@ async function startServer() {
             },
           };
         }
+      }
+      const slideRows = await getAllLectureSlideDecksFromDb();
+      if (slideRows.length > 0) {
+        const slidesMap = {
+          ...((liveClassroomSession.lectureSlidesByLesson || {}) as Record<string, any>),
+        };
+        slideRows.forEach((row) => {
+          try {
+            const parsedDeck = JSON.parse(row.slidesJson);
+            if (parsedDeck && !isLegacyDemoSlideDeck(parsedDeck)) {
+              slidesMap[row.lessonKey] = parsedDeck;
+            }
+          } catch {
+            // ignore malformed slide row
+          }
+        });
+        liveClassroomSession.lectureSlidesByLesson = slidesMap;
       }
       const wsRows = await getAllLessonWorksheetsFromDb();
       if (wsRows.length > 0) {
@@ -1094,22 +1130,299 @@ async function startServer() {
 
   app.post('/api/live-session', async (req, res) => {
     const patch = req.body || {};
+    const syncResolved = resolveMonotonicSlideSyncState({
+      currentSlideIndices:
+        (liveClassroomSession.activeSlideIndexByLesson as Record<string, number>) || {},
+      currentSyncVersions:
+        (liveClassroomSession.slideSyncVersionByLesson as Record<string, number>) || {},
+      incomingSlideIndices:
+        patch.activeSlideIndexByLesson && typeof patch.activeSlideIndexByLesson === 'object'
+          ? patch.activeSlideIndexByLesson
+          : undefined,
+      incomingSyncVersions:
+        patch.slideSyncVersionByLesson && typeof patch.slideSyncVersionByLesson === 'object'
+          ? patch.slideSyncVersionByLesson
+          : undefined,
+    });
+
+    // Preserve server's authoritative lectureSlidesByLesson unless explicitly updated
+    const mergedDecks: Record<string, any> = {
+      ...((liveClassroomSession.lectureSlidesByLesson as Record<string, any>) || {}),
+    };
+    if (patch.lectureSlidesByLesson && typeof patch.lectureSlidesByLesson === 'object') {
+      for (const [k, d] of Object.entries(patch.lectureSlidesByLesson)) {
+        if (d === null) {
+          delete mergedDecks[k];
+        } else if (d && !isLegacyDemoSlideDeck(d)) {
+          mergedDecks[k] = d;
+        }
+      }
+    }
+
     liveClassroomSession = offloadSessionBase64ToFileStorage({
       ...liveClassroomSession,
       ...patch,
+      lectureSlidesByLesson:
+        patch._clearAllSlides === true ? {} : mergedDecks,
+      activeSlideIndexByLesson: syncResolved.activeSlideIndexByLesson,
+      slideSyncVersionByLesson: syncResolved.slideSyncVersionByLesson,
       updatedAt: new Date().toISOString(),
     });
     if (isPgConfigured()) {
-      try {
+      saveLiveSessionStateToDb(
+        'global_live_session',
+        JSON.stringify(liveClassroomSession)
+      ).catch((error) => {
+        console.error('Failed to persist live session to PostgreSQL:', error);
+      });
+    }
+    res.json(liveClassroomSession);
+  });
+
+  // Atomic, zero-jitter slide index navigation endpoint (prevents slide jumping between Teacher and Student)
+  app.post('/api/live-session/slide', async (req, res) => {
+    const {
+      lessonKey,
+      slideIndex = 0,
+      slideSyncVersion = Date.now(),
+      grade,
+      period,
+      classId,
+      activeLiveView = 'slide',
+    } = req.body || {};
+
+    if (!lessonKey || typeof lessonKey !== 'string') {
+      return res.status(400).json({ ok: false, error: 'Missing lessonKey' });
+    }
+
+    const curIndices =
+      (liveClassroomSession.activeSlideIndexByLesson as Record<string, number>) || {};
+    const curVersions =
+      (liveClassroomSession.slideSyncVersionByLesson as Record<string, number>) || {};
+
+    const syncResolved = resolveMonotonicSlideSyncState({
+      currentSlideIndices: curIndices,
+      currentSyncVersions: curVersions,
+      incomingSlideIndices: { [lessonKey]: Number(slideIndex) || 0 },
+      incomingSyncVersions: { [lessonKey]: Number(slideSyncVersion) || Date.now() },
+    });
+
+    const unlockedSlides = {
+      ...((liveClassroomSession.unlockedSlideDeckByLesson as Record<string, boolean>) || {}),
+      [lessonKey]: true,
+    };
+    const unlockedStages = {
+      ...((liveClassroomSession.unlockedStagesByLesson as Record<string, any>) || {}),
+      [lessonKey]: { 1: false, 2: false, 3: false, 4: false },
+    };
+    const unlockedPractice = {
+      ...((liveClassroomSession.unlockedPracticeStage3ByLesson as Record<string, boolean>) || {}),
+      [lessonKey]: false,
+    };
+
+    liveClassroomSession = {
+      ...liveClassroomSession,
+      isBroadcasting: true,
+      ...(grade ? { activeGrade: Number(grade) } : {}),
+      ...(period ? { activePeriod: Number(period) } : {}),
+      ...(classId ? { activeClassId: String(classId) } : {}),
+      activeLiveView,
+      unlockedSlideDeckByLesson: unlockedSlides,
+      unlockedStagesByLesson: unlockedStages,
+      unlockedPracticeStage3ByLesson: unlockedPractice,
+      activeSlideIndexByLesson: syncResolved.activeSlideIndexByLesson,
+      slideSyncVersionByLesson: syncResolved.slideSyncVersionByLesson,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (isPgConfigured()) {
+      saveLiveSessionStateToDb(
+        'global_live_session',
+        JSON.stringify(liveClassroomSession)
+      ).catch(() => {});
+    }
+
+    res.json({
+      ok: true,
+      lessonKey,
+      slideIndex: syncResolved.activeSlideIndexByLesson[lessonKey],
+      slideSyncVersion: syncResolved.slideSyncVersionByLesson[lessonKey],
+      updatedAt: liveClassroomSession.updatedAt,
+    });
+  });
+
+  // Dedicated Slide Deck Database CRUD API for smooth read/write synchronization
+  app.get('/api/db/slides', async (_req, res) => {
+    await hydrateFromPostgresIfNeeded();
+    res.json({
+      ok: true,
+      decks: (liveClassroomSession.lectureSlidesByLesson as Record<string, any>) || {},
+      activeSlideIndexByLesson:
+        (liveClassroomSession.activeSlideIndexByLesson as Record<string, number>) || {},
+      slideSyncVersionByLesson:
+        (liveClassroomSession.slideSyncVersionByLesson as Record<string, number>) || {},
+    });
+  });
+
+  app.post('/api/db/slides', async (req, res) => {
+    try {
+      const { lessonKey, deck, activeSlideIndex } = req.body || {};
+      if (!lessonKey || !deck || typeof deck !== 'object') {
+        return res.status(400).json({ ok: false, error: 'Thiếu lessonKey hoặc dữ liệu deck' });
+      }
+
+      const markedDeck = {
+        ...deck,
+        lessonKey,
+        isUserUploaded: true,
+        storageBucket: 'slide-storage-1gb',
+      };
+
+      const offloadedSession = offloadSessionBase64ToFileStorage({
+        lectureSlidesByLesson: { [lessonKey]: markedDeck },
+      });
+      const finalDeck = offloadedSession.lectureSlidesByLesson?.[lessonKey] || markedDeck;
+
+      const currentDecks = {
+        ...((liveClassroomSession.lectureSlidesByLesson as Record<string, any>) || {}),
+        [lessonKey]: finalDeck,
+      };
+
+      const nextIndices = {
+        ...((liveClassroomSession.activeSlideIndexByLesson as Record<string, number>) || {}),
+      };
+      const nextVersions = {
+        ...((liveClassroomSession.slideSyncVersionByLesson as Record<string, number>) || {}),
+      };
+      if (typeof activeSlideIndex === 'number' && Number.isFinite(activeSlideIndex)) {
+        nextIndices[lessonKey] = Math.max(0, Math.floor(activeSlideIndex));
+        nextVersions[lessonKey] = Date.now();
+      }
+
+      liveClassroomSession = {
+        ...liveClassroomSession,
+        lectureSlidesByLesson: currentDecks,
+        activeSlideIndexByLesson: nextIndices,
+        slideSyncVersionByLesson: nextVersions,
+        unlockedSlideDeckByLesson: {
+          ...((liveClassroomSession.unlockedSlideDeckByLesson as Record<string, boolean>) || {}),
+          [lessonKey]: true,
+        },
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (isPgConfigured()) {
+        await upsertLectureSlideDeckToDb({
+          lessonKey,
+          grade: Number(finalDeck.grade) || 6,
+          period: Number(finalDeck.period) || 1,
+          fileName: String(finalDeck.fileName || `${lessonKey}.webp`),
+          fileType: String(finalDeck.fileType || 'image'),
+          fileSize: String(finalDeck.fileSize || '0 KB'),
+          storageBucket: 'slide-storage-1gb',
+          totalCompressedKb: Number(finalDeck.totalCompressedKb) || 0,
+          slidesJson: JSON.stringify(finalDeck),
+        }).catch((err) => console.warn('upsertLectureSlideDeckToDb warning:', err));
+
+        saveLiveSessionStateToDb(
+          'global_live_session',
+          JSON.stringify(liveClassroomSession)
+        ).catch(() => {});
+      }
+
+      res.json({
+        ok: true,
+        lessonKey,
+        deck: finalDeck,
+        liveClassroomSession,
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message || 'Lỗi khi lưu slide vào CSDL.' });
+    }
+  });
+
+  app.delete('/api/db/slides/:lessonKey', async (req, res) => {
+    try {
+      const lessonKey = String(req.params.lessonKey || '').trim();
+      const currentDecks = {
+        ...((liveClassroomSession.lectureSlidesByLesson as Record<string, any>) || {}),
+      };
+      delete currentDecks[lessonKey];
+
+      const nextIndices = {
+        ...((liveClassroomSession.activeSlideIndexByLesson as Record<string, number>) || {}),
+        [lessonKey]: 0,
+      };
+      const nextVersions = {
+        ...((liveClassroomSession.slideSyncVersionByLesson as Record<string, number>) || {}),
+        [lessonKey]: Date.now(),
+      };
+
+      liveClassroomSession = {
+        ...liveClassroomSession,
+        lectureSlidesByLesson: currentDecks,
+        activeSlideIndexByLesson: nextIndices,
+        slideSyncVersionByLesson: nextVersions,
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (isPgConfigured()) {
+        await deleteLectureSlideDeckFromDb(lessonKey).catch(() => {});
         await saveLiveSessionStateToDb(
           'global_live_session',
           JSON.stringify(liveClassroomSession)
-        );
-      } catch (error) {
-        console.error('Failed to persist live session to PostgreSQL:', error);
+        ).catch(() => {});
       }
+
+      res.json({
+        ok: true,
+        lessonKey,
+        message: `🗑️ Đã xoá toàn bộ slide của tiết ${lessonKey} khỏi CSDL!`,
+        liveClassroomSession,
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
     }
-    res.json(liveClassroomSession);
+  });
+
+  app.delete('/api/db/slides', async (_req, res) => {
+    try {
+      fileStorageMemoryMap.clear();
+      try {
+        if (fs.existsSync(FILE_STORAGE_DIR)) {
+          for (const f of fs.readdirSync(FILE_STORAGE_DIR)) {
+            fs.unlinkSync(path.join(FILE_STORAGE_DIR, f));
+          }
+        }
+      } catch {
+        // ignore fs cleanup error
+      }
+
+      liveClassroomSession = {
+        ...liveClassroomSession,
+        lectureSlidesByLesson: {},
+        activeSlideIndexByLesson: {},
+        slideSyncVersionByLesson: {},
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (isPgConfigured()) {
+        await deleteAllLectureSlideDecksFromDb().catch(() => {});
+        await saveLiveSessionStateToDb(
+          'global_live_session',
+          JSON.stringify(liveClassroomSession)
+        ).catch(() => {});
+      }
+
+      res.json({
+        ok: true,
+        message:
+          '🔥 Đã xoá trắng toàn bộ dữ liệu Slide đã có sẵn trong CSDL và File Storage của tất cả các tiết học!',
+        liveClassroomSession,
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
   });
 
   app.post('/api/worksheets/ingest', async (req, res) => {

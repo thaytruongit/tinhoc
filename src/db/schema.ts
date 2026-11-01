@@ -138,6 +138,21 @@ export const studentProgress = pgTable('student_progress', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+// 10. Lecture Slides table (Smooth synchronized read/write for PDF/PPTX/HTML/Video/Image slide decks)
+export const lectureSlides = pgTable('lecture_slides', {
+  id: serial('id').primaryKey(),
+  lessonKey: text('lesson_key').notNull().unique(),
+  grade: integer('grade').notNull(),
+  period: integer('period').notNull(),
+  fileName: text('file_name').notNull(),
+  fileType: text('file_type').notNull().default('image'),
+  fileSize: text('file_size').notNull().default('0 KB'),
+  storageBucket: text('storage_bucket').notNull().default('slide-storage-1gb'),
+  totalCompressedKb: integer('total_compressed_kb').notNull().default(0),
+  slidesJson: text('slides_json').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
 export const usersRelations = relations(users, ({ many }) => ({
   submissions: many(studentSubmissions),
   wordCloudEntries: many(wordCloudEntries),
