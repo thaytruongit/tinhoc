@@ -36,6 +36,7 @@ import {
   isFileStorageSlideUrl,
   getArenaCountdownVisualState,
   generateFallbackSlideSvgDataUrl,
+  isActivityFinalized,
 } from '../utils/slideAndArenaController';
 
 interface StudentLiveRoomProps {
@@ -517,7 +518,21 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     },
   ];
 
+  const isStage1Finalized = isActivityFinalized(liveSession, lessonKey, 1);
+  const isStage2Finalized = isActivityFinalized(liveSession, lessonKey, 2);
+  const isStage2DragFinalized = isActivityFinalized(liveSession, lessonKey, 'hd2_drag');
+  const isStage2FillFinalized = isActivityFinalized(liveSession, lessonKey, 'hd2_fill');
+  const isStage2MatchFinalized = isActivityFinalized(liveSession, lessonKey, 'hd2_match');
+  const isStage2ShortFinalized = isActivityFinalized(liveSession, lessonKey, 'hd2_short');
+  const isStage3ArenaFinalized = isActivityFinalized(liveSession, lessonKey, 3);
+  const isStage3PracticeFinalized = isActivityFinalized(liveSession, lessonKey, 'hd3-practice');
+  const isStage4Finalized = isActivityFinalized(liveSession, lessonKey, 4);
+
   const markStageCompleted = (stageKey: string | number, xpBonus: number, msg: string) => {
+    if (isActivityFinalized(liveSession, lessonKey, stageKey)) {
+      onShowToast('⚠️ Hoạt động này đã được Giáo viên chốt kết quả và đóng nộp bài!');
+      return;
+    }
     setCompletedStages((prev) => ({ ...prev, [String(stageKey)]: true }));
     triggerSynchronizedCelebration('xp');
     onAwardXp(xpBonus);
@@ -623,7 +638,11 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {!unlocked ? (
+                      {isActivityFinalized(liveSession, lessonKey, item.id) ? (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[10px] font-black border border-rose-200">
+                          🔒 Đã chốt
+                        </span>
+                      ) : !unlocked ? (
                         <span className="material-symbols-outlined text-[16px] text-slate-400">
                           lock
                         </span>
@@ -1213,6 +1232,21 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                                 className={`w-full object-contain ${
                                   isFullscreen ? 'max-h-[75vh]' : 'max-h-[540px]'
                                 }`}
+                                onError={(e) => {
+                                  const fallback = generateFallbackSlideSvgDataUrl({
+                                    grade: periodSpec.grade,
+                                    period: periodSpec.period,
+                                    slideIndex: safeSlideIdx,
+                                    totalSlides: slidesList.length,
+                                    title: activeSlide.title || periodSpec.lessonTitle,
+                                    subtitle: activeSlide.subtitle,
+                                    bulletPoints: activeSlide.bulletPoints || [],
+                                    highlightNote: activeSlide.highlightNote,
+                                  });
+                                  if (e.currentTarget.src !== fallback) {
+                                    e.currentTarget.src = fallback;
+                                  }
+                                }}
                               />
                             )}
                           </div>
@@ -1310,6 +1344,20 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     </span>
                   </div>
 
+                  {isStage1Finalized && (
+                    <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-2.5">
+                        <span className="material-symbols-outlined text-rose-600 text-[22px]">lock</span>
+                        <span>
+                          <strong>HOẠT ĐỘNG 1 ĐÃ ĐƯỢC GIÁO VIÊN CHỐT KẾT QUẢ:</strong> Đã khóa nhận câu trả lời Khởi động. Em chỉ xem lại nội dung, không thể nộp thêm hoặc sửa bài.
+                        </span>
+                      </div>
+                      <span className="px-3 py-1 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+                        ĐÃ ĐÓNG NỘP BÀI
+                      </span>
+                    </div>
+                  )}
+
                   <WarmupEssayActivity
                     title="Tình huống mở đầu bài học"
                     scenario={`Trong bài học "${periodSpec.lessonTitle}", em hãy quan sát tình huống thực tế và thảo luận câu trả lời.`}
@@ -1318,9 +1366,17 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     }
                     sampleAnswer="Gợi ý: Dữ liệu là các con số, hình ảnh, văn bản; thông tin là ý nghĩa rút ra từ dữ liệu."
                     points={1.0}
+                    isReadOnly={isStage1Finalized}
                     studentAnswer={warmupAnswer}
-                    onAnswerChange={(val) => setWarmupAnswer(val)}
+                    onAnswerChange={(val) => {
+                      if (isStage1Finalized) return;
+                      setWarmupAnswer(val);
+                    }}
                     onSubmitAnswer={() => {
+                      if (isStage1Finalized) {
+                        onShowToast('⚠️ Hoạt động 1 đã được Giáo viên chốt kết quả và đóng nộp bài!');
+                        return;
+                      }
                       markStageCompleted(
                         1,
                         30,
@@ -1348,28 +1404,43 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     </div>
 
                     {/* Sub-tabs for Stage 2 */}
-                    <div className="flex items-center gap-1.5 p-1 rounded-full bg-slate-100">
+                    <div className="flex items-center gap-1.5 p-1 rounded-full bg-slate-100 flex-wrap">
                       {[
-                        { id: 'drag', label: '1. Kéo thả' },
-                        { id: 'fill', label: '2. Điền khuyết' },
-                        { id: 'match', label: '3. Nối cột' },
-                        { id: 'short', label: '4. Trả lời ngắn' },
+                        { id: 'drag', label: '1. Kéo thả', isFin: isStage2DragFinalized },
+                        { id: 'fill', label: '2. Điền khuyết', isFin: isStage2FillFinalized },
+                        { id: 'match', label: '3. Nối cột', isFin: isStage2MatchFinalized },
+                        { id: 'short', label: '4. Trả lời ngắn', isFin: isStage2ShortFinalized },
                       ].map((st) => (
                         <button
                           key={st.id}
                           type="button"
                           onClick={() => setStage2SubTab(st.id as any)}
-                          className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                          className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
                             stage2SubTab === st.id
                               ? 'bg-sky-600 text-white shadow-2xs'
                               : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
-                          {st.label}
+                          <span>{st.label}</span>
+                          {st.isFin && <span className="text-[11px]">🔒</span>}
                         </button>
                       ))}
                     </div>
                   </div>
+
+                  {isStage2Finalized && (
+                    <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-2.5">
+                        <span className="material-symbols-outlined text-rose-600 text-[22px]">lock</span>
+                        <span>
+                          <strong>HOẠT ĐỘNG 2 ĐÃ ĐƯỢC GIÁO VIÊN CHỐT KẾT QUẢ:</strong> Đã khóa toàn bộ Phiếu Khám phá và các bài tập. Em chỉ xem lại bài làm, không thể nộp thêm bài mới.
+                        </span>
+                      </div>
+                      <span className="px-3 py-1 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+                        ĐÃ ĐÓNG NỘP BÀI
+                      </span>
+                    </div>
+                  )}
 
                   {stage2SubTab === 'drag' && (
                     <DragDropActivity
@@ -1377,9 +1448,11 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                       instruction="Kéo các từ ngữ vào đúng ô phân loại phù hợp."
                       wordBank={['Thông tin', 'Dữ liệu', 'Vật mang tin', 'Xử lý thông tin']}
                       slots={dragSlots}
-                      onSlotChange={(s, val) =>
-                        setDragSlots((prev) => ({ ...prev, [s]: val }))
-                      }
+                      isReadOnly={isStage2DragFinalized}
+                      onSlotChange={(s, val) => {
+                        if (isStage2DragFinalized) return;
+                        setDragSlots((prev) => ({ ...prev, [s]: val }));
+                      }}
                     />
                   )}
 
@@ -1387,9 +1460,11 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     <FillBlankActivity
                       title="Điền từ thích hợp vào chỗ trống"
                       answers={fillBlankAnswers}
-                      onChange={(k, val) =>
-                        setFillBlankAnswers((prev) => ({ ...prev, [k]: val }))
-                      }
+                      isReadOnly={isStage2FillFinalized}
+                      onChange={(k, val) => {
+                        if (isStage2FillFinalized) return;
+                        setFillBlankAnswers((prev) => ({ ...prev, [k]: val }));
+                      }}
                     />
                   )}
 
@@ -1397,25 +1472,30 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     <MatchingActivity
                       title="Nối cột Khái niệm với Diễn giải tương ứng"
                       connections={matchingConnections}
-                      onConnect={(a: string, b: string) =>
-                        setMatchingConnections((prev) => ({ ...prev, [a]: b }))
-                      }
-                      onDisconnect={(a: string) =>
+                      isReadOnly={isStage2MatchFinalized}
+                      onConnect={(a: string, b: string) => {
+                        if (isStage2MatchFinalized) return;
+                        setMatchingConnections((prev) => ({ ...prev, [a]: b }));
+                      }}
+                      onDisconnect={(a: string) => {
+                        if (isStage2MatchFinalized) return;
                         setMatchingConnections((prev) => {
                           const copy = { ...prev };
                           delete copy[a];
                           return copy;
-                        })
-                      }
+                        });
+                      }}
                     />
                   )}
 
                   {stage2SubTab === 'short' && (
                     <ShortAnswerActivity
                       answers={shortAnswers}
-                      onChange={(k, val) =>
-                        setShortAnswers((prev) => ({ ...prev, [k]: val }))
-                      }
+                      isReadOnly={isStage2ShortFinalized}
+                      onChange={(k, val) => {
+                        if (isStage2ShortFinalized) return;
+                        setShortAnswers((prev) => ({ ...prev, [k]: val }));
+                      }}
                     />
                   )}
 
@@ -1423,20 +1503,31 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     <span className="text-xs text-slate-500">
                       💡 Em có thể chuyển qua lại giữa 4 phần hoặc quay lại Hoạt động 1 bất cứ lúc nào.
                     </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        markStageCompleted(
-                          2,
-                          40,
-                          '🎵🎉 Đã nộp Phiếu học tập Hoạt động 2: Khám phá (+40 XP)!'
-                        )
-                      }
-                      className="px-6 py-2.5 rounded-full bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-700 hover:to-blue-700 text-white text-xs font-bold shadow-md cursor-pointer flex items-center gap-1.5"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">check_circle</span>
-                      <span>Hoàn thành &amp; Nộp Phiếu Khám Phá (+40 XP)</span>
-                    </button>
+                    {isStage2Finalized ? (
+                      <button
+                        type="button"
+                        disabled
+                        className="px-6 py-2.5 rounded-full bg-slate-200 text-slate-500 text-xs font-bold cursor-not-allowed flex items-center gap-1.5 shadow-2xs"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">lock</span>
+                        <span>🔒 Giáo viên đã chốt HĐ 2 (Đã đóng nộp bài)</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          markStageCompleted(
+                            2,
+                            40,
+                            '🎵🎉 Đã nộp Phiếu học tập Hoạt động 2: Khám phá (+40 XP)!'
+                          )
+                        }
+                        className="px-6 py-2.5 rounded-full bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-700 hover:to-blue-700 text-white text-xs font-bold shadow-md cursor-pointer flex items-center gap-1.5"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                        <span>Hoàn thành &amp; Nộp Phiếu Khám Phá (+40 XP)</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -1501,6 +1592,20 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     </span>
                   </div>
 
+                  {isStage3ArenaFinalized && (
+                    <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-2.5">
+                        <span className="material-symbols-outlined text-rose-600 text-[22px]">lock</span>
+                        <span>
+                          <strong>ĐẤU TRƯỜNG TRẮC NGHIỆM ĐÃ ĐƯỢC CHỐT KẾT QUẢ:</strong> Giáo viên đã chốt và đóng làm bài Đấu trường 25s, không thể làm thêm hoặc nộp bài.
+                        </span>
+                      </div>
+                      <span className="px-3 py-1 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+                        ĐÃ ĐÓNG NỘP BÀI
+                      </span>
+                    </div>
+                  )}
+
                   <QuizArena25sActivity
                     questions={INITIAL_MINIGAME_QUESTIONS.map((q) => ({
                       id: q.id,
@@ -1513,9 +1618,19 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                         'Đáp án chính xác theo sách giáo khoa.',
                     }))}
                     lessonContext={`Tiết ${periodSpec.period}: ${periodSpec.lessonTitle}`}
-                    onReadyStart={() => setIsStudentArenaReady(true)}
+                    onReadyStart={() => {
+                      if (isStage3ArenaFinalized) {
+                        onShowToast('⚠️ Đấu trường trắc nghiệm 25s đã được Giáo viên chốt kết quả!');
+                        return;
+                      }
+                      setIsStudentArenaReady(true);
+                    }}
                     onShowToast={onShowToast}
                     onFinish={(earned) => {
+                      if (isStage3ArenaFinalized) {
+                        onShowToast('⚠️ Đấu trường trắc nghiệm 25s đã được Giáo viên chốt kết quả!');
+                        return;
+                      }
                       const bonus = Math.max(20, Math.round(earned * 20));
                       markStageCompleted(
                         3,
@@ -1527,6 +1642,20 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
 
                   {/* Synchronized Lock/Unlock Practical Activity inside Stage 3 */}
                   <div className="mt-4 pt-4 border-t border-slate-100">
+                    {isStage3PracticeFinalized && (
+                      <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-3 shadow-2xs mb-4">
+                        <div className="flex items-center gap-2.5">
+                          <span className="material-symbols-outlined text-rose-600 text-[22px]">lock</span>
+                          <span>
+                            <strong>HOẠT ĐỘNG THỰC HÀNH ĐÃ ĐƯỢC CHỐT:</strong> Đã khóa nộp sản phẩm Google Drive. Em không thể nộp thêm sản phẩm mới.
+                          </span>
+                        </div>
+                        <span className="px-3 py-1 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+                          ĐÃ ĐÓNG NỘP SẢN PHẨM
+                        </span>
+                      </div>
+                    )}
+
                     {isPracticeStage3Unlocked ? (
                       <GoogleDrivePracticalActivity
                         classId={currentStudent.classId}
@@ -1539,13 +1668,17 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                         folderName={`Thư mục Tiết ${periodSpec.period}`}
                         drivePath={`Google Drive / Lớp ${currentStudent.classId}`}
                         existingSubmissions={[]}
-                        onSubmitProduct={() =>
+                        onSubmitProduct={() => {
+                          if (isStage3PracticeFinalized) {
+                            onShowToast('⚠️ Hoạt động thực hành đã được Giáo viên chốt kết quả!');
+                            return;
+                          }
                           markStageCompleted(
                             'hd3-practice',
                             50,
                             '🎵☁️ Đã nộp sản phẩm thực hành lên Google Drive thành công (+50 XP)!'
-                          )
-                        }
+                          );
+                        }}
                       />
                     ) : (
                       <div className="p-6 rounded-2xl bg-slate-50 border border-dashed border-slate-200 flex items-center justify-between gap-4 flex-wrap">
@@ -1594,6 +1727,20 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     </span>
                   </div>
 
+                  {isStage3PracticeFinalized && (
+                    <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-2.5">
+                        <span className="material-symbols-outlined text-rose-600 text-[22px]">lock</span>
+                        <span>
+                          <strong>HOẠT ĐỘNG THỰC HÀNH ĐÃ ĐƯỢC CHỐT:</strong> Đã khóa nộp sản phẩm Google Drive. Em không thể nộp thêm sản phẩm mới.
+                        </span>
+                      </div>
+                      <span className="px-3 py-1 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+                        ĐÃ ĐÓNG NỘP SẢN PHẨM
+                      </span>
+                    </div>
+                  )}
+
                   <GoogleDrivePracticalActivity
                     classId={currentStudent.classId}
                     studentName={currentStudent.name}
@@ -1605,13 +1752,17 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     folderName={`Thư mục Tiết ${periodSpec.period}`}
                     drivePath={`Google Drive / Lớp ${currentStudent.classId}`}
                     existingSubmissions={[]}
-                    onSubmitProduct={() =>
+                    onSubmitProduct={() => {
+                      if (isStage3PracticeFinalized) {
+                        onShowToast('⚠️ Hoạt động thực hành đã được Giáo viên chốt kết quả!');
+                        return;
+                      }
                       markStageCompleted(
                         'hd3-practice',
                         50,
                         '🎵☁️ Đã nộp sản phẩm thực hành lên Google Drive thành công (+50 XP)!'
-                      )
-                    }
+                      );
+                    }}
                   />
                 </div>
               )}
@@ -1636,8 +1787,23 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     </span>
                   </div>
 
+                  {isStage4Finalized && (
+                    <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-2.5">
+                        <span className="material-symbols-outlined text-rose-600 text-[22px]">lock</span>
+                        <span>
+                          <strong>HOẠT ĐỘNG 4 ĐÃ ĐƯỢC GIÁO VIÊN CHỐT KẾT QUẢ:</strong> Đã khóa toàn bộ bài làm Vận dụng. Em chỉ xem lại bài làm, không thể nộp thêm hoặc sửa bài.
+                        </span>
+                      </div>
+                      <span className="px-3 py-1 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+                        ĐÃ ĐÓNG NỘP BÀI
+                      </span>
+                    </div>
+                  )}
+
                   <ApplicationThreeTasksActivity
                     title="Vận dụng kiến thức vào đời sống"
+                    isReadOnly={isStage4Finalized}
                     deepAnalysis={{
                       title: '1. Phân tích thực tế',
                       prompt:
@@ -1654,10 +1820,15 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                         'Đề xuất cách bảo vệ thông tin cá nhân khi sử dụng mạng xã hội.',
                     }}
                     answers={appAnswers}
-                    onAnswerChange={(field, val) =>
-                      setAppAnswers((prev) => ({ ...prev, [field]: val }))
-                    }
+                    onAnswerChange={(field, val) => {
+                      if (isStage4Finalized) return;
+                      setAppAnswers((prev) => ({ ...prev, [field]: val }));
+                    }}
                     onSubmit={() => {
+                      if (isStage4Finalized) {
+                        onShowToast('⚠️ Hoạt động 4 đã được Giáo viên chốt kết quả và đóng nộp bài!');
+                        return;
+                      }
                       markStageCompleted(
                         4,
                         50,

@@ -21,6 +21,10 @@ import {
   formatTeacherStageCompletionToast,
   getStageVietnameseName,
 } from '../utils/realtimeProgressAnalytics';
+import {
+  isActivityFinalized,
+  buildToggleFinalizeActivityState,
+} from '../utils/slideAndArenaController';
 
 interface ActivityCompletionVisualizerProps {
   stage: ActivityStageCode;
@@ -166,7 +170,27 @@ export const ActivityCompletionVisualizer: React.FC<
       });
     }
 
-    onShowToast(formatTeacherStageCompletionToast(evt));
+  };
+
+  const lessonKey = `k${grade}-tiet-${period}`;
+  const isFinalized = isActivityFinalized(liveSession, lessonKey, stage);
+
+  const handleToggleFinalize = () => {
+    if (onUpdateLiveSession) {
+      onUpdateLiveSession((prev) =>
+        buildToggleFinalizeActivityState(prev, {
+          lessonKey,
+          activityKey: stage,
+          activityTitle: getStageVietnameseName(stage),
+        })
+      );
+    }
+    const nextState = !isFinalized;
+    onShowToast(
+      nextState
+        ? `🔒 Đã chốt ${getStageVietnameseName(stage)}! Toàn bộ cổng nộp bài phía học sinh đã được khóa an toàn.`
+        : `🔓 Đã mở lại nộp bài cho ${getStageVietnameseName(stage)}.`
+    );
   };
 
   return (
@@ -194,6 +218,29 @@ export const ActivityCompletionVisualizer: React.FC<
             <span className="px-3 py-1 rounded-full bg-white border border-slate-200 text-xs font-bold text-slate-700 font-mono tabular-nums">
               Điểm TB mục này: <strong className="text-indigo-700">{viz.averageScoreLabel}</strong>
             </span>
+
+            {/* Chốt hoạt động (Finalize Activity & Lock Student Submissions) */}
+            <button
+              type="button"
+              data-testid={`finalize-stage-btn-${stage}`}
+              onClick={handleToggleFinalize}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
+                isFinalized
+                  ? 'bg-rose-700 hover:bg-rose-800 text-white shadow-xs'
+                  : 'bg-slate-900 hover:bg-slate-800 text-white'
+              }`}
+              title={
+                isFinalized
+                  ? 'Hoạt động đang chốt kết quả (đã khóa nộp bài phía học sinh). Bấm để mở lại nếu cần'
+                  : 'Chốt hoạt động này và khóa ngay cổng nộp bài phía học sinh'
+              }
+            >
+              <span className="material-symbols-outlined text-[15px]">
+                {isFinalized ? 'lock' : 'lock_clock'}
+              </span>
+              <span>{isFinalized ? '✓ Đã chốt HĐ (Mở lại)' : '🔒 Chốt hoạt động'}</span>
+            </button>
+
             <button
               type="button"
               data-testid={`record-stage-completion-btn-${stage}`}
@@ -208,6 +255,21 @@ export const ActivityCompletionVisualizer: React.FC<
             </button>
           </div>
         </div>
+
+        {/* Finalized Banner Alert */}
+        {isFinalized && (
+          <div className="p-3 rounded-xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-2 shadow-2xs">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-rose-600 text-[18px]">lock</span>
+              <span>
+                <strong>HOẠT ĐỘNG ĐÃ ĐƯỢC CHỐT KẾT QUẢ:</strong> Đã khóa toàn bộ cổng nộp bài phía học sinh, đảm bảo tính riêng biệt của {getStageVietnameseName(stage)}.
+              </span>
+            </div>
+            <span className="px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+              ĐÃ ĐÓNG NỘP BÀI
+            </span>
+          </div>
+        )}
 
         {/* Progress Bar & 3 Status Counters */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">

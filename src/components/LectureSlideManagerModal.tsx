@@ -11,12 +11,18 @@ import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { buildInteractiveHtmlSlideTemplate } from '../utils/realtimeProgressAnalytics';
 import {
+  saveSlideDeckToIndexedDb,
+  deleteSlideDeckFromIndexedDb,
+  clearAllSlideDecksFromIndexedDb,
+} from '../utils/indexedDbSlideStorage';
+import {
   insertHtmlSlideIntoDeck,
   updateSlideInDeck,
   deleteSlideFromDeck,
   moveSlideInDeck,
   renumberSlides,
   extractTextFromPptxSlideXml,
+  ensureDeckSlideImages,
   type HtmlSlideEmbedMode,
 } from '../utils/slideDeckManager';
 
@@ -706,6 +712,10 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
     targetSlideIndex: number = 0
   ) => {
     const cleanSlides = renumberSlides(nextDeck.slides);
+    const guaranteedSlides = ensureDeckSlideImages(cleanSlides, {
+      grade: selectedGrade,
+      period: selectedPeriod,
+    });
     const normalizedDeck: LectureSlideDeck = {
       ...nextDeck,
       lessonKey,
@@ -713,14 +723,19 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
       period: selectedPeriod,
       isUserUploaded: true,
       storageBucket: 'slide-storage-1gb',
-      slides: cleanSlides,
+      slides: guaranteedSlides,
     };
 
     const boundedIdx =
-      cleanSlides.length > 0
-        ? Math.max(0, Math.min(cleanSlides.length - 1, targetSlideIndex))
+      guaranteedSlides.length > 0
+        ? Math.max(0, Math.min(guaranteedSlides.length - 1, targetSlideIndex))
         : 0;
     const syncVer = Date.now();
+
+    // 1. Immediately persist to IndexedDB (ultra-resilient across page reloads without 5MB quota errors)
+    saveSlideDeckToIndexedDb(lessonKey, normalizedDeck).catch((idbErr) =>
+      console.warn('saveSlideDeckToIndexedDb notice:', idbErr)
+    );
 
     onUpdateLiveSession((prev) => ({
       ...prev,
@@ -1377,6 +1392,8 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
       };
     });
 
+    deleteSlideDeckFromIndexedDb(lessonKey).catch(() => {});
+
     try {
       await fetch(`/api/db/slides/${encodeURIComponent(lessonKey)}`, {
         method: 'DELETE',
@@ -1396,6 +1413,8 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
   const handleWipeAllSlidesInDatabase = async () => {
     setEditingSlideIdx(null);
     setPreviewSlideIdx(0);
+
+    clearAllSlideDecksFromIndexedDb().catch(() => {});
 
     onUpdateLiveSession((prev) => ({
       ...prev,

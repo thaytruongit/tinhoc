@@ -35,6 +35,7 @@ import {
   ApplicationThreeTasksActivity,
 } from './InteractiveActivities';
 import { evaluateAnswerBySuggestedPercentage } from '../utils/essayPercentageGrader';
+import { isActivityFinalized } from '../utils/slideAndArenaController';
 import { StudentNotificationBannerModal } from './StudentNotificationBannerModal';
 import { StudentWorksheetScanner, type ExtractedWorksheetData } from './StudentWorksheetScanner';
 import { DataBoundary } from './DataBoundary';
@@ -486,6 +487,16 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     selectedGrade,
     currentPeriodSpec.period
   );
+
+  const isStage1Finalized = isActivityFinalized(liveSession, currentLessonKey, 1);
+  const isStage2Finalized = isActivityFinalized(liveSession, currentLessonKey, 2);
+  const isStage2DragFinalized = isActivityFinalized(liveSession, currentLessonKey, 'hd2_drag');
+  const isStage2FillFinalized = isActivityFinalized(liveSession, currentLessonKey, 'hd2_fill');
+  const isStage2MatchFinalized = isActivityFinalized(liveSession, currentLessonKey, 'hd2_match');
+  const isStage2ShortFinalized = isActivityFinalized(liveSession, currentLessonKey, 'hd2_short');
+  const isStage3ArenaFinalized = isActivityFinalized(liveSession, currentLessonKey, 3);
+  const isStage3PracticeFinalized = isActivityFinalized(liveSession, currentLessonKey, 'hd3-practice');
+  const isStage4Finalized = isActivityFinalized(liveSession, currentLessonKey, 4);
 
   // ================= STAGE 1 INLINE WORKSPACE STATE =================
   const [stage1SubTab, setStage1SubTab] = useState<'scenario' | 'video' | 'crossword'>('scenario');
@@ -1027,6 +1038,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     fileSize: string;
     studentNote: string;
   }) => {
+    if (isStage3PracticeFinalized || isStage3ArenaFinalized) {
+      onShowToast('🔒 Hoạt động thực hành này đã được Giáo viên chốt kết quả và đóng nộp bài!');
+      return;
+    }
     const driveFolders = liveSession?.driveFolders || INITIAL_DRIVE_FOLDERS;
     const targetFolder =
       driveFolders.find(
@@ -1094,6 +1109,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
   const handleSubmitStage1Word = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isStage1Finalized) {
+      onShowToast('🔒 Giáo viên đã chốt Hoạt động 1. Hệ thống đã đóng nhận câu trả lời!');
+      return;
+    }
     const clean = wordCloudInput.trim();
     if (!clean) return;
     setWordCloudList((prev) => {
@@ -1114,6 +1133,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   };
 
   const handleSubmitWorksheetStage2 = async () => {
+    if (isStage2Finalized) {
+      onShowToast('🔒 Giáo viên đã chốt Hoạt động 2. Hệ thống đã đóng nhận bài làm!');
+      return;
+    }
     setWorksheetSubmitted(true);
     const score = worksheetScore ?? 10;
     onAwardXp(score * 10);
@@ -2381,6 +2404,14 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       ).map((node) => {
                         const isUnlocked = currentPeriodUnlocked[node.stage];
                         const isSelected = activeInlineStage === node.stage;
+                        const isNodeFinalized =
+                          node.stage === 1
+                            ? isStage1Finalized
+                            : node.stage === 2
+                            ? isStage2Finalized
+                            : node.stage === 3
+                            ? isStage3ArenaFinalized && isStage3PracticeFinalized
+                            : isStage4Finalized;
 
                         return (
                           <button
@@ -2414,13 +2445,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                               </div>
                               <div
                                 className={`absolute -top-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center ring-2 ring-surface-container-lowest shadow-sm ${
-                                  isUnlocked
+                                  isNodeFinalized
+                                    ? 'bg-amber-500 text-white'
+                                    : isUnlocked
                                     ? 'bg-tertiary text-on-tertiary'
                                     : 'bg-inverse-surface text-inverse-on-surface'
                                 }`}
                               >
                                 <span className="material-symbols-outlined text-[14px]">
-                                  {isUnlocked ? 'lock_open' : 'lock'}
+                                  {isNodeFinalized ? 'lock' : isUnlocked ? 'lock_open' : 'lock'}
                                 </span>
                               </div>
                             </div>
@@ -2434,10 +2467,18 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                               </span>
                               <span
                                 className={`font-label-sm text-label-sm block mt-0.5 ${
-                                  isUnlocked ? 'text-tertiary font-bold' : 'text-outline'
+                                  isNodeFinalized
+                                    ? 'text-amber-600 font-extrabold'
+                                    : isUnlocked
+                                    ? 'text-tertiary font-bold'
+                                    : 'text-outline'
                                 }`}
                               >
-                                {isUnlocked ? node.subtitle : '🔒 Đang khóa (Chờ GV mở)'}
+                                {isNodeFinalized
+                                  ? '🔒 Đã chốt'
+                                  : isUnlocked
+                                  ? node.subtitle
+                                  : '🔒 Đang khóa (Chờ GV mở)'}
                               </span>
                             </div>
                           </button>
@@ -2485,6 +2526,27 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       {activeInlineStage === 1 && (
                         <div className="flex flex-col gap-space-lg">
                           <div className="bg-surface-container-lowest rounded-2xl p-space-lg shadow-md flex flex-col gap-space-md">
+                            {isStage1Finalized && (
+                              <div className="p-3.5 rounded-xl bg-amber-500/15 border-2 border-amber-500/50 flex flex-wrap items-center justify-between gap-3 text-amber-900 dark:text-amber-200">
+                                <div className="flex items-center gap-2.5">
+                                  <span className="material-symbols-outlined text-amber-600 font-black text-[22px]">
+                                    lock
+                                  </span>
+                                  <div>
+                                    <span className="font-black text-xs uppercase tracking-wide block">
+                                      HOẠT ĐỘNG 1 ĐÃ ĐƯỢC GIÁO VIÊN CHỐT KẾT QUẢ
+                                    </span>
+                                    <span className="text-xs font-medium">
+                                      Giáo viên đã kết thúc và chốt hoạt động này. Hệ thống không nhận thêm câu trả lời hay từ khóa mới.
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className="px-3 py-1 rounded-full bg-amber-600 text-white font-bold text-xs shrink-0">
+                                  🔒 ĐÃ ĐÓNG NỘP BÀI
+                                </span>
+                              </div>
+                            )}
+
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex items-center gap-2">
                                 <span className="w-10 h-10 rounded-full bg-primary-fixed text-primary flex items-center justify-center font-headline-sm font-black">
@@ -2729,6 +2791,35 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       {/* ================= HOẠT ĐỘNG 2: KHÁM PHÁ ================= */}
                       {activeInlineStage === 2 && (
                         <div className="bg-surface-container-lowest rounded-2xl p-space-lg shadow-md flex flex-col gap-space-lg">
+                          {(isStage2Finalized ||
+                            isStage2DragFinalized ||
+                            isStage2FillFinalized ||
+                            isStage2MatchFinalized ||
+                            isStage2ShortFinalized) && (
+                            <div className="p-3.5 rounded-xl bg-amber-500/15 border-2 border-amber-500/50 flex flex-wrap items-center justify-between gap-3 text-amber-900 dark:text-amber-200">
+                              <div className="flex items-center gap-2.5">
+                                <span className="material-symbols-outlined text-amber-600 font-black text-[22px]">
+                                  lock
+                                </span>
+                                <div>
+                                  <span className="font-black text-xs uppercase tracking-wide block">
+                                    {isStage2Finalized
+                                      ? 'HOẠT ĐỘNG 2 ĐÃ ĐƯỢC GIÁO VIÊN CHỐT KẾT QUẢ TOÀN BỘ'
+                                      : 'MỘT SỐ BÀI TẬP TRONG HOẠT ĐỘNG 2 ĐÃ ĐƯỢC GIÁO VIÊN CHỐT KẾT QUẢ'}
+                                  </span>
+                                  <span className="text-xs font-medium">
+                                    {isStage2Finalized
+                                      ? 'Giáo viên đã chốt toàn bộ Hoạt động 2. Hệ thống đã đóng nộp bài cho mọi bài tập.'
+                                      : 'Các bài tập có biểu tượng 🔒 Đã chốt không nhận thêm bài làm từ học sinh.'}
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="px-3 py-1 rounded-full bg-amber-600 text-white font-bold text-xs shrink-0">
+                                🔒 ĐÃ ĐÓNG NỘP BÀI
+                              </span>
+                            </div>
+                          )}
+
                           <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-outline-variant/20">
                             <div className="flex items-center gap-2">
                               <span className="w-10 h-10 rounded-full bg-secondary-fixed text-secondary flex items-center justify-center font-headline-sm font-black">
@@ -2770,21 +2861,25 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                   id: 'drag' as const,
                                   icon: 'extension',
                                   label: '1. Kéo Thả (1.0đ)',
+                                  finalized: isStage2Finalized || isStage2DragFinalized,
                                 },
                                 {
                                   id: 'fill' as const,
                                   icon: 'edit_square',
                                   label: '2. Điền Khuyết (1.0đ)',
+                                  finalized: isStage2Finalized || isStage2FillFinalized,
                                 },
                                 {
                                   id: 'match' as const,
                                   icon: 'account_tree',
                                   label: '3. Nối Cột (1.0đ)',
+                                  finalized: isStage2Finalized || isStage2MatchFinalized,
                                 },
                                 {
                                   id: 'short' as const,
                                   icon: 'format_list_bulleted',
                                   label: '4. Trả Lời Ngắn (1.0đ)',
+                                  finalized: isStage2Finalized || isStage2ShortFinalized,
                                 },
                               ] as const
                             ).map((tab) => {
@@ -2805,6 +2900,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                     {tab.icon}
                                   </span>
                                   <span>{tab.label}</span>
+                                  {tab.finalized && (
+                                    <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-black">
+                                      🔒 ĐÃ CHỐT
+                                    </span>
+                                  )}
                                 </button>
                               );
                             })}
@@ -2881,7 +2981,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                           {/* Submission Footer */}
                           <div className="flex items-center justify-between flex-wrap gap-3 pt-4 border-t border-outline-variant/30">
                             <span className="text-sm font-bold text-tertiary">
-                              {worksheetSubmitted
+                              {isStage2Finalized
+                                ? '🔒 Hoạt động 2 đã được Giáo viên chốt kết quả và đóng nộp bài!'
+                                : worksheetSubmitted
                                 ? '✓ Phiếu học tập Hoạt động 2 (4.0đ) đã được chấm tự động và nộp lên hệ thống!'
                                 : 'Hoàn thành 4 nhiệm vụ trên rồi bấm Nộp Phiếu để chấm điểm Hoạt động 2 (Thang 4.0 điểm)'}
                             </span>
@@ -2889,7 +2991,12 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             <div className="flex items-center gap-2 flex-wrap">
                               <button
                                 type="button"
+                                disabled={isStage2Finalized}
                                 onClick={() => {
+                                  if (isStage2Finalized) {
+                                    onShowToast('🔒 Hoạt động 2 đã được Giáo viên chốt kết quả và đóng nộp bài!');
+                                    return;
+                                  }
                                   const sc = calculatePdfStage2Score();
                                   setWorksheetScore(sc);
                                   setWorksheetSubmitted(true);
@@ -2912,15 +3019,26 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                     handleRequestFastFinisherChallenge();
                                   }
                                 }}
-                                className="px-6 py-2.5 rounded-full bg-primary text-on-primary font-bold text-sm shadow-md cursor-pointer hover:bg-primary/90"
+                                className={`px-6 py-2.5 rounded-full font-bold text-sm shadow-md flex items-center gap-2 ${
+                                  isStage2Finalized
+                                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                                    : 'bg-primary text-on-primary cursor-pointer hover:bg-primary/90'
+                                }`}
                               >
-                                {worksheetSubmitted
-                                  ? `🔄 Chấm lại Hoạt động 2 (Lần #${attemptCount})`
-                                  : `📝 Nộp Phiếu Học Tập HĐ2 (${
-                                      activeLearningMode === 'IN_CLASS_LIVE'
-                                        ? '🔴 Trên lớp'
-                                        : '🏠 Tự luyện'
-                                    })`}
+                                <span className="material-symbols-outlined text-[18px]">
+                                  {isStage2Finalized ? 'lock' : 'send'}
+                                </span>
+                                <span>
+                                  {isStage2Finalized
+                                    ? '🔒 Đã chốt HĐ 2 - Đóng nộp'
+                                    : worksheetSubmitted
+                                    ? `🔄 Chấm lại Hoạt động 2 (Lần #${attemptCount})`
+                                    : `📝 Nộp Phiếu Học Tập HĐ2 (${
+                                        activeLearningMode === 'IN_CLASS_LIVE'
+                                          ? '🔴 Trên lớp'
+                                          : '🏠 Tự luyện'
+                                      })`}
+                                </span>
                               </button>
 
                               <button
@@ -2990,6 +3108,32 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       {/* ================= HOẠT ĐỘNG 3: LUYỆN TẬP ================= */}
                       {activeInlineStage === 3 && (
                         <div className="flex flex-col gap-5">
+                          {(isStage3ArenaFinalized || isStage3PracticeFinalized) && (
+                            <div className="p-3.5 rounded-xl bg-amber-500/15 border-2 border-amber-500/50 flex flex-wrap items-center justify-between gap-3 text-amber-900 dark:text-amber-200">
+                              <div className="flex items-center gap-2.5">
+                                <span className="material-symbols-outlined text-amber-600 font-black text-[22px]">
+                                  lock
+                                </span>
+                                <div>
+                                  <span className="font-black text-xs uppercase tracking-wide block">
+                                    HOẠT ĐỘNG 3:{' '}
+                                    {isStage3ArenaFinalized && isStage3PracticeFinalized
+                                      ? 'ĐÃ ĐƯỢC GIÁO VIÊN CHỐT KẾT QUẢ TOÀN BỘ'
+                                      : isStage3ArenaFinalized
+                                      ? 'ĐÃ CHỐT ĐẤU TRƯỜNG 25S'
+                                      : 'ĐÃ CHỐT PHẦN THỰC HÀNH DRIVE'}
+                                  </span>
+                                  <span className="text-xs font-medium">
+                                    Giáo viên đã kết thúc và chốt phần này. Hệ thống không nhận thêm kết quả nộp bài mới.
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="px-3 py-1 rounded-full bg-amber-600 text-white font-bold text-xs shrink-0">
+                                🔒 ĐÃ ĐÓNG NỘP BÀI
+                              </span>
+                            </div>
+                          )}
+
                           <div className="bg-surface-container-lowest rounded-2xl p-4 shadow-sm flex items-center justify-between flex-wrap gap-2">
                             <div className="flex items-center gap-2">
                               <span className="w-10 h-10 rounded-full bg-tertiary-fixed text-on-tertiary-fixed flex items-center justify-center font-headline-sm font-black">
@@ -3036,6 +3180,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                   : 'Theo chuẩn kiến thức SGK Tin học GDPT 2018',
                             }))}
                             onFinish={(earnedPts) => {
+                              if (isStage3ArenaFinalized) {
+                                onShowToast('🔒 Đấu trường 25s đã được Giáo viên chốt kết quả!');
+                                return;
+                              }
                               recordTaggedSubmission(
                                 3,
                                 'HĐ3: Đấu trường Trắc nghiệm 25s',
@@ -3091,6 +3239,27 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       {/* ================= HOẠT ĐỘNG 4: VẬN DỤNG ================= */}
                       {activeInlineStage === 4 && (
                         <div className="flex flex-col gap-5">
+                          {isStage4Finalized && (
+                            <div className="p-3.5 rounded-xl bg-amber-500/15 border-2 border-amber-500/50 flex flex-wrap items-center justify-between gap-3 text-amber-900 dark:text-amber-200">
+                              <div className="flex items-center gap-2.5">
+                                <span className="material-symbols-outlined text-amber-600 font-black text-[22px]">
+                                  lock
+                                </span>
+                                <div>
+                                  <span className="font-black text-xs uppercase tracking-wide block">
+                                    HOẠT ĐỘNG 4 (VẬN DỤNG) ĐÃ ĐƯỢC GIÁO VIÊN CHỐT KẾT QUẢ
+                                  </span>
+                                  <span className="text-xs font-medium">
+                                    Giáo viên đã kết thúc và chốt bài tập Vận dụng. Hệ thống đã đóng nhận bài làm từ học sinh.
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="px-3 py-1 rounded-full bg-amber-600 text-white font-bold text-xs shrink-0">
+                                🔒 ĐÃ ĐÓNG NỘP BÀI
+                              </span>
+                            </div>
+                          )}
+
                           <div className="bg-surface-container-lowest rounded-2xl p-4 shadow-sm flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <span className="w-10 h-10 rounded-full bg-primary-fixed text-primary flex items-center justify-center font-headline-sm font-black">
@@ -3111,6 +3280,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             }
                             isSubmitted={stage4Submitted}
                             onSubmit={() => {
+                              if (isStage4Finalized) {
+                                onShowToast('🔒 Hoạt động 4 đã được Giáo viên chốt kết quả và đóng nộp bài!');
+                                return;
+                              }
                               const stage4Obj = (activeWorksheet as any)?.stage4;
                               const eval1 = evaluateAnswerBySuggestedPercentage(
                                 stage4Answers.deepAnalysis,
@@ -3169,7 +3342,12 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
                             <button
                               type="button"
+                              disabled={isStage4Finalized}
                               onClick={() => {
+                                if (isStage4Finalized) {
+                                  onShowToast('🔒 Hoạt động 4 đã được Giáo viên chốt kết quả và đóng nộp bài!');
+                                  return;
+                                }
                                 setStage4Submitted(true);
                                 recordTaggedSubmission(
                                   4,
@@ -3192,10 +3370,22 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                   }]!`
                                 );
                               }}
-                              className="px-6 py-2.5 rounded-full bg-primary text-on-primary font-bold text-sm shadow-md cursor-pointer hover:bg-primary/90 flex items-center gap-2"
+                              className={`px-6 py-2.5 rounded-full font-bold text-sm shadow-md flex items-center gap-2 ${
+                                isStage4Finalized
+                                  ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                                  : 'bg-primary text-on-primary font-bold cursor-pointer hover:bg-primary/90'
+                              }`}
                             >
-                              <span className="material-symbols-outlined text-[18px]">send</span>
-                              <span>{stage4Submitted ? '✓ Đã nộp bài' : 'Nộp bài Vận dụng'}</span>
+                              <span className="material-symbols-outlined text-[18px]">
+                                {isStage4Finalized ? 'lock' : 'send'}
+                              </span>
+                              <span>
+                                {isStage4Finalized
+                                  ? '🔒 Đã chốt HĐ 4 - Đóng nộp'
+                                  : stage4Submitted
+                                  ? '✓ Đã nộp bài'
+                                  : 'Nộp bài Vận dụng'}
+                              </span>
                             </button>
                           </div>
                         </div>

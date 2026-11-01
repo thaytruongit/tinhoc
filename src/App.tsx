@@ -14,6 +14,7 @@ import {
   type ClassroomItem,
   type LiveClassroomSession,
   type StudentRosterItem,
+  type LectureSlideDeck,
 } from './data/mockCurriculumData';
 import {
   auth,
@@ -33,6 +34,16 @@ import {
   normalizeClassroomList,
   buildEndSlidePresentationState,
 } from './utils/slideAndArenaController';
+import {
+  getAllSlideDecksFromIndexedDb,
+  saveSlideDeckToIndexedDb,
+  getSlideDeckForLessonFromIndexedDb,
+} from './utils/indexedDbSlideStorage';
+import {
+  stripLargeBlobsForLocalStorage,
+  ensureDeckSlideImages,
+  filterActiveSlideDecksForMemory,
+} from './utils/slideDeckManager';
 import {
   buildStageCompletionEvent,
   formatTeacherStageCompletionToast,
@@ -182,9 +193,71 @@ export default function App() {
     }
   }, [classes]);
 
+  // Persist slide decks to IndexedDB asynchronously (eliminating 5MB localStorage limit)
+  useEffect(() => {
+    const decks = liveSession?.lectureSlidesByLesson;
+    if (decks && typeof decks === 'object') {
+      for (const [k, d] of Object.entries(decks)) {
+        if (d && typeof d === 'object') {
+          // Do not write lazy placeholder stubs to IndexedDB to preserve full persisted images
+          if ((d as any).isLazyLoaded !== false) {
+            saveSlideDeckToIndexedDb(k, d as any).catch(() => {});
+          }
+        }
+      }
+    }
+  }, [liveSession?.lectureSlidesByLesson]);
+
+  // On-demand Lazy Loading hydration for active lesson: loads full high-res images from IndexedDB
+  useEffect(() => {
+    let isCancelled = false;
+    async function hydrateActiveLesson() {
+      const currentDeck = liveSession?.lectureSlidesByLesson?.[activeLessonKey];
+      const needsHydration =
+        !currentDeck ||
+        (currentDeck as any).isLazyLoaded === false ||
+        (Array.isArray(currentDeck.slides) &&
+          currentDeck.slides.some((s: any) => s.isLazyPlaceholder));
+
+      if (needsHydration) {
+        try {
+          const hydrated = await getSlideDeckForLessonFromIndexedDb(activeLessonKey);
+          if (hydrated && !isCancelled) {
+            setLiveSession((prev) => {
+              const prevDecks = prev.lectureSlidesByLesson || {};
+              const nextDecks = {
+                ...prevDecks,
+                [activeLessonKey]: {
+                  ...hydrated,
+                  isLazyLoaded: true,
+                },
+              };
+              const governedDecks = filterActiveSlideDecksForMemory(
+                nextDecks,
+                activeLessonKey
+              ) as Record<string, LectureSlideDeck>;
+              return {
+                ...prev,
+                lectureSlidesByLesson: governedDecks,
+              };
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+    hydrateActiveLesson();
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeLessonKey]);
+
+  // Persist live session to localStorage with large blob stripping to avoid QuotaExceededError
   useEffect(() => {
     try {
-      localStorage.setItem('cloudplay_live_session_v5', JSON.stringify(liveSession));
+      const sanitizedSession = stripLargeBlobsForLocalStorage(liveSession);
+      localStorage.setItem('cloudplay_live_session_v5', JSON.stringify(sanitizedSession));
     } catch {
       // ignore
     }
@@ -197,6 +270,22 @@ export default function App() {
     async function fetchBackendData() {
       setIsLoading(true);
       try {
+        // 1. Immediately hydrate any saved slide decks from IndexedDB (ultra-resilient across page reloads)
+        const idbDecks = await getAllSlideDecksFromIndexedDb().catch(() => ({}));
+        if (idbDecks && Object.keys(idbDecks).length > 0) {
+          const governed = filterActiveSlideDecksForMemory(
+            idbDecks,
+            activeLessonKey
+          ) as Record<string, LectureSlideDeck>;
+          setLiveSession((prev) => ({
+            ...prev,
+            lectureSlidesByLesson: {
+              ...(prev.lectureSlidesByLesson || {}),
+              ...governed,
+            },
+          }));
+        }
+
         const [clsRes, stRes, liveRes, slidesRes] = await Promise.all([
           fetch('/api/db/classes')
             .then((r) => (r.ok ? r.json() : null))
@@ -232,16 +321,24 @@ export default function App() {
         if (liveRes && typeof liveRes === 'object') {
           setLiveSession((prev) => {
             const normalized = normalizeLiveSession(liveRes, prev);
-            if (slidesRes?.ok && slidesRes.decks && typeof slidesRes.decks === 'object') {
-              return {
-                ...normalized,
-                lectureSlidesByLesson: {
-                  ...normalized.lectureSlidesByLesson,
-                  ...slidesRes.decks,
-                },
-              };
-            }
-            return normalized;
+            const serverDecks =
+              slidesRes?.ok && slidesRes.decks && typeof slidesRes.decks === 'object'
+                ? slidesRes.decks
+                : {};
+            const mergedDecks = {
+              ...(idbDecks || {}),
+              ...(prev.lectureSlidesByLesson || {}),
+              ...((normalized.lectureSlidesByLesson as Record<string, any>) || {}),
+              ...serverDecks,
+            };
+            const governedDecks = filterActiveSlideDecksForMemory(
+              mergedDecks,
+              activeLessonKey
+            ) as Record<string, LectureSlideDeck>;
+            return {
+              ...normalized,
+              lectureSlidesByLesson: governedDecks,
+            };
           });
         } else if (supabase && isSupabaseRealtimeConfigured) {
           const { data: sbLiveRow } = await supabase

@@ -996,8 +996,11 @@ async function startServer() {
 
   // ============================================================================
   // 1GB FILE STORAGE SUBSYSTEM (OFFLOAD SLIDE IMAGES FROM 500MB POSTGRESQL DB)
+  // PERSISTENT TO DISK & RESILIENT ACROSS SERVER RESTARTS
   // ============================================================================
-  const FILE_STORAGE_DIR = '/tmp/cloudplay-file-storage-1gb';
+  const DATA_DIR = path.resolve(process.cwd(), 'data');
+  const FILE_STORAGE_DIR = path.join(DATA_DIR, 'file-storage-slides');
+  const SLIDES_BACKUP_FILE = path.join(DATA_DIR, 'lecture_slides_store.json');
   const FILE_STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024; // 1 GB File Storage Quota
   const DB_QUOTA_BYTES = 500 * 1024 * 1024; // 500 MB PostgreSQL Database Quota
   const fileStorageMemoryMap = new Map<
@@ -1005,12 +1008,81 @@ async function startServer() {
     { buffer: Buffer; mimeType: string; createdAt: string; lessonKey: string; sizeBytes: number }
   >();
 
+  function saveSlidesBackupToDisk() {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      const decks = liveClassroomSession.lectureSlidesByLesson || {};
+      fs.writeFileSync(SLIDES_BACKUP_FILE, JSON.stringify(decks, null, 2), 'utf-8');
+    } catch (e) {
+      console.warn('[Server] Failed to save slides backup to disk:', e);
+    }
+  }
+
+  function loadSlidesBackupFromDisk() {
+    try {
+      if (fs.existsSync(SLIDES_BACKUP_FILE)) {
+        const raw = fs.readFileSync(SLIDES_BACKUP_FILE, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          const existing = (liveClassroomSession.lectureSlidesByLesson as Record<string, any>) || {};
+          liveClassroomSession.lectureSlidesByLesson = {
+            ...existing,
+            ...parsed,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('[Server] Failed to load slides backup from disk:', e);
+    }
+  }
+
   try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
     if (!fs.existsSync(FILE_STORAGE_DIR)) {
       fs.mkdirSync(FILE_STORAGE_DIR, { recursive: true });
+    } else {
+      // Preload saved slide files into memory map on startup so all slide images are instantly available
+      const savedFiles = fs.readdirSync(FILE_STORAGE_DIR);
+      for (const f of savedFiles) {
+        if (f.endsWith('.meta.json')) continue;
+        const filePath = path.join(FILE_STORAGE_DIR, f);
+        const metaPath = path.join(FILE_STORAGE_DIR, `${f}.meta.json`);
+        try {
+          const buffer = fs.readFileSync(filePath);
+          let mimeType = f.endsWith('.webp')
+            ? 'image/webp'
+            : f.endsWith('.png')
+            ? 'image/png'
+            : f.endsWith('.pdf')
+            ? 'application/pdf'
+            : f.endsWith('.mp4')
+            ? 'video/mp4'
+            : 'image/jpeg';
+          let lessonKey = 'general';
+          if (fs.existsSync(metaPath)) {
+            try {
+              const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+              if (meta.mimeType) mimeType = meta.mimeType;
+              if (meta.lessonKey) lessonKey = meta.lessonKey;
+            } catch {}
+          }
+          fileStorageMemoryMap.set(f, {
+            buffer,
+            mimeType,
+            createdAt: new Date().toISOString(),
+            lessonKey,
+            sizeBytes: buffer.length,
+          });
+        } catch {}
+      }
     }
-  } catch {
-    // ignore fs init warnings
+    loadSlidesBackupFromDisk();
+  } catch (initErr) {
+    console.warn('[Server File Storage Init] Warning:', initErr);
   }
 
   function storeDataUrlInFileStorage(
@@ -1171,6 +1243,7 @@ async function startServer() {
       slideSyncVersionByLesson: syncResolved.slideSyncVersionByLesson,
       updatedAt: new Date().toISOString(),
     });
+    saveSlidesBackupToDisk();
     if (isPgConfigured()) {
       saveLiveSessionStateToDb(
         'global_live_session',
@@ -1313,6 +1386,7 @@ async function startServer() {
         },
         updatedAt: new Date().toISOString(),
       };
+      saveSlidesBackupToDisk();
 
       if (isPgConfigured()) {
         await upsertLectureSlideDeckToDb({
@@ -1368,6 +1442,7 @@ async function startServer() {
         slideSyncVersionByLesson: nextVersions,
         updatedAt: new Date().toISOString(),
       };
+      saveSlidesBackupToDisk();
 
       if (isPgConfigured()) {
         await deleteLectureSlideDeckFromDb(lessonKey).catch(() => {});
@@ -1408,6 +1483,7 @@ async function startServer() {
         slideSyncVersionByLesson: {},
         updatedAt: new Date().toISOString(),
       };
+      saveSlidesBackupToDisk();
 
       if (isPgConfigured()) {
         await deleteAllLectureSlideDecksFromDb().catch(() => {});

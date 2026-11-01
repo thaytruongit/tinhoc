@@ -21,6 +21,9 @@ import {
   buildEndSlidePresentationState,
   buildBroadcastSingleActivityState,
   buildStopSingleActivityState,
+  isActivityFinalized,
+  buildToggleFinalizeActivityState,
+  generateFallbackSlideSvgDataUrl,
 } from '../utils/slideAndArenaController';
 import { LiveStudentProgressTracker } from './LiveStudentProgressTracker';
 import { ActivityCompletionVisualizer } from './ActivityCompletionVisualizer';
@@ -416,6 +419,28 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     onUpdateLiveSession((prev) => buildEndSlidePresentationState(prev, lessonKey));
     onShowToast(
       `⏹️ Đã kết thúc Slide bài giảng! Đã dừng tại chỗ và khóa tất cả các hoạt động — Giáo viên bấm Phát Live hoạt động nào thì mới mở riêng hoạt động đó!`
+    );
+  };
+
+  // Finalize an activity or specific exercise: locks submissions for all students to prevent late submissions
+  const handleToggleFinalizeActivity = (
+    activityKey: string | number,
+    activityTitle?: string
+  ) => {
+    const isCurrentlyFinalized = isActivityFinalized(liveSession, lessonKey, activityKey);
+    const nextFinalized = !isCurrentlyFinalized;
+    onUpdateLiveSession((prev) =>
+      buildToggleFinalizeActivityState(prev, {
+        lessonKey,
+        activityKey,
+        finalized: nextFinalized,
+        activityTitle: activityTitle || `Hoạt động ${activityKey}`,
+      })
+    );
+    onShowToast(
+      nextFinalized
+        ? `🔒 Đã chốt ${activityTitle || `Hoạt động ${activityKey}`}! Toàn bộ cổng nộp bài phía học sinh đã được khóa an toàn.`
+        : `🔓 Đã mở lại nộp bài cho ${activityTitle || `Hoạt động ${activityKey}`}.`
     );
   };
 
@@ -1371,6 +1396,11 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                           ĐANG PHÁT
                         </span>
                       )}
+                      {!isBroadcastingThis && isActivityFinalized(liveSession, lessonKey, item.stage) && (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[10px] font-black border border-rose-200">
+                          🔒 ĐÃ CHỐT
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-xs gap-1 flex-wrap">
@@ -1460,6 +1490,11 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                   {liveSession?.activeLiveView === 'hd3-practice' && (
                     <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-black border border-red-200 animate-pulse">
                       ĐANG PHÁT
+                    </span>
+                  )}
+                  {liveSession?.activeLiveView !== 'hd3-practice' && isActivityFinalized(liveSession, lessonKey, 'hd3-practice') && (
+                    <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[10px] font-black border border-rose-200">
+                      🔒 ĐÃ CHỐT
                     </span>
                   )}
                 </div>
@@ -1573,6 +1608,11 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       {isBroadcastingThis && (
                         <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-black border border-red-200 animate-pulse">
                           ĐANG PHÁT
+                        </span>
+                      )}
+                      {!isBroadcastingThis && item.stage && isActivityFinalized(liveSession, lessonKey, item.stage) && (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[10px] font-black border border-rose-200">
+                          🔒 ĐÃ CHỐT
                         </span>
                       )}
                     </div>
@@ -2370,90 +2410,69 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                             />
                           </div>
                         </div>
-                      ) : activeSlidePage.imageUrl ? (
-                        <div className="flex flex-col gap-3">
-                          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs">
-                            <span className="px-3 py-1 rounded-full bg-orange-500/25 border border-orange-400/40 text-orange-300 font-bold">
-                              🖼️ Ảnh Slide #{activeSlidePage.slideNumber} / {slidePages.length}:{' '}
-                              {activeSlidePage.title}
-                            </span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-emerald-300 font-bold flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                                {isFileStorageSlideUrl(activeSlidePage.imageUrl)
-                                  ? `File Storage 1GB • Đang đồng bộ Lớp ${classId}`
-                                  : isSlideUnlocked
-                                  ? `Học sinh Lớp ${classId} đang xem đồng bộ Ảnh Slide này`
-                                  : `Đang khóa Slide trên màn hình học sinh`}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setShowSlideUploadModal(true)}
-                                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] cursor-pointer"
-                              >
-                                Sửa / Xoá Slide
-                              </button>
-                            </div>
-                          </div>
-                          <div className="w-full rounded-3xl overflow-hidden border-2 border-slate-200 shadow-xl bg-slate-950 flex items-center justify-center">
-                            <img
-                              src={activeSlidePage.imageUrl}
-                              alt={`Slide ${activeSlidePage.slideNumber}: ${activeSlidePage.title}`}
-                              className="w-full max-h-[500px] object-contain"
-                            />
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white p-8 sm:p-10 shadow-xl flex flex-col justify-between min-h-[380px]">
-                          <div className="flex items-center justify-between gap-2 border-b border-white/15 pb-4">
-                            <span className="px-3.5 py-1 rounded-full bg-orange-500/20 border border-orange-400/40 text-orange-300 text-xs font-bold">
-                              Slide {activeSlidePage.slideNumber} / {slidePages.length}
-                            </span>
-                            <span className="text-xs text-emerald-300 font-bold flex items-center gap-1.5">
-                              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                              {isSlideUnlocked
-                                ? `Học sinh Lớp ${classId} đang xem đồng bộ Slide này`
-                                : `Đang khóa Slide trên màn hình học sinh`}
-                            </span>
-                          </div>
-
-                          <div className="my-6 flex flex-col gap-4">
-                            <div>
-                              <h3 className="text-2xl sm:text-3xl font-black text-white leading-snug">
+                      ) : (() => {
+                        const effectiveSlideImageUrl =
+                          activeSlidePage.imageUrl ||
+                          generateFallbackSlideSvgDataUrl({
+                            grade,
+                            period,
+                            slideIndex: activeSlidePage.slideNumber - 1,
+                            totalSlides: slidePages.length,
+                            title: activeSlidePage.title,
+                            subtitle: activeSlidePage.subtitle,
+                            bulletPoints: activeSlidePage.bulletPoints,
+                            highlightNote: activeSlidePage.highlightNote,
+                          });
+                        return (
+                          <div className="flex flex-col gap-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs">
+                              <span className="px-3 py-1 rounded-full bg-orange-500/25 border border-orange-400/40 text-orange-300 font-bold">
+                                🖼️ Ảnh Slide #{activeSlidePage.slideNumber} / {slidePages.length}:{' '}
                                 {activeSlidePage.title}
-                              </h3>
-                              {activeSlidePage.subtitle && (
-                                <p className="text-sm sm:text-base text-sky-300 font-semibold mt-1">
-                                  {activeSlidePage.subtitle}
-                                </p>
-                              )}
-                            </div>
-
-                            <ul className="flex flex-col gap-3 mt-2">
-                              {(activeSlidePage.bulletPoints || []).map((pt, i) => (
-                                <li
-                                  key={i}
-                                  className="flex items-start gap-3 text-sm sm:text-base text-slate-100"
-                                >
-                                  <span className="w-6 h-6 rounded-full bg-sky-500/30 text-sky-300 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
-                                    {i + 1}
-                                  </span>
-                                  <span className="leading-relaxed">{pt}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-
-                          {activeSlidePage.highlightNote && (
-                            <div className="p-4 rounded-2xl bg-white/10 border border-white/15 text-xs sm:text-sm text-amber-200 flex items-center gap-2">
-                              <span className="material-symbols-outlined text-[20px] text-amber-300">
-                                lightbulb
                               </span>
-                              <span>{activeSlidePage.highlightNote}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-emerald-300 font-bold flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                                  {isFileStorageSlideUrl(effectiveSlideImageUrl)
+                                    ? `File Storage 1GB • Đang đồng bộ Lớp ${classId}`
+                                    : isSlideUnlocked
+                                    ? `Học sinh Lớp ${classId} đang xem đồng bộ Ảnh Slide này`
+                                    : `Đang khóa Slide trên màn hình học sinh`}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowSlideUploadModal(true)}
+                                  className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] cursor-pointer"
+                                >
+                                  Sửa / Xoá Slide
+                                </button>
+                              </div>
                             </div>
-                          )}
-                        </div>
-                      )}
+                            <div className="w-full rounded-3xl overflow-hidden border-2 border-slate-200 shadow-xl bg-slate-950 flex items-center justify-center">
+                              <img
+                                src={effectiveSlideImageUrl}
+                                alt={`Slide ${activeSlidePage.slideNumber}: ${activeSlidePage.title}`}
+                                className="w-full max-h-[500px] object-contain"
+                                onError={(e) => {
+                                  const fallback = generateFallbackSlideSvgDataUrl({
+                                    grade,
+                                    period,
+                                    slideIndex: activeSlidePage.slideNumber - 1,
+                                    totalSlides: slidePages.length,
+                                    title: activeSlidePage.title,
+                                    subtitle: activeSlidePage.subtitle,
+                                    bulletPoints: activeSlidePage.bulletPoints,
+                                    highlightNote: activeSlidePage.highlightNote,
+                                  });
+                                  if (e.currentTarget.src !== fallback) {
+                                    e.currentTarget.src = fallback;
+                                  }
+                                }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Synchronized Explanation Video Player Column */}
@@ -2596,6 +2615,28 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       {currentUnlockedMap[1] ? '🔒 Khóa HĐ 1' : '🔓 Mở khóa HĐ 1'}
                     </button>
 
+                    {/* Chốt Hoạt động 1 */}
+                    <button
+                      type="button"
+                      data-testid="finalize-stage-1-btn"
+                      onClick={() => handleToggleFinalizeActivity(1, 'Hoạt động 1: Khởi động')}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${
+                        isActivityFinalized(liveSession, lessonKey, 1)
+                          ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                          : 'bg-slate-900 hover:bg-slate-800 text-white'
+                      }`}
+                      title="Chốt kết quả Hoạt động 1 để khóa toàn bộ cổng nộp bài phía học sinh"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        {isActivityFinalized(liveSession, lessonKey, 1) ? 'lock' : 'lock_clock'}
+                      </span>
+                      <span>
+                        {isActivityFinalized(liveSession, lessonKey, 1)
+                          ? '✓ Đã chốt HĐ 1 (Mở lại)'
+                          : '🔒 Chốt HĐ 1'}
+                      </span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => handleBroadcastStage(1)}
@@ -2617,6 +2658,20 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     )}
                   </div>
                 </div>
+
+                {isActivityFinalized(liveSession, lessonKey, 1) && (
+                  <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-3 shadow-2xs">
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-rose-600 text-[20px]">lock</span>
+                      <span>
+                        <strong>HĐ 1 ĐÃ ĐƯỢC CHỐT KẾT QUẢ:</strong> Đã khóa cổng nộp câu trả lời Khởi động phía học sinh, đảm bảo tính riêng biệt của phần này.
+                      </span>
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+                      ĐÃ ĐÓNG NỘP BÀI
+                    </span>
+                  </div>
+                )}
 
                 <div className="p-6 rounded-2xl bg-amber-50/60 border border-amber-200/80 flex flex-col gap-3">
                   <span className="text-xs font-black text-amber-800 uppercase tracking-wider">
@@ -2681,6 +2736,28 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       {currentUnlockedMap[2] ? '🔒 Khóa HĐ 2' : '🔓 Mở khóa HĐ 2'}
                     </button>
 
+                    {/* Chốt toàn bộ Hoạt động 2 */}
+                    <button
+                      type="button"
+                      data-testid="finalize-stage-2-btn"
+                      onClick={() => handleToggleFinalizeActivity(2, 'Hoạt động 2: Khám phá')}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${
+                        isActivityFinalized(liveSession, lessonKey, 2)
+                          ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                          : 'bg-slate-900 hover:bg-slate-800 text-white'
+                      }`}
+                      title="Chốt toàn bộ Phiếu Khám phá và khóa cổng nộp bài phía học sinh"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        {isActivityFinalized(liveSession, lessonKey, 2) ? 'lock' : 'lock_clock'}
+                      </span>
+                      <span>
+                        {isActivityFinalized(liveSession, lessonKey, 2)
+                          ? '✓ Đã chốt HĐ 2 (Mở lại)'
+                          : '🔒 Chốt HĐ 2'}
+                      </span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => handleBroadcastStage(2)}
@@ -2700,6 +2777,79 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                         <span>⏹️ Kết thúc HĐ 2</span>
                       </button>
                     )}
+                  </div>
+                </div>
+
+                {/* Banner when Activity 2 is finalized */}
+                {isActivityFinalized(liveSession, lessonKey, 2) && (
+                  <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-3 shadow-2xs">
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-rose-600 text-[20px]">lock</span>
+                      <span>
+                        <strong>HĐ 2 ĐÃ ĐƯỢC CHỐT KẾT QUẢ:</strong> Đã khóa toàn bộ Phiếu Khám phá và 4 bài tập phía học sinh, ngăn nộp thêm hoặc sửa bài.
+                      </span>
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+                      ĐÃ ĐÓNG NỘP BÀI
+                    </span>
+                  </div>
+                )}
+
+                {/* Granular Per-Exercise Finalization Toolbar for Activity 2 */}
+                <div className="p-4 rounded-2xl bg-sky-50/70 border border-sky-200/90 flex flex-col gap-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-xs font-black text-sky-950 uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[18px] text-sky-700">lock_clock</span>
+                      <span>Chốt hoạt động cho từng bài tập (Khóa nộp bài độc lập từng phần):</span>
+                    </span>
+                    <span className="text-[11px] text-slate-500 font-medium">
+                      (Đảm bảo tính riêng biệt: khi chốt bài nào, học sinh không thể nộp thêm bài đó)
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                    {[
+                      { key: 'hd2_drag', num: '1', title: '1. Kéo thả phân loại', pts: '1.0đ' },
+                      { key: 'hd2_fill', num: '2', title: '2. Điền khuyết', pts: '1.0đ' },
+                      { key: 'hd2_match', num: '3', title: '3. Nối cột định nghĩa', pts: '1.0đ' },
+                      { key: 'hd2_short', num: '4', title: '4. Trả lời ngắn / Tự luận', pts: '1.0đ' },
+                    ].map((ex) => {
+                      const isExFinalized = isActivityFinalized(liveSession, lessonKey, ex.key);
+                      return (
+                        <div
+                          key={ex.key}
+                          className={`p-3 rounded-xl border flex flex-col justify-between gap-2 transition-all ${
+                            isExFinalized
+                              ? 'bg-rose-50 border-rose-300'
+                              : 'bg-white border-sky-200/80 shadow-2xs'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-800 truncate">
+                              {ex.title}
+                            </span>
+                            <span className="text-[11px] font-bold text-sky-700 font-mono">
+                              {ex.pts}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            data-testid={`finalize-exercise-${ex.key}-btn`}
+                            onClick={() => handleToggleFinalizeActivity(ex.key, ex.title)}
+                            className={`w-full py-1.5 px-2.5 rounded-lg text-[11px] font-bold cursor-pointer transition-colors flex items-center justify-center gap-1 shadow-2xs ${
+                              isExFinalized
+                                ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+                            }`}
+                          >
+                            <span className="material-symbols-outlined text-[14px]">
+                              {isExFinalized ? 'lock' : 'lock_clock'}
+                            </span>
+                            <span>{isExFinalized ? '✓ Đã chốt bài' : '🔒 Chốt bài này'}</span>
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -2753,6 +2903,28 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       {currentUnlockedMap[3] ? '🔒 Khóa HĐ 3' : '🔓 Mở khóa HĐ 3'}
                     </button>
 
+                    {/* Chốt Hoạt động 3 */}
+                    <button
+                      type="button"
+                      data-testid="finalize-stage-3-btn"
+                      onClick={() => handleToggleFinalizeActivity(3, 'Hoạt động 3: Luyện tập')}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${
+                        isActivityFinalized(liveSession, lessonKey, 3)
+                          ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                          : 'bg-slate-900 hover:bg-slate-800 text-white'
+                      }`}
+                      title="Chốt kết quả Hoạt động 3 và khóa nộp bài phía học sinh"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        {isActivityFinalized(liveSession, lessonKey, 3) ? 'lock' : 'lock_clock'}
+                      </span>
+                      <span>
+                        {isActivityFinalized(liveSession, lessonKey, 3)
+                          ? '✓ Đã chốt HĐ 3 (Mở lại)'
+                          : '🔒 Chốt HĐ 3'}
+                      </span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => handleBroadcastStage(3)}
@@ -2774,6 +2946,21 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     )}
                   </div>
                 </div>
+
+                {/* Banner when Activity 3 is finalized */}
+                {isActivityFinalized(liveSession, lessonKey, 3) && (
+                  <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-3 shadow-2xs">
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-rose-600 text-[20px]">lock</span>
+                      <span>
+                        <strong>HĐ 3 ĐÃ ĐƯỢC CHỐT KẾT QUẢ:</strong> Đã khóa toàn bộ bài làm Đấu trường Trắc nghiệm 25s phía học sinh, ngăn làm bài hoặc nộp thêm.
+                      </span>
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+                      ĐÃ ĐÓNG NỘP BÀI
+                    </span>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="p-5 rounded-2xl bg-purple-50/60 border border-purple-100 flex flex-col justify-between gap-3">
@@ -2805,6 +2992,21 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                         className="px-3 py-2 rounded-full bg-white border border-purple-300 text-purple-800 hover:bg-purple-100 text-xs font-bold cursor-pointer"
                       >
                         {arenaCountdownState?.isRunning ? '⏸️ Tạm dừng' : '▶️ Tiếp tục'}
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="finalize-arena-part1-btn"
+                        onClick={() => handleToggleFinalizeActivity(3, 'Đấu trường Trắc nghiệm 25s')}
+                        className={`px-3 py-2 rounded-full text-xs font-bold cursor-pointer transition-colors flex items-center gap-1 shadow-2xs ${
+                          isActivityFinalized(liveSession, lessonKey, 3)
+                            ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                            : 'bg-slate-900 hover:bg-slate-800 text-white'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[15px]">
+                          {isActivityFinalized(liveSession, lessonKey, 3) ? 'lock' : 'lock_clock'}
+                        </span>
+                        <span>{isActivityFinalized(liveSession, lessonKey, 3) ? '✓ Đã chốt Đấu trường' : '🔒 Chốt Đấu trường'}</span>
                       </button>
                       {[180, 300, 600].map((sec) => (
                         <button
@@ -2857,6 +3059,22 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                         {isPracticeStage3Unlocked
                           ? '🔒 Khóa Thực hành HĐ 3'
                           : '🔓 Mở khóa Thực hành HĐ 3'}
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="finalize-practice-part2-btn"
+                        onClick={() => handleToggleFinalizeActivity('hd3-practice', 'HĐ 3: Thực hành máy tính')}
+                        className={`px-3.5 py-2 rounded-full text-xs font-bold cursor-pointer transition-colors flex items-center gap-1 shadow-2xs ${
+                          isActivityFinalized(liveSession, lessonKey, 'hd3-practice')
+                            ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                            : 'bg-slate-900 hover:bg-slate-800 text-white'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[15px]">
+                          {isActivityFinalized(liveSession, lessonKey, 'hd3-practice') ? 'lock' : 'lock_clock'}
+                        </span>
+                        <span>{isActivityFinalized(liveSession, lessonKey, 'hd3-practice') ? '✓ Đã chốt Thực hành' : '🔒 Chốt Thực hành'}</span>
                       </button>
 
                       <button
@@ -2924,6 +3142,28 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                         : '🔓 Mở khóa Hoạt động Thực hành'}
                     </button>
 
+                    {/* Chốt HĐ 3 Thực hành */}
+                    <button
+                      type="button"
+                      data-testid="finalize-stage-3-practice-btn"
+                      onClick={() => handleToggleFinalizeActivity('hd3-practice', 'HĐ 3: Thực hành máy tính')}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${
+                        isActivityFinalized(liveSession, lessonKey, 'hd3-practice')
+                          ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                          : 'bg-slate-900 hover:bg-slate-800 text-white'
+                      }`}
+                      title="Chốt kết quả Thực hành máy tính và khóa nộp sản phẩm Google Drive phía học sinh"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        {isActivityFinalized(liveSession, lessonKey, 'hd3-practice') ? 'lock' : 'lock_clock'}
+                      </span>
+                      <span>
+                        {isActivityFinalized(liveSession, lessonKey, 'hd3-practice')
+                          ? '✓ Đã chốt Thực hành (Mở lại)'
+                          : '🔒 Chốt Thực hành'}
+                      </span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={handleBroadcastPracticeStage3}
@@ -2945,6 +3185,21 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     )}
                   </div>
                 </div>
+
+                {/* Banner when Practice is finalized */}
+                {isActivityFinalized(liveSession, lessonKey, 'hd3-practice') && (
+                  <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-3 shadow-2xs">
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-rose-600 text-[20px]">lock</span>
+                      <span>
+                        <strong>HĐ THỰC HÀNH ĐÃ ĐƯỢC CHỐT KẾT QUẢ:</strong> Đã khóa toàn bộ cổng nộp sản phẩm lên Google Drive phía học sinh, ngăn nộp thêm tệp.
+                      </span>
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+                      ĐÃ ĐÓNG NỘP SẢN PHẨM
+                    </span>
+                  </div>
+                )}
 
                 <div className="p-6 rounded-2xl bg-indigo-50/70 border border-indigo-200/80 flex flex-col gap-3">
                   <div className="flex items-center justify-between flex-wrap gap-2">
@@ -3018,6 +3273,28 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       {currentUnlockedMap[4] ? '🔒 Khóa HĐ 4' : '🔓 Mở khóa HĐ 4'}
                     </button>
 
+                    {/* Chốt Hoạt động 4 */}
+                    <button
+                      type="button"
+                      data-testid="finalize-stage-4-btn"
+                      onClick={() => handleToggleFinalizeActivity(4, 'Hoạt động 4: Vận dụng')}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${
+                        isActivityFinalized(liveSession, lessonKey, 4)
+                          ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                          : 'bg-slate-900 hover:bg-slate-800 text-white'
+                      }`}
+                      title="Chốt kết quả Hoạt động 4 và khóa nộp bài phía học sinh"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        {isActivityFinalized(liveSession, lessonKey, 4) ? 'lock' : 'lock_clock'}
+                      </span>
+                      <span>
+                        {isActivityFinalized(liveSession, lessonKey, 4)
+                          ? '✓ Đã chốt HĐ 4 (Mở lại)'
+                          : '🔒 Chốt HĐ 4'}
+                      </span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => handleBroadcastStage(4)}
@@ -3039,6 +3316,21 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     )}
                   </div>
                 </div>
+
+                {/* Banner when Activity 4 is finalized */}
+                {isActivityFinalized(liveSession, lessonKey, 4) && (
+                  <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-3 shadow-2xs">
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-rose-600 text-[20px]">lock</span>
+                      <span>
+                        <strong>HĐ 4 ĐÃ ĐƯỢC CHỐT KẾT QUẢ:</strong> Đã khóa toàn bộ cổng nộp bài Vận dụng phía học sinh, đảm bảo tính riêng biệt của phần này.
+                      </span>
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+                      ĐÃ ĐÓNG NỘP BÀI
+                    </span>
+                  </div>
+                )}
 
                 <div className="p-6 rounded-2xl bg-emerald-50/60 border border-emerald-100 flex flex-col gap-2">
                   <span className="text-xs font-bold text-emerald-800 uppercase">

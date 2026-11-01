@@ -13,6 +13,9 @@ import {
   buildStartLiveSessionStandbyState,
   buildBroadcastSingleActivityState,
   buildStopSingleActivityState,
+  isActivityFinalized,
+  buildToggleFinalizeActivityState,
+  normalizeActivityKey,
   normalizeLiveSession,
   normalizeStudentRosterList,
   normalizeClassroomList,
@@ -199,6 +202,130 @@ test('normalizeLiveSession, normalizeStudentRosterList, and normalizeClassroomLi
     { id: '6A10', name: 'Lớp 6A10', grade: 6, school_year: '2025-2026' },
   ]);
   assert.equal(normClasses[0].schoolYear, '2025-2026');
+});
+
+test('activity finalization ("Chốt hoạt động") toggles and locks submission independently per exercise and activity', () => {
+  const lessonKey = 'k6-tiet-1';
+  let session: any = {
+    isBroadcasting: true,
+    activeGrade: 6,
+    activePeriod: 1,
+    finalizedActivitiesByLesson: {},
+  };
+
+  // Initially nothing is finalized
+  assert.equal(isActivityFinalized(session, lessonKey, 1), false);
+  assert.equal(isActivityFinalized(session, lessonKey, 'hd2_drag'), false);
+
+  // 1. Finalize Activity 1
+  session = buildToggleFinalizeActivityState(session, {
+    lessonKey,
+    activityKey: 1,
+    activityTitle: 'Hoạt động 1: Khởi động',
+  });
+  assert.equal(isActivityFinalized(session, lessonKey, 1), true);
+  assert.equal(isActivityFinalized(session, lessonKey, 'hd1'), true);
+  // Other activities remain unlocked
+  assert.equal(isActivityFinalized(session, lessonKey, 2), false);
+  assert.equal(isActivityFinalized(session, lessonKey, 3), false);
+
+  // 2. Finalize single exercise in Activity 2: Kéo thả
+  session = buildToggleFinalizeActivityState(session, {
+    lessonKey,
+    activityKey: 'hd2_drag',
+    activityTitle: 'Bài tập 1: Kéo thả',
+  });
+  assert.equal(isActivityFinalized(session, lessonKey, 'hd2_drag'), true);
+  assert.equal(isActivityFinalized(session, lessonKey, 'hd2_fill'), false);
+  assert.equal(isActivityFinalized(session, lessonKey, 2), false); // Entire HĐ 2 not yet locked
+
+  // 3. Finalize entire Activity 2 -> cascades lock to all sub-exercises
+  session = buildToggleFinalizeActivityState(session, {
+    lessonKey,
+    activityKey: 2,
+    activityTitle: 'Hoạt động 2: Khám phá',
+  });
+  assert.equal(isActivityFinalized(session, lessonKey, 2), true);
+  assert.equal(isActivityFinalized(session, lessonKey, 'hd2'), true);
+  assert.equal(isActivityFinalized(session, lessonKey, 'hd2_fill'), true);
+  assert.equal(isActivityFinalized(session, lessonKey, 'hd2_match'), true);
+
+  // 4. Finalize Practical activity in Activity 3
+  session = buildToggleFinalizeActivityState(session, {
+    lessonKey,
+    activityKey: 'hd3-practice',
+    activityTitle: 'HĐ 3: Thực hành máy tính',
+  });
+  assert.equal(isActivityFinalized(session, lessonKey, 'hd3-practice'), true);
+  assert.equal(isActivityFinalized(session, lessonKey, 3), false); // Arena 25s still open
+
+  // 5. Unlocking/reopening Activity 1 works
+  session = buildToggleFinalizeActivityState(session, {
+    lessonKey,
+    activityKey: 1,
+    finalized: false,
+  });
+  assert.equal(isActivityFinalized(session, lessonKey, 1), false);
+});
+
+test('normalizeLiveSession ensures every slide has valid imageUrl and merges fallback images so slides never degrade to plain text on reload', () => {
+  const defaultSess: any = {
+    activeGrade: 6,
+    activePeriod: 1,
+    lectureSlidesByLesson: {
+      'k6-tiet-1': {
+        grade: 6,
+        period: 1,
+        isUserUploaded: true,
+        slides: [
+          {
+            slideNumber: 1,
+            title: 'Tiết 1 - Slide 1',
+            bulletPoints: ['Gốc từ ban đầu'],
+            imageUrl: '/api/file-storage/slides/file/initial-slide-1.webp',
+          },
+        ],
+      },
+    },
+  };
+
+  // Simulate a raw session from localStorage or DB where imageUrl was lost, stripped or empty
+  const rawSessionWithEmptyImages = {
+    activeGrade: 6,
+    activePeriod: 1,
+    lectureSlidesByLesson: {
+      'k6-tiet-1': {
+        grade: 6,
+        period: 1,
+        slides: [
+          {
+            slideNumber: 1,
+            title: 'Tiết 1 - Slide 1',
+            bulletPoints: ['Nội dung mới'],
+            imageUrl: '', // stripped or empty
+          },
+          {
+            slideNumber: 2,
+            title: 'Tiết 1 - Slide 2 (Mới thêm)',
+            bulletPoints: ['Điểm 2'],
+            // no imageUrl provided
+          },
+        ],
+      },
+    },
+  };
+
+  const normalized = normalizeLiveSession(rawSessionWithEmptyImages, defaultSess);
+  const deck = normalized.lectureSlidesByLesson['k6-tiet-1'];
+  assert.equal(deck.slides.length, 2);
+
+  // Slide 1 should recover imageUrl from fallback
+  assert.equal(deck.slides[0].imageUrl, '/api/file-storage/slides/file/initial-slide-1.webp');
+
+  // Slide 2 should have guaranteed high-fidelity SVG slide image data URL instead of empty string
+  assert.ok(typeof deck.slides[1].imageUrl === 'string');
+  assert.ok(deck.slides[1].imageUrl.length > 50);
+  assert.ok(deck.slides[1].imageUrl.startsWith('data:image/svg+xml;utf8,'));
 });
 
 

@@ -935,12 +935,17 @@ export interface LectureSlidePage {
   bulletPoints: string[];
   highlightNote?: string;
   imageUrl?: string;
+  imageBlob?: Blob;
+  isLazyPlaceholder?: boolean;
+  lazyLoadKey?: string;
+  originalSizeKb?: number;
   htmlContent?: string;
   htmlEmbedUrl?: string;
   videoUrl?: string;
   videoTitle?: string;
   storageFileId?: string;
   compressedSizeKb?: number;
+  hasIndexedDbBackup?: boolean;
   embedMode?: 'simulation-single' | 'full-deck-end';
 }
 
@@ -959,6 +964,7 @@ export interface LectureSlideDeck {
   totalCompressedKb?: number;
   defaultVideoUrl?: string;
   isUserUploaded?: boolean;
+  isLazyLoaded?: boolean;
   slides: LectureSlidePage[];
 }
 
@@ -1011,6 +1017,7 @@ export interface LiveClassroomSession {
     | 'hd4';
   activeClassId: string;
   unlockedStagesByLesson: Record<string, Record<1 | 2 | 3 | 4, boolean>>;
+  finalizedActivitiesByLesson?: Record<string, Record<string, boolean>>;
   unlockedPracticeStage3ByLesson?: Record<string, boolean>;
   unlockedSlideDeckByLesson?: Record<string, boolean>;
   activeSlideIndexByLesson?: Record<string, number>;
@@ -1329,6 +1336,7 @@ export function createDefaultLiveSession(): LiveClassroomSession {
     activeLiveView: 'waiting',
     activeClassId: '6A10',
     unlockedStagesByLesson: createDefaultUnlockedMap(),
+    finalizedActivitiesByLesson: {},
     lectureSlidesByLesson: {},
     activeSlideIndexByLesson: {},
     slideSyncVersionByLesson: {},

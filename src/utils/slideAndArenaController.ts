@@ -1,7 +1,11 @@
 import {
   resolveMonotonicSlideSyncState,
   isLegacyDemoSlideDeck,
+  generateFallbackSlideSvgDataUrl,
+  ensureDeckSlideImages,
 } from './slideDeckManager';
+
+export { generateFallbackSlideSvgDataUrl };
 
 export type PresenterKeyAction = 'next' | 'prev' | null;
 
@@ -215,82 +219,6 @@ export function getArenaCountdownVisualState(
   };
 }
 
-/**
- * Generates a crisp 16:9 SVG Data URL slide image when a slide does not yet have an uploaded bitmap imageUrl,
- * ensuring the Slide Presenter & Student Live Room always display a genuine <img> Slide Image.
- */
-export function generateFallbackSlideSvgDataUrl(params: {
-  grade: number;
-  period: number;
-  slideIndex: number;
-  totalSlides: number;
-  title: string;
-  subtitle?: string;
-  bulletPoints?: string[];
-  highlightNote?: string;
-}): string {
-  const esc = (str: string) =>
-    String(str || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-
-  const bullets = (params.bulletPoints || []).slice(0, 4);
-  const bulletSvg = bullets
-    .map((b, i) => {
-      const y = 310 + i * 74;
-      const truncated = b.length > 92 ? b.slice(0, 89) + '...' : b;
-      return `
-        <g transform="translate(88, ${y})">
-          <rect x="0" y="-26" width="38" height="38" rx="12" fill="#4f46e5" />
-          <text x="19" y="0" text-anchor="middle" fill="#ffffff" font-family="system-ui, sans-serif" font-size="18" font-weight="800">${
-            i + 1
-          }</text>
-          <text x="56" y="-1" fill="#f1f5f9" font-family="system-ui, sans-serif" font-size="22" font-weight="600">${esc(
-            truncated
-          )}</text>
-        </g>
-      `;
-    })
-    .join('');
-
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720">
-    <defs>
-      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#0f172a"/>
-        <stop offset="55%" stop-color="#1e1b4b"/>
-        <stop offset="100%" stop-color="#0f172a"/>
-      </linearGradient>
-    </defs>
-    <rect width="1280" height="720" fill="url(#bg)"/>
-    <circle cx="1160" cy="110" r="210" fill="#4f46e5" opacity="0.14"/>
-    <circle cx="120" cy="640" r="180" fill="#ea580c" opacity="0.12"/>
-    <rect x="64" y="48" width="1152" height="624" rx="28" fill="#1e293b" fill-opacity="0.55" stroke="#475569" stroke-width="2"/>
-    <rect x="88" y="78" width="360" height="42" rx="21" fill="#312e81" stroke="#6366f1" stroke-width="1.5"/>
-    <text x="268" y="105" text-anchor="middle" fill="#c7d2fe" font-family="system-ui, sans-serif" font-size="17" font-weight="800">KHỐI ${
-      params.grade
-    } • TIẾT ${params.period} • SLIDE ${params.slideIndex + 1}/${
-    params.totalSlides
-  }</text>
-    <text x="1180" y="105" text-anchor="end" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="16" font-weight="700">CHUẨN GDPT 2018 TIN HỌC</text>
-    <text x="88" y="182" fill="#ffffff" font-family="system-ui, sans-serif" font-size="36" font-weight="900">${esc(
-      params.title.length > 62 ? params.title.slice(0, 59) + '...' : params.title
-    )}</text>
-    <text x="88" y="226" fill="#93c5fd" font-family="system-ui, sans-serif" font-size="21" font-weight="600">${esc(
-      params.subtitle || 'Kiến thức trọng tâm bài giảng trực tuyến đồng bộ'
-    )}</text>
-    <line x1="88" y1="252" x2="1192" y2="252" stroke="#334155" stroke-width="2"/>
-    ${bulletSvg}
-    <rect x="88" y="596" width="1104" height="50" rx="14" fill="#0f172a" fill-opacity="0.7" stroke="#334155" stroke-width="1"/>
-    <text x="112" y="627" fill="#fcd34d" font-family="system-ui, sans-serif" font-size="18" font-weight="700">💡 ${esc(
-      params.highlightNote ||
-        'Slide bài giảng đồng bộ trực tiếp từ Giáo viên sang màn hình Học sinh'
-    )}</text>
-  </svg>`;
-
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
 
 export type IsolatedLiveActivityId =
   | 'slide'
@@ -514,6 +442,124 @@ export function buildEndSlidePresentationState<T extends Record<string, any>>(
 }
 
 /**
+ * Normalizes an activity or sub-exercise key for consistency across views.
+ */
+export function normalizeActivityKey(activityKey: string | number): string {
+  const s = String(activityKey).trim().toLowerCase();
+  if (s === '1' || s === 'hd1' || s === 'stage1') return '1';
+  if (s === '2' || s === 'hd2' || s === 'stage2') return '2';
+  if (s === '3' || s === 'hd3' || s === 'stage3') return '3';
+  if (s === 'hd3-practice' || s === 'practice' || s === 'drive') return 'hd3-practice';
+  if (s === '4' || s === 'hd4' || s === 'stage4') return '4';
+  if (s === 'drag' || s === 'hd2_drag' || s === 'keo-tha') return 'hd2_drag';
+  if (s === 'fill' || s === 'hd2_fill' || s === 'dien-khuyet') return 'hd2_fill';
+  if (s === 'match' || s === 'hd2_match' || s === 'noi-cot') return 'hd2_match';
+  if (s === 'short' || s === 'hd2_short' || s === 'tra-loi-ngan' || s === 'tu-luan') return 'hd2_short';
+  return s;
+}
+
+/**
+ * Checks whether an activity or specific exercise has been finalized ("Chốt") by the teacher,
+ * preventing any student from submitting or modifying their answers.
+ *
+ * Rules:
+ * - If the overall activity is finalized (e.g. Activity 2), all its sub-exercises ('hd2_drag', 'hd2_fill', etc.) are also considered finalized.
+ * - If a specific sub-exercise is finalized, it returns true for that exercise.
+ */
+export function isActivityFinalized(
+  session: { finalizedActivitiesByLesson?: Record<string, Record<string, boolean>> } | undefined | null,
+  lessonKey: string,
+  activityKey: string | number
+): boolean {
+  if (!session?.finalizedActivitiesByLesson) return false;
+  const lessonFinalized = session.finalizedActivitiesByLesson[lessonKey];
+  if (!lessonFinalized || typeof lessonFinalized !== 'object') return false;
+
+  const normKey = normalizeActivityKey(activityKey);
+
+  // Direct check
+  if (lessonFinalized[normKey] === true) return true;
+
+  // Check aliases
+  if (normKey === '1' && (lessonFinalized['hd1'] === true || lessonFinalized['1'] === true)) return true;
+  if (normKey === '2' && (lessonFinalized['hd2'] === true || lessonFinalized['2'] === true)) return true;
+  if (normKey === '3' && (lessonFinalized['hd3'] === true || lessonFinalized['3'] === true)) return true;
+  if (normKey === '4' && (lessonFinalized['hd4'] === true || lessonFinalized['4'] === true)) return true;
+  if (normKey === 'hd3-practice' && (lessonFinalized['hd3-practice'] === true || lessonFinalized['practice'] === true)) return true;
+
+  // Sub-exercises of Stage 2: If the entire Stage 2 is finalized, the sub-exercise is finalized
+  if (normKey.startsWith('hd2_')) {
+    if (lessonFinalized['2'] === true || lessonFinalized['hd2'] === true) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Toggles or sets the finalized ("Chốt") state of a specific activity or exercise.
+ * When an activity is finalized, students cannot submit further work.
+ */
+export function buildToggleFinalizeActivityState<T extends Record<string, any>>(
+  prev: T,
+  params: {
+    lessonKey: string;
+    activityKey: string | number;
+    finalized?: boolean;
+    activityTitle?: string;
+  }
+): T & Record<string, any> {
+  const { lessonKey, activityKey, activityTitle } = params;
+  const normKey = normalizeActivityKey(activityKey);
+  const nowIso = new Date().toISOString();
+
+  const prevLessonFinalized = prev.finalizedActivitiesByLesson?.[lessonKey] || {};
+  const currentlyFinalized = isActivityFinalized(prev, lessonKey, normKey);
+  const nextFinalized = params.finalized !== undefined ? params.finalized : !currentlyFinalized;
+
+  const updatedLessonMap = {
+    ...prevLessonFinalized,
+    [normKey]: nextFinalized,
+  };
+
+  // Keep aliases in sync
+  if (normKey === '1') updatedLessonMap['hd1'] = nextFinalized;
+  if (normKey === '2') {
+    updatedLessonMap['hd2'] = nextFinalized;
+    // When locking the whole Stage 2, also mark sub-exercises
+    if (nextFinalized) {
+      updatedLessonMap['hd2_drag'] = true;
+      updatedLessonMap['hd2_fill'] = true;
+      updatedLessonMap['hd2_match'] = true;
+      updatedLessonMap['hd2_short'] = true;
+    }
+  }
+  if (normKey === '3') updatedLessonMap['hd3'] = nextFinalized;
+  if (normKey === 'hd3-practice') updatedLessonMap['practice'] = nextFinalized;
+  if (normKey === '4') updatedLessonMap['hd4'] = nextFinalized;
+
+  const pushPayload = nextFinalized
+    ? {
+        id: `fin-${Date.now()}`,
+        title: '🔒 Đã chốt hoạt động',
+        body: `Giáo viên đã chốt ${activityTitle || `Hoạt động ${activityKey}`}. Đã đóng toàn bộ cổng nộp bài!`,
+        timestampIso: nowIso,
+      }
+    : null;
+
+  return {
+    ...prev,
+    finalizedActivitiesByLesson: {
+      ...(prev.finalizedActivitiesByLesson || {}),
+      [lessonKey]: updatedLessonMap,
+    },
+    ...(pushPayload ? { lastPushNotification: pushPayload } : {}),
+    updatedAt: nowIso,
+  };
+}
+
+/**
  * Safely normalizes any LiveClassroomSession object loaded from PostgreSQL / Supabase / localStorage
  * so missing or null nested maps never cause a white-screen TypeError during render.
  */
@@ -577,6 +623,11 @@ export function normalizeLiveSession<T extends Record<string, any>>(
         ? raw.activeLiveView
         : defaultSession.activeLiveView || 'waiting',
     unlockedStagesByLesson: mergedUnlockedStages,
+    finalizedActivitiesByLesson:
+      raw.finalizedActivitiesByLesson &&
+      typeof raw.finalizedActivitiesByLesson === 'object'
+        ? raw.finalizedActivitiesByLesson
+        : defaultSession.finalizedActivitiesByLesson || {},
     unlockedPracticeStage3ByLesson:
       raw.unlockedPracticeStage3ByLesson &&
       typeof raw.unlockedPracticeStage3ByLesson === 'object'
@@ -612,11 +663,81 @@ export function normalizeLiveSession<T extends Record<string, any>>(
         raw.lectureSlidesByLesson && typeof raw.lectureSlidesByLesson === 'object'
           ? raw.lectureSlidesByLesson
           : defaultSession.lectureSlidesByLesson || {};
+      const fallbackDecks =
+        defaultSession.lectureSlidesByLesson &&
+        typeof defaultSession.lectureSlidesByLesson === 'object'
+          ? defaultSession.lectureSlidesByLesson
+          : {};
+
+      const allDeckKeys = Array.from(
+        new Set([...Object.keys(sourceDecks), ...Object.keys(fallbackDecks)])
+      );
       const cleanedDecks: Record<string, any> = {};
-      for (const [k, deck] of Object.entries(sourceDecks)) {
-        if (deck && !isLegacyDemoSlideDeck(deck)) {
-          cleanedDecks[k] = deck;
+
+      for (const k of allDeckKeys) {
+        const rawDeck = sourceDecks[k];
+        const fallbackDeck = fallbackDecks[k];
+        const baseDeck = rawDeck || fallbackDeck;
+        if (!baseDeck) {
+          continue;
         }
+
+        const isUserUploaded = Boolean(
+          rawDeck?.isUserUploaded ?? fallbackDeck?.isUserUploaded ?? true
+        );
+        const mergedDeck = {
+          ...fallbackDeck,
+          ...rawDeck,
+          isUserUploaded,
+        };
+
+        if (isLegacyDemoSlideDeck(mergedDeck)) {
+          continue;
+        }
+
+        // Parse grade and period from key (e.g. "k6-tiet-1" or "k7-tiet-12")
+        const keyMatch = /^k(\d+)-tiet-(\d+)$/.exec(k);
+        const deckGrade = keyMatch ? Number(keyMatch[1]) : safeGrade;
+        const deckPeriod = keyMatch ? Number(keyMatch[2]) : safePeriod;
+
+        const fallbackSlides = Array.isArray(fallbackDeck?.slides)
+          ? fallbackDeck.slides
+          : [];
+        const rawSlides = Array.isArray(mergedDeck.slides) ? mergedDeck.slides : [];
+
+        // Merge raw slides with fallback slides if raw lost imageUrl
+        const mergedSlides = rawSlides.map((slide: any, idx: number) => {
+          if (!slide || typeof slide !== 'object') return slide;
+          const fallback = fallbackSlides[idx];
+          const hasImage =
+            typeof slide.imageUrl === 'string' &&
+            slide.imageUrl.trim().length > 0;
+          const hasFallbackImage =
+            typeof fallback?.imageUrl === 'string' &&
+            fallback.imageUrl.trim().length > 0;
+
+          return {
+            ...fallback,
+            ...slide,
+            imageUrl: hasImage
+              ? slide.imageUrl
+              : hasFallbackImage
+              ? fallback.imageUrl
+              : slide.imageUrl,
+          };
+        });
+
+        // Ensure EVERY slide has a valid, sharp imageUrl so it NEVER falls back to plain text
+        const safeSlides = ensureDeckSlideImages(mergedSlides, {
+          grade: deckGrade,
+          period: deckPeriod,
+        });
+
+        cleanedDecks[k] = {
+          ...mergedDeck,
+          slides: safeSlides,
+          isUserUploaded,
+        };
       }
       return cleanedDecks;
     })(),
