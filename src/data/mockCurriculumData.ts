@@ -1105,10 +1105,10 @@ export function createDefaultUnlockedMap(): Record<string, Record<1 | 2 | 3 | 4,
     for (let p = 1; p <= 29; p++) {
       const key = `k${g}-tiet-${p}`;
       map[key] = {
-        1: true,
-        2: p === 1,
-        3: p === 1,
-        4: p === 1,
+        1: false,
+        2: false,
+        3: false,
+        4: false,
       };
     }
   });
@@ -1326,6 +1326,7 @@ export function createDefaultLiveSession(): LiveClassroomSession {
     activeGrade: 6,
     activePeriod: 1,
     activeStage: 1,
+    activeLiveView: 'waiting',
     activeClassId: '6A10',
     unlockedStagesByLesson: createDefaultUnlockedMap(),
     lectureSlidesByLesson: {},

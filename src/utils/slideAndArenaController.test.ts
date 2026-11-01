@@ -10,6 +10,9 @@ import {
   getArenaCountdownVisualState,
   generateFallbackSlideSvgDataUrl,
   buildEndSlidePresentationState,
+  buildStartLiveSessionStandbyState,
+  buildBroadcastSingleActivityState,
+  buildStopSingleActivityState,
   normalizeLiveSession,
   normalizeStudentRosterList,
   normalizeClassroomList,
@@ -28,41 +31,55 @@ test('resolvePresenterKeyAction handles Space, ArrowRight, PageDown, ArrowLeft, 
   assert.equal(resolvePresenterKeyAction('ArrowRight', 'ArrowRight', 'DIV', true), null);
 });
 
-test('isStudentLiveViewUnlocked locks all other activities when teacher broadcasts slide and enforces strict per-activity lock after slide ends', () => {
-  const slideBroadcastParams = {
-    teacherActiveView: 'slide',
-    isSlideDeckUnlocked: true,
-    isPracticeStage3Unlocked: true,
-    unlockedStages: { 1: true, 2: true, 3: true, 4: true },
-    teacherCurrentStage: 3,
-  };
-
-  assert.equal(isStudentLiveViewUnlocked({ ...slideBroadcastParams, viewId: 'slide' }), true);
-  assert.equal(isStudentLiveViewUnlocked({ ...slideBroadcastParams, viewId: 1 }), false);
-  assert.equal(isStudentLiveViewUnlocked({ ...slideBroadcastParams, viewId: 2 }), false);
-  assert.equal(isStudentLiveViewUnlocked({ ...slideBroadcastParams, viewId: 3 }), false);
-  assert.equal(isStudentLiveViewUnlocked({ ...slideBroadcastParams, viewId: 'hd3-practice' }), false);
-  assert.equal(isStudentLiveViewUnlocked({ ...slideBroadcastParams, viewId: 4 }), false);
-
-  // When teacher ends slide presentation: slide closes and all activities remain locked until explicitly unlocked
-  const endedSession = buildEndSlidePresentationState(
+test('isStudentLiveViewUnlocked and isolated activity builders enforce standby on Live start, isolated per-activity broadcast, and clean stop', () => {
+  // 1. Entering Live period starts in standby ('waiting') with zero activities auto-activated
+  const initialStandby = buildStartLiveSessionStandbyState(
     {
-      activeLiveView: 'slide',
-      unlockedSlideDeckByLesson: { 'k6-tiet-1': true },
-      unlockedStagesByLesson: { 'k6-tiet-1': { 1: false, 2: false, 3: false, 4: false } },
-      unlockedPracticeStage3ByLesson: { 'k6-tiet-1': false },
-      updatedAt: '2026-05-01T10:00:00.000Z',
+      isBroadcasting: false,
+      activeGrade: 6,
+      activePeriod: 1,
+      activeStage: 1,
+      activeClassId: '6A10',
+      unlockedStagesByLesson: { 'k6-tiet-1': { 1: true, 2: true, 3: true, 4: true } },
     },
-    'k6-tiet-1'
+    { grade: 6, period: 1, classId: '6A10' }
   );
+  assert.equal(initialStandby.isBroadcasting, true);
+  assert.equal(initialStandby.activeLiveView, 'waiting');
+  assert.deepEqual(initialStandby.unlockedStagesByLesson['k6-tiet-1'], {
+    1: false,
+    2: false,
+    3: false,
+    4: false,
+  });
 
-  assert.equal(endedSession.activeLiveView, 'waiting');
-  assert.equal(endedSession.unlockedSlideDeckByLesson['k6-tiet-1'], false);
+  // 2. Broadcasting Slide unlocks only Slide
+  const slideSession = buildBroadcastSingleActivityState(initialStandby, {
+    grade: 6,
+    period: 1,
+    classId: '6A10',
+    activity: 'slide',
+    slideIndex: 2,
+    slideSyncVersion: 1000,
+  });
+  assert.equal(slideSession.activeLiveView, 'slide');
+  assert.equal(slideSession.unlockedSlideDeckByLesson['k6-tiet-1'], true);
+  assert.deepEqual(slideSession.unlockedStagesByLesson['k6-tiet-1'], {
+    1: false,
+    2: false,
+    3: false,
+    4: false,
+  });
+
+  // 3. Ending Slide stops at 'waiting' and locks all views
+  const endedSlide = buildEndSlidePresentationState(slideSession, 'k6-tiet-1');
+  assert.equal(endedSlide.activeLiveView, 'waiting');
+  assert.equal(endedSlide.unlockedSlideDeckByLesson['k6-tiet-1'], false);
   const afterSlideEndParams = {
-    teacherActiveView: endedSession.activeLiveView,
-    isSlideDeckUnlocked: endedSession.unlockedSlideDeckByLesson['k6-tiet-1'],
-    isPracticeStage3Unlocked: endedSession.unlockedPracticeStage3ByLesson['k6-tiet-1'],
-    unlockedStages: endedSession.unlockedStagesByLesson['k6-tiet-1'],
+    teacherActiveView: endedSlide.activeLiveView,
+    isSlideDeckUnlocked: endedSlide.unlockedSlideDeckByLesson['k6-tiet-1'],
+    isPracticeStage3Unlocked: endedSlide.unlockedPracticeStage3ByLesson['k6-tiet-1'],
+    unlockedStages: endedSlide.unlockedStagesByLesson['k6-tiet-1'],
     teacherCurrentStage: 1,
   };
   assert.equal(isStudentLiveViewUnlocked({ ...afterSlideEndParams, viewId: 'slide' }), false);
@@ -71,14 +88,40 @@ test('isStudentLiveViewUnlocked locks all other activities when teacher broadcas
   assert.equal(isStudentLiveViewUnlocked({ ...afterSlideEndParams, viewId: 3 }), false);
   assert.equal(isStudentLiveViewUnlocked({ ...afterSlideEndParams, viewId: 4 }), false);
 
-  // When teacher unlocks only Hoạt động 2, only viewId 2 is unlocked
-  const onlyStage2Params = {
-    ...afterSlideEndParams,
-    unlockedStages: { 1: false, 2: true, 3: false, 4: false },
+  // 4. Broadcasting Hoạt động 2 unlocks ONLY Hoạt động 2 (does not affect HĐ 1, 3, 4)
+  const hd2Session = buildBroadcastSingleActivityState(endedSlide, {
+    grade: 6,
+    period: 1,
+    classId: '6A10',
+    activity: 'hd2',
+  });
+  assert.equal(hd2Session.activeLiveView, 'hd2');
+  assert.deepEqual(hd2Session.unlockedStagesByLesson['k6-tiet-1'], {
+    1: false,
+    2: true,
+    3: false,
+    4: false,
+  });
+  const hd2Params = {
+    teacherActiveView: hd2Session.activeLiveView,
+    isSlideDeckUnlocked: hd2Session.unlockedSlideDeckByLesson['k6-tiet-1'],
+    isPracticeStage3Unlocked: hd2Session.unlockedPracticeStage3ByLesson['k6-tiet-1'],
+    unlockedStages: hd2Session.unlockedStagesByLesson['k6-tiet-1'],
+    teacherCurrentStage: 2,
   };
-  assert.equal(isStudentLiveViewUnlocked({ ...onlyStage2Params, viewId: 1 }), false);
-  assert.equal(isStudentLiveViewUnlocked({ ...onlyStage2Params, viewId: 2 }), true);
-  assert.equal(isStudentLiveViewUnlocked({ ...onlyStage2Params, viewId: 3 }), false);
+  assert.equal(isStudentLiveViewUnlocked({ ...hd2Params, viewId: 1 }), false);
+  assert.equal(isStudentLiveViewUnlocked({ ...hd2Params, viewId: 2 }), true);
+  assert.equal(isStudentLiveViewUnlocked({ ...hd2Params, viewId: 3 }), false);
+
+  // 5. Stopping Hoạt động 2 stops cleanly at 'waiting'
+  const stoppedHd2 = buildStopSingleActivityState(hd2Session, 'k6-tiet-1');
+  assert.equal(stoppedHd2.activeLiveView, 'waiting');
+  assert.deepEqual(stoppedHd2.unlockedStagesByLesson['k6-tiet-1'], {
+    1: false,
+    2: false,
+    3: false,
+    4: false,
+  });
 });
 
 test('computeArenaRemainingSeconds and formatCountdownMmSs calculate accurate countdown', () => {

@@ -51,10 +51,9 @@ export function resolvePresenterKeyAction(
 
 /**
  * Determines whether a student live room view is unlocked.
- * CRITICAL RULE 1: When the teacher is actively broadcasting a slide image (teacherActiveView === 'slide'),
- * ALL other activities (1, 2, 3, 'hd3-practice', 4) are locked so ONLY the slide is available.
- * CRITICAL RULE 2: Strict pedagogical lock — when Slide ends or during Live class, an activity (1, 2, 3, 4)
- * is ONLY unlocked if unlockedStages[viewId] is explicitly true.
+ * - When teacherActiveView === 'waiting', NO activity is active/unlocked (clean standby state).
+ * - When teacher broadcasts a specific activity ('slide', 'hd1', 'hd2', 'hd3', 'hd3-practice', 'hd4'),
+ *   each activity operates independently without coupling to other activities.
  */
 export function isStudentLiveViewUnlocked(params: {
   viewId: 'slide' | 1 | 2 | 3 | 'hd3-practice' | 4;
@@ -71,6 +70,11 @@ export function isStudentLiveViewUnlocked(params: {
     isPracticeStage3Unlocked,
     unlockedStages,
   } = params;
+
+  // When in standby/waiting state (entering Live room or after ending an activity), all activities stop and remain locked
+  if (teacherActiveView === 'waiting') {
+    return false;
+  }
 
   // When teacher broadcasts slide image, lock all other activities
   if (teacherActiveView === 'slide') {
@@ -288,20 +292,168 @@ export function generateFallbackSlideSvgDataUrl(params: {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
+export type IsolatedLiveActivityId =
+  | 'slide'
+  | 'hd1'
+  | 'hd2'
+  | 'hd3'
+  | 'hd3-practice'
+  | 'hd4';
+
 /**
- * Builds the updated session state when the Teacher clicks "Kết thúc Slide bài giảng":
- * - Automatically closes the Slide presentation (unlockedSlideDeckByLesson[lessonKey] = false)
- * - Exits 'slide' broadcast mode (activeLiveView = 'waiting')
- * - Stops slide auto-advance and explanation video playback
- * - Keeps all activity locks closed ({ 1: false, 2: false, 3: false, 4: false }) so only activities
- *   explicitly unlocked by the Teacher afterwards can be opened by students.
+ * Builds the initial Live session state when the Teacher clicks "Live Tiết X" in TeacherPortal:
+ * - Enters the Live room in standby mode (`activeLiveView: 'waiting'`)
+ * - Does NOT automatically activate or unlock any learning activity (Slide, HĐ 1, HĐ 2, HĐ 3, HĐ 3 Thực hành, HĐ 4 are all locked).
  */
-export function buildEndSlidePresentationState<T extends Record<string, any>>(
+export function buildStartLiveSessionStandbyState<T extends Record<string, any>>(
+  prev: T,
+  params: {
+    grade: 6 | 7 | 8 | 9;
+    period: number;
+    classId: string;
+  }
+): T & Record<string, any> {
+  const { grade, period, classId } = params;
+  const lessonKey = `k${grade}-tiet-${period}`;
+  return {
+    ...prev,
+    isBroadcasting: true,
+    activeGrade: grade,
+    activePeriod: period,
+    activeClassId: classId,
+    activeStage: prev.activeStage || 1,
+    activeLiveView: 'waiting',
+    unlockedSlideDeckByLesson: {
+      ...(prev.unlockedSlideDeckByLesson || {}),
+      [lessonKey]: false,
+    },
+    unlockedPracticeStage3ByLesson: {
+      ...(prev.unlockedPracticeStage3ByLesson || {}),
+      [lessonKey]: false,
+    },
+    unlockedStagesByLesson: {
+      ...(prev.unlockedStagesByLesson || {}),
+      [lessonKey]: {
+        1: false,
+        2: false,
+        3: false,
+        4: false,
+      },
+    },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Builds the state when the Teacher clicks "Phát Live" for a specific isolated activity:
+ * - Activates and unlocks ONLY that single activity (`activity`)
+ * - Strictly locks all other activities so there is zero cross-coupling between activities.
+ */
+export function buildBroadcastSingleActivityState<T extends Record<string, any>>(
+  prev: T,
+  params: {
+    grade: 6 | 7 | 8 | 9;
+    period: number;
+    classId: string;
+    activity: IsolatedLiveActivityId;
+    slideIndex?: number;
+    slideSyncVersion?: number;
+    arenaDurationSec?: number;
+    pushPayload?: any;
+  }
+): T & Record<string, any> {
+  const {
+    grade,
+    period,
+    classId,
+    activity,
+    slideIndex,
+    slideSyncVersion,
+    arenaDurationSec = 300,
+    pushPayload,
+  } = params;
+  const lessonKey = `k${grade}-tiet-${period}`;
+  const nowIso = new Date().toISOString();
+
+  const stageForActivity: 1 | 2 | 3 | 4 =
+    activity === 'hd1'
+      ? 1
+      : activity === 'hd2'
+      ? 2
+      : activity === 'hd3' || activity === 'hd3-practice'
+      ? 3
+      : activity === 'hd4'
+      ? 4
+      : (prev.activeStage as 1 | 2 | 3 | 4) || 1;
+
+  return {
+    ...prev,
+    isBroadcasting: true,
+    activeGrade: grade,
+    activePeriod: period,
+    activeClassId: classId,
+    activeStage: stageForActivity,
+    activeLiveView: activity,
+    unlockedSlideDeckByLesson: {
+      ...(prev.unlockedSlideDeckByLesson || {}),
+      [lessonKey]: activity === 'slide',
+    },
+    unlockedPracticeStage3ByLesson: {
+      ...(prev.unlockedPracticeStage3ByLesson || {}),
+      [lessonKey]: activity === 'hd3-practice',
+    },
+    unlockedStagesByLesson: {
+      ...(prev.unlockedStagesByLesson || {}),
+      [lessonKey]: {
+        1: activity === 'hd1',
+        2: activity === 'hd2',
+        3: activity === 'hd3',
+        4: activity === 'hd4',
+      },
+    },
+    ...(activity === 'slide' && typeof slideIndex === 'number'
+      ? {
+          activeSlideIndexByLesson: {
+            ...(prev.activeSlideIndexByLesson || {}),
+            [lessonKey]: slideIndex,
+          },
+          slideSyncVersionByLesson: {
+            ...(prev.slideSyncVersionByLesson || {}),
+            [lessonKey]: slideSyncVersion ?? Date.now(),
+          },
+        }
+      : {}),
+    ...(activity === 'hd3'
+      ? {
+          arenaCountdownStateByLesson: {
+            ...(prev.arenaCountdownStateByLesson || {}),
+            [lessonKey]: {
+              isRunning: true,
+              durationSec: arenaDurationSec,
+              startedAtIso: nowIso,
+            },
+          },
+        }
+      : {}),
+    ...(pushPayload ? { lastPushNotification: pushPayload } : {}),
+    updatedAt: nowIso,
+  };
+}
+
+/**
+ * Builds the updated session state when the Teacher ends any individual activity or Slide presentation:
+ * - Sets `activeLiveView = 'waiting'` so the session stops cleanly at that exact spot without jumping to any other activity.
+ * - Closes/locks Slide and all activities ({ 1: false, 2: false, 3: false, 4: false }) until the Teacher explicitly starts another activity.
+ * - Stops slide auto-advance, explanation video playback, and arena timer.
+ */
+export function buildStopSingleActivityState<T extends Record<string, any>>(
   prev: T,
   lessonKey: string
-): T {
+): T & Record<string, any> {
   const prevVideo = prev.slideVideoStateByLesson?.[lessonKey];
   const prevAuto = prev.slideAutoAdvanceStateByLesson?.[lessonKey];
+  const prevArena = prev.arenaCountdownStateByLesson?.[lessonKey];
+  const nowIso = new Date().toISOString();
   return {
     ...prev,
     activeLiveView: 'waiting',
@@ -328,7 +480,7 @@ export function buildEndSlidePresentationState<T extends Record<string, any>>(
           [lessonKey]: {
             ...prevVideo,
             isPlaying: false,
-            updatedAt: new Date().toISOString(),
+            updatedAt: nowIso,
           },
         }
       : prev.slideVideoStateByLesson,
@@ -341,8 +493,24 @@ export function buildEndSlidePresentationState<T extends Record<string, any>>(
           },
         }
       : prev.slideAutoAdvanceStateByLesson,
-    updatedAt: new Date().toISOString(),
+    arenaCountdownStateByLesson: prevArena
+      ? {
+          ...(prev.arenaCountdownStateByLesson || {}),
+          [lessonKey]: {
+            ...prevArena,
+            isRunning: false,
+          },
+        }
+      : prev.arenaCountdownStateByLesson,
+    updatedAt: nowIso,
   };
+}
+
+export function buildEndSlidePresentationState<T extends Record<string, any>>(
+  prev: T,
+  lessonKey: string
+): T {
+  return buildStopSingleActivityState(prev, lessonKey);
 }
 
 /**

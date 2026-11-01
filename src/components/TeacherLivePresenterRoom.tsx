@@ -19,6 +19,8 @@ import {
   formatCountdownMmSs,
   isFileStorageSlideUrl,
   buildEndSlidePresentationState,
+  buildBroadcastSingleActivityState,
+  buildStopSingleActivityState,
 } from '../utils/slideAndArenaController';
 import { LiveStudentProgressTracker } from './LiveStudentProgressTracker';
 import { ActivityCompletionVisualizer } from './ActivityCompletionVisualizer';
@@ -53,14 +55,14 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
   const lessonKey = `k${grade}-tiet-${period}`;
   const currentUnlockedMap: Record<1 | 2 | 3 | 4, boolean> =
     liveSession?.unlockedStagesByLesson?.[lessonKey] || {
-      1: true,
+      1: false,
       2: false,
       3: false,
       4: false,
     };
 
   const isSlideUnlocked = Boolean(
-    liveSession?.unlockedSlideDeckByLesson?.[lessonKey] ?? true
+    liveSession?.unlockedSlideDeckByLesson?.[lessonKey] ?? false
   );
   const isPracticeStage3Unlocked = Boolean(
     liveSession?.unlockedPracticeStage3ByLesson?.[lessonKey] ?? false
@@ -109,13 +111,20 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
   const activeStage: 1 | 2 | 3 | 4 = (liveSession?.activeStage as 1 | 2 | 3 | 4) || 1;
   const [activeTab, setActiveTab] = useState<
     'slide' | 'theo-doi-tien-do' | 'hd1' | 'hd2' | 'hd3' | 'hd3-practice' | 'hd4' | 'ket-qua'
-  >(
-    liveSession?.activeLiveView === 'slide'
-      ? 'slide'
-      : liveSession?.activeLiveView === 'hd3-practice'
-      ? 'hd3-practice'
-      : (`hd${activeStage}` as 'hd1' | 'hd2' | 'hd3' | 'hd4')
-  );
+  >(() => {
+    const view = liveSession?.activeLiveView;
+    if (
+      view === 'slide' ||
+      view === 'hd1' ||
+      view === 'hd2' ||
+      view === 'hd3' ||
+      view === 'hd3-practice' ||
+      view === 'hd4'
+    ) {
+      return view;
+    }
+    return 'slide';
+  });
   const [rankingScope, setRankingScope] = useState<'class' | 'grade'>('class');
 
   // Lucky wheel random student selection
@@ -362,42 +371,17 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
       timestampIso: nowIso,
     };
 
-    onUpdateLiveSession((prev) => ({
-      ...prev,
-      isBroadcasting: true,
-      activeGrade: grade,
-      activePeriod: period,
-      activeClassId: classId,
-      activeLiveView: 'slide',
-      unlockedSlideDeckByLesson: {
-        ...(prev.unlockedSlideDeckByLesson || {}),
-        [lessonKey]: true,
-      },
-      // Lock all other activities when broadcasting Slide Image so students only see the slide
-      unlockedStagesByLesson: {
-        ...(prev.unlockedStagesByLesson || {}),
-        [lessonKey]: {
-          1: false,
-          2: false,
-          3: false,
-          4: false,
-        },
-      },
-      unlockedPracticeStage3ByLesson: {
-        ...(prev.unlockedPracticeStage3ByLesson || {}),
-        [lessonKey]: false,
-      },
-      activeSlideIndexByLesson: {
-        ...(prev.activeSlideIndexByLesson || {}),
-        [lessonKey]: slideIdx,
-      },
-      slideSyncVersionByLesson: {
-        ...(prev.slideSyncVersionByLesson || {}),
-        [lessonKey]: syncVer,
-      },
-      lastPushNotification: pushPayload,
-      updatedAt: nowIso,
-    }));
+    onUpdateLiveSession((prev) =>
+      buildBroadcastSingleActivityState(prev, {
+        grade,
+        period,
+        classId,
+        activity: 'slide',
+        slideIndex: slideIdx,
+        slideSyncVersion: syncVer,
+        pushPayload,
+      })
+    );
     fetch('/api/live-session/slide', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -411,29 +395,18 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
         classId,
       }),
     }).catch(() => {});
-    try {
-      if (typeof BroadcastChannel !== 'undefined') {
-        const ch = new BroadcastChannel('cloudplay_realtime_sync');
-        ch.postMessage({
-          type: 'SLIDE_CHANGED',
-          lessonKey,
-          grade,
-          period,
-          classId,
-          slideIndex: slideIdx,
-          slideSyncVersion: syncVer,
-          totalSlides: slidePages.length,
-          activeLiveView: 'slide',
-          timestampIso: nowIso,
-        });
-        ch.close();
-      }
-    } catch {
-      // ignore
-    }
     setActiveTab('slide');
     onShowToast(
-      `📢 Đang phát trực tiếp Slide ${slideIdx + 1}/${Math.max(1, slidePages.length)} sang Lớp ${classId} — Đã tự động khóa các hoạt động khác để học sinh chỉ xem Slide!`
+      `📢 Đang phát trực tiếp Slide ${slideIdx + 1}/${Math.max(1, slidePages.length)} sang Lớp ${classId} — Hoạt động riêng biệt, đã khóa các hoạt động khác!`
+    );
+  };
+
+  // Stop any currently active Live activity or Slide presentation and stay cleanly at the current spot without jumping tabs
+  const handleStopActivityBroadcast = (activityLabel = 'Hoạt động hiện tại') => {
+    setIsAutoAdvancing(false);
+    onUpdateLiveSession((prev) => buildStopSingleActivityState(prev, lessonKey));
+    onShowToast(
+      `⏹️ Đã kết thúc phát Live "${activityLabel}"! Màn hình giữ nguyên tại chỗ và toàn bộ các hoạt động khác vẫn đóng khóa độc lập.`
     );
   };
 
@@ -441,28 +414,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
   const handleEndSlidePresentation = () => {
     setIsAutoAdvancing(false);
     onUpdateLiveSession((prev) => buildEndSlidePresentationState(prev, lessonKey));
-    try {
-      if (typeof BroadcastChannel !== 'undefined') {
-        const ch = new BroadcastChannel('cloudplay_realtime_sync');
-        ch.postMessage({
-          type: 'SLIDE_ENDED',
-          lessonKey,
-          grade,
-          period,
-          classId,
-          timestampIso: new Date().toISOString(),
-        });
-        ch.close();
-      }
-    } catch {
-      // ignore
-    }
     onShowToast(
-      `⏹️ Đã kết thúc Slide bài giảng! Slide trên màn hình Học sinh đã tự động đóng và toàn bộ các hoạt động (HĐ 1, 2, 3, 4) vẫn giữ trạng thái KHÓA nghiêm ngặt — Giáo viên mở khóa hoạt động nào học sinh mới được mở hoạt động đó!`
+      `⏹️ Đã kết thúc Slide bài giảng! Đã dừng tại chỗ và khóa tất cả các hoạt động — Giáo viên bấm Phát Live hoạt động nào thì mới mở riêng hoạt động đó!`
     );
   };
 
-  // Change current slide index and sync with students via monotonic slideSyncVersion and BroadcastChannel
+  // Change current slide index and sync with students via monotonic slideSyncVersion
   const handleChangeSlideIndex = (nextIdx: number) => {
     if (slidePages.length === 0) return;
     const bounded = Math.max(0, Math.min(slidePages.length - 1, nextIdx));
@@ -488,32 +445,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
         lessonKey,
         slideIndex: bounded,
         slideSyncVersion: syncVer,
-        activeLiveView: 'slide',
+        activeLiveView: liveSession?.activeLiveView || 'waiting',
         grade,
         period,
         classId,
       }),
     }).catch(() => {});
-    try {
-      if (typeof BroadcastChannel !== 'undefined') {
-        const ch = new BroadcastChannel('cloudplay_realtime_sync');
-        ch.postMessage({
-          type: 'SLIDE_CHANGED',
-          lessonKey,
-          grade,
-          period,
-          classId,
-          slideIndex: bounded,
-          slideSyncVersion: syncVer,
-          totalSlides: slidePages.length,
-          activeLiveView: 'slide',
-          timestampIso: nowIso,
-        });
-        ch.close();
-      }
-    } catch {
-      // ignore
-    }
   };
 
   // Toggle synchronized Explanation Video accompanying the Slide Image
@@ -686,7 +623,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     );
   };
 
-  // Broadcast Stage 3 Practical Activity to Student Live Room
+  // Broadcast Stage 3 Practical Activity to Student Live Room (strictly isolated from other activities)
   const handleBroadcastPracticeStage3 = () => {
     playStageBroadcastSound();
     const pushPayload = {
@@ -702,36 +639,18 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
       timestampIso: new Date().toISOString(),
     };
 
-    onUpdateLiveSession((prev) => ({
-      ...prev,
-      isBroadcasting: true,
-      activeGrade: grade,
-      activePeriod: period,
-      activeClassId: classId,
-      activeStage: 3,
-      activeLiveView: 'hd3-practice',
-      unlockedPracticeStage3ByLesson: {
-        ...(prev.unlockedPracticeStage3ByLesson || {}),
-        [lessonKey]: true,
-      },
-      unlockedStagesByLesson: {
-        ...prev.unlockedStagesByLesson,
-        [lessonKey]: {
-          ...(prev.unlockedStagesByLesson?.[lessonKey] || {
-            1: true,
-            2: false,
-            3: false,
-            4: false,
-          }),
-          3: true,
-        },
-      },
-      lastPushNotification: pushPayload,
-      updatedAt: new Date().toISOString(),
-    }));
+    onUpdateLiveSession((prev) =>
+      buildBroadcastSingleActivityState(prev, {
+        grade,
+        period,
+        classId,
+        activity: 'hd3-practice',
+        pushPayload,
+      })
+    );
     setActiveTab('hd3-practice');
     onShowToast(
-      `📢 Đang phát trực tiếp Hoạt động 3 (Thực hành) & gửi Push Notification tới Lớp ${classId}!`
+      `📢 Đang phát Live riêng biệt Hoạt động 3 (Thực hành) sang Lớp ${classId} — Các hoạt động khác được giữ khóa độc lập!`
     );
   };
 
@@ -765,7 +684,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
         ...prev.unlockedStagesByLesson,
         [lessonKey]: {
           ...(prev.unlockedStagesByLesson?.[lessonKey] || {
-            1: true,
+            1: false,
             2: false,
             3: false,
             4: false,
@@ -796,7 +715,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     );
   };
 
-  // Broadcast stage switch to student screens (auto-switches student screens to this activity)
+  // Broadcast stage switch to student screens (strictly isolated: only unlocks & broadcasts this single activity)
   const handleBroadcastStage = (stage: 1 | 2 | 3 | 4) => {
     playStageBroadcastSound();
     const stageLabels: Record<number, string> = {
@@ -818,49 +737,24 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
       timestampIso: new Date().toISOString(),
     };
 
-    onUpdateLiveSession((prev) => ({
-      ...prev,
-      isBroadcasting: true,
-      activeGrade: grade,
-      activePeriod: period,
-      activeClassId: classId,
-      activeStage: stage,
-      activeLiveView: `hd${stage}` as 'hd1' | 'hd2' | 'hd3' | 'hd4',
-      // Ensure stage is unlocked when broadcasting
-      unlockedStagesByLesson: {
-        ...prev.unlockedStagesByLesson,
-        [lessonKey]: {
-          ...(prev.unlockedStagesByLesson?.[lessonKey] || {
-            1: true,
-            2: false,
-            3: false,
-            4: false,
-          }),
-          [stage]: true,
-        },
-      },
-      ...(stage === 3
-        ? {
-            arenaCountdownStateByLesson: {
-              ...(prev.arenaCountdownStateByLesson || {}),
-              [lessonKey]: {
-                isRunning: true,
-                durationSec: arenaDurationSec,
-                startedAtIso: new Date().toISOString(),
-              },
-            },
-          }
-        : {}),
-      lastPushNotification: pushPayload,
-      updatedAt: new Date().toISOString(),
-    }));
-    setActiveTab(`hd${stage}` as any);
+    const activityKey = `hd${stage}` as 'hd1' | 'hd2' | 'hd3' | 'hd4';
+    onUpdateLiveSession((prev) =>
+      buildBroadcastSingleActivityState(prev, {
+        grade,
+        period,
+        classId,
+        activity: activityKey,
+        arenaDurationSec,
+        pushPayload,
+      })
+    );
+    setActiveTab(activityKey);
     onShowToast(
       stage === 3
-        ? `📢 Đang phát trực tiếp Đấu trường Luyện tập (HĐ 3) & Kích hoạt Đồng hồ đếm ngược ${formatCountdownMmSs(
+        ? `📢 Đang phát Live riêng biệt Đấu trường Luyện tập (HĐ 3) & Đồng hồ đếm ngược ${formatCountdownMmSs(
             arenaDurationSec
           )} sang Lớp ${classId}!`
-        : `📢 Đang phát trực tiếp Hoạt động ${stage} & Đã phát Push Notification sang Lớp ${classId}!`
+        : `📢 Đang phát Live riêng biệt Hoạt động ${stage} (${stageLabels[stage]}) sang Lớp ${classId} — Không liên đới đến các hoạt động khác!`
     );
   };
 
@@ -1291,7 +1185,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
               Điều khiển Slide &amp; Hoạt động Live
             </span>
             <nav className="flex flex-col gap-2">
-              {/* 0. SLIDE BÀI GIẢNG (ĐỒNG BỘ KHÓA/MỞ GIÁO VIÊN & HỌC SINH) */}
+              {/* 0. SLIDE BÀI GIẢNG (HOẠT ĐỘNG ĐỘC LẬP) */}
               <div
                 className={`p-3 rounded-2xl border transition-all flex flex-col gap-2 ${
                   activeTab === 'slide'
@@ -1300,7 +1194,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 }`}
               >
                 <div
-                  onClick={() => handleBroadcastSlideDeck(currentSlideIndex)}
+                  onClick={() => setActiveTab('slide')}
                   className="flex items-center justify-between cursor-pointer"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
@@ -1320,7 +1214,9 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                         Slide Bài Giảng (PDF/PPTX/HTML)
                       </span>
                       <span className="text-[10px] text-slate-500 truncate">
-                        Slide {currentSlideIndex + 1}/{slidePages.length} • Đồng bộ HS
+                        {slidePages.length > 0
+                          ? `Slide ${safeCurrentSlideIndex + 1}/${slidePages.length} • Hoạt động riêng`
+                          : 'Chưa nạp Slide • Hoạt động riêng'}
                       </span>
                     </div>
                   </div>
@@ -1333,34 +1229,47 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 </div>
 
                 <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-xs gap-1 flex-wrap">
-                  <span className="text-[11px] font-semibold text-slate-600">
-                    {isSlideUnlocked ? '🔓 Đã mở Slide cho HS' : '🔒 Đang khóa Slide'}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleBroadcastSlideDeck(safeCurrentSlideIndex);
+                    }}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${
+                      liveSession?.activeLiveView === 'slide'
+                        ? 'bg-orange-600 text-white shadow-2xs'
+                        : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
+                    }`}
+                  >
+                    📢 Phát Live Slide
+                  </button>
                   <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEndSlidePresentation();
-                      }}
-                      className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-900 text-white hover:bg-rose-700 cursor-pointer transition-colors"
-                      title="Kết thúc trình chiếu Slide bài giảng, đóng Slide ở máy HS và giữ nguyên khóa các hoạt động"
-                    >
-                      ⏹️ Kết thúc Slide
-                    </button>
+                    {liveSession?.activeLiveView === 'slide' && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEndSlidePresentation();
+                        }}
+                        className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-900 text-white hover:bg-rose-700 cursor-pointer transition-colors"
+                        title="Kết thúc trình chiếu Slide bài giảng và dừng ngay tại chỗ"
+                      >
+                        ⏹️ Kết thúc
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleToggleSlideLock();
                       }}
-                      className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${
+                      className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
                         isSlideUnlocked
                           ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                          : 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
                     >
-                      {isSlideUnlocked ? 'Khóa lại' : 'Mở khóa'}
+                      {isSlideUnlocked ? '🔓 Đang mở' : '🔒 Đang khóa'}
                     </button>
                   </div>
                 </div>
@@ -1395,21 +1304,21 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
 
               {[
                 {
-                  id: 'hd1',
+                  id: 'hd1' as const,
                   stage: 1 as const,
                   label: 'Khởi động (HĐ 1)',
                   icon: 'psychology',
                   desc: 'Tình huống & Khơi gợi (1.0đ)',
                 },
                 {
-                  id: 'hd2',
+                  id: 'hd2' as const,
                   stage: 2 as const,
                   label: 'Khám phá (HĐ 2)',
                   icon: 'menu_book',
                   desc: 'Phiếu học tập tương tác (4.0đ)',
                 },
                 {
-                  id: 'hd3',
+                  id: 'hd3' as const,
                   stage: 3 as const,
                   label: 'Luyện tập (HĐ 3)',
                   icon: 'extension',
@@ -1417,12 +1326,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 },
               ].map((item) => {
                 const isSelected = activeTab === item.id;
-                const isBroadcastingThis =
-                  item.stage &&
-                  activeStage === item.stage &&
-                  liveSession?.activeLiveView !== 'slide' &&
-                  liveSession?.activeLiveView !== 'hd3-practice';
-                const isUnlocked = item.stage ? currentUnlockedMap[item.stage] : true;
+                const isBroadcastingThis = Boolean(
+                  liveSession?.isBroadcasting && liveSession?.activeLiveView === item.id
+                );
+                const isUnlocked = Boolean(currentUnlockedMap[item.stage]);
 
                 return (
                   <div
@@ -1434,10 +1341,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     }`}
                   >
                     <div
-                      onClick={() => {
-                        setActiveTab(item.id as any);
-                        if (item.stage) handleBroadcastStage(item.stage);
-                      }}
+                      onClick={() => setActiveTab(item.id)}
                       className="flex items-center justify-between cursor-pointer"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
@@ -1469,32 +1373,57 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       )}
                     </div>
 
-                    {item.stage && (
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-xs">
-                        <span className="text-[11px] font-semibold text-slate-600">
-                          {isUnlocked ? '🔓 Đã mở cho HS' : '🔒 Đang khóa với HS'}
-                        </span>
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-xs gap-1 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleBroadcastStage(item.stage);
+                        }}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${
+                          isBroadcastingThis
+                            ? 'bg-orange-600 text-white shadow-2xs'
+                            : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
+                        }`}
+                      >
+                        📢 Phát Live HĐ {item.stage}
+                      </button>
+
+                      <div className="flex items-center gap-1">
+                        {isBroadcastingThis && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStopActivityBroadcast(item.label);
+                            }}
+                            className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-900 text-white hover:bg-rose-700 cursor-pointer transition-colors"
+                            title={`Kết thúc phát Live ${item.label} và dừng ngay tại chỗ`}
+                          >
+                            ⏹️ Kết thúc
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleToggleStageLock(item.stage!);
+                            handleToggleStageLock(item.stage);
                           }}
-                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${
+                          className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
                             isUnlocked
                               ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                              : 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                           }`}
                         >
-                          {isUnlocked ? 'Khóa lại' : 'Mở khóa'}
+                          {isUnlocked ? '🔓 Đang mở' : '🔒 Đang khóa'}
                         </button>
                       </div>
-                    )}
+                    </div>
                   </div>
                 );
               })}
 
-              {/* HOẠT ĐỘNG 3 (TIẾT THỰC HÀNH) — KHÓA/MỞ ĐỒNG BỘ VỚI PHÒNG LIVE HỌC SINH */}
+              {/* HOẠT ĐỘNG 3 (TIẾT THỰC HÀNH) — HOẠT ĐỘNG ĐỘC LẬP */}
               <div
                 className={`p-3 rounded-2xl border transition-all flex flex-col gap-2 ${
                   activeTab === 'hd3-practice'
@@ -1503,7 +1432,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 }`}
               >
                 <div
-                  onClick={handleBroadcastPracticeStage3}
+                  onClick={() => setActiveTab('hd3-practice')}
                   className="flex items-center justify-between cursor-pointer"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
@@ -1535,38 +1464,63 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                   )}
                 </div>
 
-                <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-xs">
-                  <span className="text-[11px] font-semibold text-slate-600">
-                    {isPracticeStage3Unlocked ? '🔓 Đã mở Thực hành' : '🔒 Khóa Thực hành'}
-                  </span>
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-xs gap-1 flex-wrap">
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleTogglePracticeStage3Lock();
+                      handleBroadcastPracticeStage3();
                     }}
                     className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${
-                      isPracticeStage3Unlocked
-                        ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                        : 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                      liveSession?.activeLiveView === 'hd3-practice'
+                        ? 'bg-orange-600 text-white shadow-2xs'
+                        : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
                     }`}
                   >
-                    {isPracticeStage3Unlocked ? 'Khóa lại' : 'Mở khóa'}
+                    📢 Phát Live Thực hành
                   </button>
+                  <div className="flex items-center gap-1">
+                    {liveSession?.activeLiveView === 'hd3-practice' && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStopActivityBroadcast('HĐ 3 (Tiết Thực hành)');
+                        }}
+                        className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-900 text-white hover:bg-rose-700 cursor-pointer transition-colors"
+                      >
+                        ⏹️ Kết thúc
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleTogglePracticeStage3Lock();
+                      }}
+                      className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
+                        isPracticeStage3Unlocked
+                          ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {isPracticeStage3Unlocked ? '🔓 Đang mở' : '🔒 Đang khóa'}
+                    </button>
+                  </div>
                 </div>
               </div>
 
               {/* HOẠT ĐỘNG 4 & KẾT QUẢ */}
               {[
                 {
-                  id: 'hd4',
+                  id: 'hd4' as const,
                   stage: 4 as const,
                   label: 'Vận dụng (HĐ 4)',
                   icon: 'assignment_turned_in',
                   desc: 'Bài tập thực tiễn (2.0đ)',
                 },
                 {
-                  id: 'ket-qua',
+                  id: 'ket-qua' as const,
                   stage: null,
                   label: 'Tổng hợp Kết quả & Xếp hạng',
                   icon: 'leaderboard',
@@ -1574,12 +1528,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 },
               ].map((item) => {
                 const isSelected = activeTab === item.id;
-                const isBroadcastingThis =
+                const isBroadcastingThis = Boolean(
                   item.stage &&
-                  activeStage === item.stage &&
-                  liveSession?.activeLiveView !== 'slide' &&
-                  liveSession?.activeLiveView !== 'hd3-practice';
-                const isUnlocked = item.stage ? currentUnlockedMap[item.stage] : true;
+                    liveSession?.isBroadcasting &&
+                    liveSession?.activeLiveView === item.id
+                );
+                const isUnlocked = item.stage ? Boolean(currentUnlockedMap[item.stage]) : true;
 
                 return (
                   <div
@@ -1591,10 +1545,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     }`}
                   >
                     <div
-                      onClick={() => {
-                        setActiveTab(item.id as any);
-                        if (item.stage) handleBroadcastStage(item.stage);
-                      }}
+                      onClick={() => setActiveTab(item.id)}
                       className="flex items-center justify-between cursor-pointer"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
@@ -1627,24 +1578,50 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     </div>
 
                     {item.stage && (
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-xs">
-                        <span className="text-[11px] font-semibold text-slate-600">
-                          {isUnlocked ? '🔓 Đã mở cho HS' : '🔒 Đang khóa với HS'}
-                        </span>
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-xs gap-1 flex-wrap">
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleToggleStageLock(item.stage!);
+                            handleBroadcastStage(item.stage!);
                           }}
                           className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${
-                            isUnlocked
-                              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                              : 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                            isBroadcastingThis
+                              ? 'bg-orange-600 text-white shadow-2xs'
+                              : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
                           }`}
                         >
-                          {isUnlocked ? 'Khóa lại' : 'Mở khóa'}
+                          📢 Phát Live HĐ {item.stage}
                         </button>
+
+                        <div className="flex items-center gap-1">
+                          {isBroadcastingThis && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStopActivityBroadcast(item.label);
+                              }}
+                              className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-900 text-white hover:bg-rose-700 cursor-pointer transition-colors"
+                            >
+                              ⏹️ Kết thúc
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleStageLock(item.stage!);
+                            }}
+                            className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
+                              isUnlocked
+                                ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            }`}
+                          >
+                            {isUnlocked ? '🔓 Đang mở' : '🔒 Đang khóa'}
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1713,27 +1690,69 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
           </div>
 
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            {/* Quick Broadcaster */}
+            {/* Quick Broadcaster (Individual isolated activity broadcasters) */}
             <div className="flex items-center gap-1 p-1 rounded-full bg-slate-100 border border-slate-200 flex-wrap">
               <button
                 type="button"
-                onClick={() => handleBroadcastSlideDeck(currentSlideIndex)}
+                onClick={() => handleBroadcastSlideDeck(safeCurrentSlideIndex)}
                 className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
                   liveSession?.activeLiveView === 'slide'
                     ? 'bg-orange-500 text-white shadow-2xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Slide Bài giảng
+                📢 Phát Slide
+              </button>
+              {([1, 2, 3] as const).map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => handleBroadcastStage(st)}
+                  className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                    liveSession?.activeLiveView === `hd${st}`
+                      ? 'bg-orange-500 text-white shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  📢 Phát HĐ {st}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={handleBroadcastPracticeStage3}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                  liveSession?.activeLiveView === 'hd3-practice'
+                    ? 'bg-orange-500 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                📢 Phát HĐ 3 (TH)
               </button>
               <button
                 type="button"
-                onClick={handleEndSlidePresentation}
-                className="px-3 py-1 rounded-full text-xs font-bold bg-slate-900 hover:bg-rose-700 text-white transition-all cursor-pointer"
-                title="Kết thúc Slide bài giảng: Tự động đóng Slide trên máy HS và giữ nguyên khóa các hoạt động"
+                onClick={() => handleBroadcastStage(4)}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                  liveSession?.activeLiveView === 'hd4'
+                    ? 'bg-orange-500 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
               >
-                ⏹️ Kết thúc Slide bài giảng
+                📢 Phát HĐ 4
               </button>
+              {liveSession?.activeLiveView && liveSession.activeLiveView !== 'waiting' && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    liveSession?.activeLiveView === 'slide'
+                      ? handleEndSlidePresentation()
+                      : handleStopActivityBroadcast('Hoạt động đang phát')
+                  }
+                  className="px-3 py-1 rounded-full text-xs font-bold bg-slate-900 hover:bg-rose-700 text-white transition-all cursor-pointer"
+                  title="Kết thúc hoạt động đang phát và dừng ngay tại chỗ"
+                >
+                  ⏹️ Kết thúc hoạt động đang phát
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setActiveTab('theo-doi-tien-do')}
@@ -1746,48 +1765,6 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
               >
                 <span className="material-symbols-outlined text-[15px]">monitoring</span>
                 <span>Tiến độ HS</span>
-              </button>
-              {([1, 2, 3] as const).map((st) => (
-                <button
-                  key={st}
-                  type="button"
-                  onClick={() => handleBroadcastStage(st)}
-                  className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                    activeStage === st &&
-                    liveSession?.activeLiveView !== 'slide' &&
-                    liveSession?.activeLiveView !== 'waiting' &&
-                    liveSession?.activeLiveView !== 'hd3-practice'
-                      ? 'bg-orange-500 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Phát HĐ {st}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={handleBroadcastPracticeStage3}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                  liveSession?.activeLiveView === 'hd3-practice'
-                    ? 'bg-orange-500 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                HĐ 3 (Thực hành)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleBroadcastStage(4)}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                  activeStage === 4 &&
-                  liveSession?.activeLiveView !== 'slide' &&
-                  liveSession?.activeLiveView !== 'waiting' &&
-                  liveSession?.activeLiveView !== 'hd3-practice'
-                    ? 'bg-orange-500 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Phát HĐ 4
               </button>
             </div>
 
@@ -2606,15 +2583,38 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleStageLock(1)}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer ${
+                        currentUnlockedMap[1]
+                          ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                          : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                      }`}
+                    >
+                      {currentUnlockedMap[1] ? '🔒 Khóa HĐ 1' : '🔓 Mở khóa HĐ 1'}
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => handleBroadcastStage(1)}
                       className="px-4 py-2 rounded-full bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
                     >
                       <span className="material-symbols-outlined text-[16px]">cast</span>
-                      <span>📢 Phát HĐ 1 sang màn hình HS</span>
+                      <span>📢 Phát Live HĐ 1 sang HS</span>
                     </button>
+
+                    {liveSession?.activeLiveView === 'hd1' && (
+                      <button
+                        type="button"
+                        onClick={() => handleStopActivityBroadcast('Hoạt động 1: Khởi động')}
+                        className="px-4 py-2 rounded-full bg-slate-900 hover:bg-rose-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">stop_circle</span>
+                        <span>⏹️ Kết thúc HĐ 1</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -2668,7 +2668,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <button
                       type="button"
                       onClick={() => handleToggleStageLock(2)}
@@ -2687,8 +2687,19 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       className="px-4 py-2 rounded-full bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
                     >
                       <span className="material-symbols-outlined text-[16px]">cast</span>
-                      <span>📢 Phát HĐ 2 sang màn hình HS</span>
+                      <span>📢 Phát Live HĐ 2 sang HS</span>
                     </button>
+
+                    {liveSession?.activeLiveView === 'hd2' && (
+                      <button
+                        type="button"
+                        onClick={() => handleStopActivityBroadcast('Hoạt động 2: Khám phá')}
+                        className="px-4 py-2 rounded-full bg-slate-900 hover:bg-rose-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">stop_circle</span>
+                        <span>⏹️ Kết thúc HĐ 2</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -2748,8 +2759,19 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       className="px-4 py-2 rounded-full bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
                     >
                       <span className="material-symbols-outlined text-[16px]">cast</span>
-                      <span>📢 Phát Đấu trường HĐ 3 sang HS</span>
+                      <span>📢 Phát Live HĐ 3 sang HS</span>
                     </button>
+
+                    {liveSession?.activeLiveView === 'hd3' && (
+                      <button
+                        type="button"
+                        onClick={() => handleStopActivityBroadcast('Hoạt động 3: Luyện tập')}
+                        className="px-4 py-2 rounded-full bg-slate-900 hover:bg-rose-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">stop_circle</span>
+                        <span>⏹️ Kết thúc HĐ 3</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -2908,8 +2930,19 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       className="px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
                     >
                       <span className="material-symbols-outlined text-[16px]">cast</span>
-                      <span>📢 Phát HĐ 3 (Thực hành) sang màn hình HS</span>
+                      <span>📢 Phát Live HĐ 3 (Thực hành) sang HS</span>
                     </button>
+
+                    {liveSession?.activeLiveView === 'hd3-practice' && (
+                      <button
+                        type="button"
+                        onClick={() => handleStopActivityBroadcast('HĐ 3 (Tiết Thực hành)')}
+                        className="px-4 py-2 rounded-full bg-slate-900 hover:bg-rose-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">stop_circle</span>
+                        <span>⏹️ Kết thúc HĐ 3 (Thực hành)</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -2972,7 +3005,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <button
                       type="button"
                       onClick={() => handleToggleStageLock(4)}
@@ -2991,8 +3024,19 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       className="px-4 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
                     >
                       <span className="material-symbols-outlined text-[16px]">cast</span>
-                      <span>📢 Phát HĐ 4 sang màn hình HS</span>
+                      <span>📢 Phát Live HĐ 4 sang HS</span>
                     </button>
+
+                    {liveSession?.activeLiveView === 'hd4' && (
+                      <button
+                        type="button"
+                        onClick={() => handleStopActivityBroadcast('Hoạt động 4: Vận dụng')}
+                        className="px-4 py-2 rounded-full bg-slate-900 hover:bg-rose-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">stop_circle</span>
+                        <span>⏹️ Kết thúc HĐ 4</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 

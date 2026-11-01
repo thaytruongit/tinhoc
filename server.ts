@@ -605,10 +605,12 @@ async function startServer() {
   ([6, 7, 8, 9] as const).forEach((g) => {
     for (let p = 1; p <= 29; p++) {
       const key = `k${g}-tiet-${p}`;
-      defaultUnlockedStagesByLesson[key] =
-        p === 1
-          ? { 1: true, 2: true, 3: true, 4: true }
-          : { 1: true, 2: true, 3: false, 4: false };
+      defaultUnlockedStagesByLesson[key] = {
+        1: false,
+        2: false,
+        3: false,
+        4: false,
+      };
       defaultVerifiedLessonsMap[key] = true;
     }
   });
@@ -618,6 +620,7 @@ async function startServer() {
     activeGrade: 6,
     activePeriod: 1,
     activeStage: 1,
+    activeLiveView: 'waiting',
     activeClassId: '6A10',
     unlockedStagesByLesson: defaultUnlockedStagesByLesson,
     lectureSlidesByLesson: {},

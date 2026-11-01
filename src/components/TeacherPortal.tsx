@@ -46,6 +46,7 @@ import {
 import {
   resolvePresenterKeyAction,
   buildEndSlidePresentationState,
+  buildStartLiveSessionStandbyState,
 } from '../utils/slideAndArenaController';
 import { LiveStudentProgressTracker } from './LiveStudentProgressTracker';
 
@@ -1411,38 +1412,22 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const handleBroadcastLivePeriod = (
     grade: 6 | 7 | 8 | 9,
     periodNum: number,
-    unlockAll = false,
+    _unlockAll = false,
     targetClassOverride?: string
   ) => {
     const targetClass = targetClassOverride || selectedClass;
-    const key = `k${grade}-tiet-${periodNum}`;
     if (onUpdateLiveSession) {
-      onUpdateLiveSession((prev) => {
-        const currentStages = prev.unlockedStagesByLesson?.[key] || {
-          1: true,
-          2: false,
-          3: false,
-          4: false,
-        };
-        return {
-          ...prev,
-          isBroadcasting: true,
-          activeGrade: grade,
-          activePeriod: periodNum,
-          activeStage: unlockAll ? 2 : 1,
-          activeClassId: targetClass,
-          unlockedStagesByLesson: {
-            ...(prev.unlockedStagesByLesson || {}),
-            [key]: unlockAll
-              ? { 1: true, 2: true, 3: true, 4: true }
-              : { ...currentStages, 1: true, 2: true },
-          },
-        };
-      });
+      onUpdateLiveSession((prev) =>
+        buildStartLiveSessionStandbyState(prev, {
+          grade,
+          period: periodNum,
+          classId: targetClass,
+        })
+      );
     }
     setIsLivePresenterOpen(true);
     onShowToast(
-      `🔴 Đã phát Live trực tiếp Khối ${grade} • Tiết ${periodNum} cho đúng Lớp ${targetClass}!`
+      `🔴 Đã mở Phòng Live Khối ${grade} • Tiết ${periodNum} (Lớp ${targetClass}) ở trạng thái chờ — Bấm "📢 Phát Live" ở hoạt động nào để kích hoạt riêng hoạt động đó!`
     );
   };
 

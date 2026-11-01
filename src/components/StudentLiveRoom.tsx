@@ -188,9 +188,8 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
         }
       } else if (data.type === 'SLIDE_ENDED') {
         if (!data.lessonKey || data.lessonKey === lessonKey) {
-          setActiveView(1);
           onShowToast(
-            '⏹️ Giáo viên đã kết thúc trình chiếu Slide bài giảng — Các hoạt động đang khóa, chờ Giáo viên mở khóa hoạt động tiếp theo!'
+            '⏹️ Giáo viên đã kết thúc hoạt động đang phát — Màn hình dừng tại chỗ và chờ Giáo viên phát hoạt động tiếp theo!'
           );
         }
       } else if (data.type === 'LIVE_SESSION_ENDED') {
@@ -209,8 +208,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
         }
         if (data.session.activeLiveView === 'slide') {
           setActiveView('slide');
-        } else if (data.session.activeLiveView === 'waiting') {
-          setActiveView(1);
         }
       }
     };
@@ -289,15 +286,12 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     }
   };
 
-  // Force activeView to 'slide' whenever Teacher broadcasts Slide Image, or close 'slide' when Teacher ends Slide
+  // Force activeView to 'slide' ONLY when Teacher explicitly broadcasts Slide Image
   useEffect(() => {
     if (teacherActiveView === 'slide' && activeView !== 'slide') {
       setActiveView('slide');
-    } else if (teacherActiveView !== 'slide' && !isSlideDeckUnlocked && activeView === 'slide') {
-      const firstOpen = ([1, 2, 3, 4] as const).find((s) => Boolean(effectiveUnlockedStages[s]));
-      setActiveView(firstOpen || 1);
     }
-  }, [teacherActiveView, isSlideDeckUnlocked, activeView, effectiveUnlockedStages]);
+  }, [teacherActiveView, activeView]);
 
   // Track real-time Top Performers in Class
   const rankedLiveStudents = [...students]
@@ -385,8 +379,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     }
   };
 
-  // Track last teacher broadcast view/stage so whenever Teacher switches activity, Student automatically follows
-  const lastTeacherStageRef = useRef<number>(teacherCurrentStage);
+  // Track last teacher broadcast view so whenever Teacher switches to an isolated activity, Student follows cleanly without jumping when stopped
   const lastTeacherViewRef = useRef<string | undefined>(teacherActiveView);
 
   useEffect(() => {
@@ -401,10 +394,9 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
         return;
       }
       if (teacherActiveView === 'waiting') {
-        setActiveView(1);
         playStageBroadcastSound();
         onShowToast(
-          '⏹️ Giáo viên đã kết thúc trình chiếu Slide Bài Giảng — Các hoạt động vẫn khóa nghiêm ngặt, chờ Giáo viên mở khóa hoạt động tiếp theo!'
+          '⏹️ Giáo viên đã kết thúc hoạt động đang phát — Màn hình dừng tại chỗ và chờ Giáo viên phát hoạt động tiếp theo!'
         );
         return;
       }
@@ -424,7 +416,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
       };
       const mapped = stageMap[teacherActiveView];
       if (mapped) {
-        lastTeacherStageRef.current = mapped;
         setActiveView(mapped);
         playStageBroadcastSound();
         onShowToast(
@@ -433,18 +424,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
       }
     }
   }, [teacherActiveView]);
-
-  useEffect(() => {
-    const incomingStage = liveSession?.activeStage;
-    if (incomingStage && incomingStage !== lastTeacherStageRef.current) {
-      lastTeacherStageRef.current = incomingStage;
-      setActiveView(incomingStage);
-      playStageBroadcastSound();
-      onShowToast(
-        `📢 Giáo viên vừa phát trực tiếp Hoạt động ${incomingStage} — Màn hình của em đã tự động chuyển sang Hoạt động ${incomingStage}!`
-      );
-    }
-  }, [liveSession?.activeStage]);
 
   // When Teacher exits the live room or ends broadcast, automatically close student live room
   useEffect(() => {
@@ -594,10 +573,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                 const isTeacherBroadcastingThis =
                   (item.id === 'slide' && teacherActiveView === 'slide') ||
                   (item.id === 'hd3-practice' && teacherActiveView === 'hd3-practice') ||
-                  (typeof item.id === 'number' &&
-                    teacherCurrentStage === item.id &&
-                    teacherActiveView !== 'slide' &&
-                    teacherActiveView !== 'hd3-practice');
+                  (typeof item.id === 'number' && teacherActiveView === `hd${item.id}`);
                 const isDone = Boolean(completedStages[String(item.id)]);
 
                 return (
@@ -745,7 +721,15 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                   ? 'Slide Bài Giảng'
                   : teacherActiveView === 'hd3-practice'
                   ? 'HĐ 3 Thực Hành'
-                  : `HĐ ${teacherCurrentStage}`}
+                  : teacherActiveView === 'hd1'
+                  ? 'HĐ 1'
+                  : teacherActiveView === 'hd2'
+                  ? 'HĐ 2'
+                  : teacherActiveView === 'hd3'
+                  ? 'HĐ 3'
+                  : teacherActiveView === 'hd4'
+                  ? 'HĐ 4'
+                  : 'Đang chờ GV phát'}
                 )
               </span>
             </div>
