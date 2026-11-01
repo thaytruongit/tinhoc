@@ -935,6 +935,8 @@ export interface LectureSlidePage {
   bulletPoints: string[];
   highlightNote?: string;
   imageUrl?: string;
+  htmlContent?: string;
+  htmlEmbedUrl?: string;
   videoUrl?: string;
   videoTitle?: string;
   storageFileId?: string;
@@ -946,10 +948,12 @@ export interface LectureSlideDeck {
   grade: 6 | 7 | 8 | 9;
   period: number;
   fileName: string;
-  fileType: 'pdf' | 'pptx';
+  fileType: 'pdf' | 'pptx' | 'html';
   fileSize: string;
   uploadedAt: string;
   pdfDataUrl?: string;
+  htmlContent?: string;
+  htmlEmbedUrl?: string;
   storageBucket?: string;
   totalCompressedKb?: number;
   defaultVideoUrl?: string;
@@ -1056,6 +1060,39 @@ export interface LiveClassroomSession {
     period?: number;
     timestampIso: string;
   } | null;
+  lastStudentStageCompletion?: {
+    id: string;
+    studentId: string;
+    studentName: string;
+    stationNumber: string;
+    classId: string;
+    grade: number;
+    period: number;
+    lessonTitle: string;
+    stage: 1 | 2 | 3 | 4 | 'hd3-practice';
+    stageLabel: string;
+    score?: number;
+    xpEarned: number;
+    summary?: string;
+    timestampIso: string;
+  } | null;
+  recentStageCompletions?: {
+    id: string;
+    studentId: string;
+    studentName: string;
+    stationNumber: string;
+    classId: string;
+    grade: number;
+    period: number;
+    lessonTitle: string;
+    stage: 1 | 2 | 3 | 4 | 'hd3-practice';
+    stageLabel: string;
+    score?: number;
+    xpEarned: number;
+    summary?: string;
+    timestampIso: string;
+  }[];
+  completedStagesByStudent?: Record<string, (1 | 2 | 3 | 4 | 'hd3-practice')[]>;
   updatedAt: string;
 }
 

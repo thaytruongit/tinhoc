@@ -37,7 +37,6 @@ import {
   getArenaCountdownVisualState,
   generateFallbackSlideSvgDataUrl,
 } from '../utils/slideAndArenaController';
-import { VirtualWhiteboardPanel } from './VirtualWhiteboardPanel';
 
 interface StudentLiveRoomProps {
   currentStudent: StudentRosterItem;
@@ -185,6 +184,13 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
             '⏹️ Giáo viên đã kết thúc trình chiếu Slide bài giảng — Các hoạt động đang khóa, chờ Giáo viên mở khóa hoạt động tiếp theo!'
           );
         }
+      } else if (data.type === 'LIVE_SESSION_ENDED') {
+        if (!data.classId || data.classId === currentStudent.classId) {
+          onShowToast(
+            '🔔 Giáo viên đã kết thúc & thoát phiên Live! Phiên học trực tiếp của lớp đã đóng lại, em có thể tiếp tục tự luyện tập.'
+          );
+          onExitLiveRoom();
+        }
       } else if (data.type === 'LIVE_SESSION_UPDATED' && data.session) {
         const nextIdx = data.session.activeSlideIndexByLesson?.[lessonKey];
         if (typeof nextIdx === 'number') {
@@ -200,7 +206,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     return () => {
       ch.close();
     };
-  }, [lessonKey, onShowToast]);
+  }, [lessonKey, onShowToast, onExitLiveRoom, currentStudent.classId]);
 
   // Synchronized lock states for Slide Deck and Stage 3 Practical Activity
   const isSlideDeckUnlocked =
@@ -210,8 +216,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
   const isPracticeStage3Unlocked = Boolean(
     liveSession?.unlockedPracticeStage3ByLesson?.[lessonKey]
   );
-  const whiteboardState = liveSession?.whiteboardByLesson?.[lessonKey];
-  const isWhiteboardOpen = Boolean(whiteboardState?.isOpen || teacherActiveView === 'whiteboard');
 
   // Synchronized Explanation Video state accompanying Slide Image
   const slideVideoState = liveSession?.slideVideoStateByLesson?.[lessonKey];
@@ -905,21 +909,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
             )}
           </div>
 
-          {/* SYNCHRONIZED REAL-TIME VIRTUAL WHITEBOARD FROM TEACHER */}
-          {isWhiteboardOpen && (
-            <VirtualWhiteboardPanel
-              lessonKey={lessonKey}
-              lessonTitle={periodSpec.lessonTitle}
-              grade={periodSpec.grade}
-              period={periodSpec.period}
-              classId={currentStudent.classId}
-              whiteboardState={whiteboardState}
-              slideBackgroundUrl={activeSlideImageSrc}
-              readOnly={true}
-              onShowToast={onShowToast}
-            />
-          )}
-
           {/* GLOBAL REAL-TIME PRACTICE ARENA COUNTDOWN CLOCK BAR WHEN HOẠT ĐỘNG 3 IS UNLOCKED */}
           {isArenaStage3Unlocked && teacherActiveView !== 'slide' && (
             <div className="rounded-2xl bg-gradient-to-r from-purple-950 via-indigo-950 to-slate-900 text-white p-4 shadow-md border border-purple-400/30 flex flex-col gap-2.5">
@@ -1015,11 +1004,9 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    if (activePushAlert.stage && activePushAlert.stage !== 'whiteboard') {
-                      setActiveView(activePushAlert.stage);
+                    if (activePushAlert.stage) {
+                      setActiveView(activePushAlert.stage as any);
                       onShowToast(`🚀 Đã chuyển sang ${activePushAlert.stageLabel}!`);
-                    } else if (activePushAlert.stage === 'whiteboard') {
-                      onShowToast('🎨 Đang hiển thị Bảng trắng ảo từ Giáo viên!');
                     }
                     setActivePushAlert(null);
                   }}
@@ -1174,15 +1161,39 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                           </span>
                         </div>
                         <div className="w-full rounded-3xl overflow-hidden border-2 border-slate-200 shadow-xl bg-slate-950 flex items-center justify-center">
-                          <img
-                            src={activeSlideImageSrc}
-                            alt={`Slide ${safeSlideIdx + 1}: ${
-                              activeSlide?.title || periodSpec.lessonTitle
-                            }`}
-                            className={`w-full object-contain ${
-                              isFullscreen ? 'max-h-[75vh]' : 'max-h-[540px]'
-                            }`}
-                          />
+                          {activeSlide?.htmlContent || uploadedDeck?.htmlContent ? (
+                            <iframe
+                              srcDoc={activeSlide?.htmlContent || uploadedDeck?.htmlContent}
+                              title={`HTML Slide ${safeSlideIdx + 1}: ${
+                                activeSlide?.title || periodSpec.lessonTitle
+                              }`}
+                              sandbox="allow-scripts allow-forms"
+                              className={`w-full border-0 bg-slate-950 ${
+                                isFullscreen ? 'h-[75vh]' : 'h-[540px]'
+                              }`}
+                            />
+                          ) : activeSlide?.htmlEmbedUrl || uploadedDeck?.htmlEmbedUrl ? (
+                            <iframe
+                              src={activeSlide?.htmlEmbedUrl || uploadedDeck?.htmlEmbedUrl}
+                              title={`Web Slide URL ${safeSlideIdx + 1}: ${
+                                activeSlide?.title || periodSpec.lessonTitle
+                              }`}
+                              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                              className={`w-full border-0 bg-white ${
+                                isFullscreen ? 'h-[75vh]' : 'h-[540px]'
+                              }`}
+                            />
+                          ) : (
+                            <img
+                              src={activeSlideImageSrc}
+                              alt={`Slide ${safeSlideIdx + 1}: ${
+                                activeSlide?.title || periodSpec.lessonTitle
+                              }`}
+                              className={`w-full object-contain ${
+                                isFullscreen ? 'max-h-[75vh]' : 'max-h-[540px]'
+                              }`}
+                            />
+                          )}
                         </div>
                         {teacherActiveView !== 'slide' && (
                           <div className="flex flex-wrap items-center justify-between gap-3 pt-2">

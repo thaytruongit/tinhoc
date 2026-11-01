@@ -11,6 +11,7 @@ import {
   estimateBase64Bytes,
   isFileStorageSlideUrl,
 } from '../utils/slideAndArenaController';
+import { buildInteractiveHtmlSlideTemplate } from '../utils/realtimeProgressAnalytics';
 
 export const PRESET_EXPLANATION_VIDEOS = [
   {
@@ -133,8 +134,11 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isExtractingAi, setIsExtractingAi] = useState<boolean>(false);
   const [previewSlideIdx, setPreviewSlideIdx] = useState<number>(0);
-  const [viewMode, setViewMode] = useState<'slides' | 'raw-pdf'>('slides');
+  const [viewMode, setViewMode] = useState<'slides' | 'raw-pdf' | 'html-web'>('slides');
   const [customVideoUrlInput, setCustomVideoUrlInput] = useState<string>('');
+  const [showHtmlEmbedPanel, setShowHtmlEmbedPanel] = useState<boolean>(true);
+  const [htmlSlideCodeInput, setHtmlSlideCodeInput] = useState<string>('');
+  const [htmlSlideUrlInput, setHtmlSlideUrlInput] = useState<string>('');
   const [storageStats, setStorageStats] = useState<{
     fileCount: number;
     usedStorageMb: number;
@@ -649,18 +653,100 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
     }
   };
 
+  const handleEmbedHtmlToDeck = (
+    htmlCode?: string,
+    embedUrl?: string,
+    sourceFileName?: string
+  ) => {
+    const cleanHtml = htmlCode?.trim();
+    const cleanUrl = embedUrl?.trim();
+    if (!cleanHtml && !cleanUrl) {
+      onShowToast('⚠️ Vui lòng nhập mã HTML hoặc đường dẫn URL Slide Web để nhúng!');
+      return;
+    }
+
+    const updatedSlides: LectureSlidePage[] = activeSlides.map((sl, idx) =>
+      idx === previewSlideIdx
+        ? {
+            ...sl,
+            htmlContent: cleanHtml || sl.htmlContent,
+            htmlEmbedUrl: cleanUrl || sl.htmlEmbedUrl,
+          }
+        : sl
+    );
+
+    const fileName =
+      sourceFileName ||
+      existingDeck?.fileName ||
+      `Slide_Web_Khoi_${selectedGrade}_Tiet_${selectedPeriod}.html`;
+
+    const updatedDeck: LectureSlideDeck = {
+      lessonKey,
+      grade: selectedGrade,
+      period: selectedPeriod,
+      fileName,
+      fileType: 'html',
+      fileSize: cleanHtml ? `${Math.max(1, Math.round(cleanHtml.length / 1024))} KB` : 'HTML Web',
+      uploadedAt: new Date().toLocaleTimeString('vi-VN', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      storageBucket: 'slide-storage-1gb',
+      totalCompressedKb: cleanHtml ? Math.max(1, Math.round(cleanHtml.length / 1024)) : 12,
+      htmlContent: cleanHtml || existingDeck?.htmlContent,
+      htmlEmbedUrl: cleanUrl || existingDeck?.htmlEmbedUrl,
+      slides: updatedSlides,
+    };
+
+    if (onUpdateLiveSession) {
+      onUpdateLiveSession((prev) => ({
+        ...prev,
+        lectureSlidesByLesson: {
+          ...(prev.lectureSlidesByLesson || {}),
+          [lessonKey]: updatedDeck,
+        },
+        unlockedSlideDeckByLesson: {
+          ...(prev.unlockedSlideDeckByLesson || {}),
+          [lessonKey]: true,
+        },
+        activeSlideIndexByLesson: {
+          ...(prev.activeSlideIndexByLesson || {}),
+          [lessonKey]: previewSlideIdx,
+        },
+        updatedAt: new Date().toISOString(),
+      }));
+    }
+
+    setViewMode('html-web');
+    onShowToast(
+      `🌐 Đã nhúng thành công HTML Slide Web vào Slide #${previewSlideIdx + 1} (${fileName}) và đồng bộ cho Học sinh!`
+    );
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const ext = file.name.split('.').pop()?.toLowerCase();
-    if (ext !== 'pdf' && ext !== 'pptx' && ext !== 'ppt') {
-      onShowToast('⚠️ Vui lòng chọn tệp bài giảng định dạng .PDF hoặc .PPTX!');
+    if (ext !== 'pdf' && ext !== 'pptx' && ext !== 'ppt' && ext !== 'html' && ext !== 'htm') {
+      onShowToast('⚠️ Vui lòng chọn tệp bài giảng định dạng .PDF, .PPTX hoặc .HTML!');
       return;
     }
 
     setIsUploading(true);
     try {
+      if (ext === 'html' || ext === 'htm') {
+        const htmlText = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(new Error('Failed to read HTML file'));
+          reader.readAsText(file, 'utf-8');
+        });
+        setHtmlSlideCodeInput(htmlText);
+        handleEmbedHtmlToDeck(htmlText, undefined, file.name);
+        return;
+      }
+
       const fileType: 'pdf' | 'pptx' = ext === 'pdf' ? 'pdf' : 'pptx';
       const fileSizeKb = Math.max(1, Math.round(file.size / 1024));
       const fileSizeStr =
@@ -896,7 +982,7 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,.pptx,.ppt,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+              accept=".pdf,.pptx,.ppt,.html,.htm,text/html,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
               onChange={handleFileUpload}
               className="hidden"
             />
@@ -909,9 +995,22 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
               <span className="material-symbols-outlined text-[18px]">upload_file</span>
               <span>
                 {isUploading || isExtractingAi
-                  ? 'Đang nén & lưu File Storage...'
-                  : 'Nạp Bài Giảng (.PDF, .PPTX) vào File Storage 1GB'}
+                  ? 'Đang nạp & lưu bài giảng...'
+                  : 'Nạp Bài Giảng (PDF / PPTX / HTML)'}
               </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowHtmlEmbedPanel((prev) => !prev)}
+              className={`px-3.5 py-2.5 rounded-full text-xs font-bold shadow-sm cursor-pointer flex items-center gap-1.5 transition-all ${
+                showHtmlEmbedPanel
+                  ? 'bg-sky-600 text-white'
+                  : 'bg-sky-50 text-sky-800 border border-sky-200 hover:bg-sky-100'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px]">code</span>
+              <span>🌐 Nhúng HTML Slide Web</span>
             </button>
 
             <button
@@ -920,7 +1019,7 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
               onClick={() =>
                 runGeminiExtractKnowledgeSlides(
                   existingDeck?.fileName || `SGK-Tin${selectedGrade}-Tiet${selectedPeriod}.pptx`,
-                  existingDeck?.fileType || 'pptx',
+                  existingDeck?.fileType === 'pdf' ? 'pdf' : 'pptx',
                   existingDeck?.fileSize || '1.4 MB',
                   [],
                   existingDeck?.pdfDataUrl
@@ -951,6 +1050,152 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
             </button>
           </div>
         </div>
+
+        {/* HTML SLIDE WEB EMBEDDING PANEL (PDF / PPTX / HTML) */}
+        {showHtmlEmbedPanel && (
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-sky-50 via-indigo-50/70 to-cyan-50 border border-sky-200/90 flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-sky-600 text-[20px]">language</span>
+                <div>
+                  <span className="text-xs font-black text-slate-900 block">
+                    🌐 Nhúng HTML Slide Web Tương Tác Vào Bài Giảng (PDF / PPTX / HTML)
+                  </span>
+                  <span className="text-[11px] text-slate-600">
+                    Hỗ trợ tải tệp <code>.html</code>, dán mã HTML5/CSS/JS trực tiếp hoặc nhúng đường dẫn Web Slide (Canva, Genially, Google Slides, HTML5...) đồng bộ thời gian thực sang màn hình học sinh.
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const generatedHtml = buildInteractiveHtmlSlideTemplate({
+                      grade: selectedGrade,
+                      period: selectedPeriod,
+                      lessonTitle: currentPeriodSpec.lessonTitle,
+                      topic: currentPeriodSpec.topic,
+                      yccd: currentPeriodSpec.yccd,
+                    });
+                    setHtmlSlideCodeInput(generatedHtml);
+                    handleEmbedHtmlToDeck(
+                      generatedHtml,
+                      undefined,
+                      `Slide_Web_Tuong_Tac_K${selectedGrade}_T${selectedPeriod}.html`
+                    );
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white text-xs font-bold cursor-pointer shadow-2xs flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-[16px]">auto_awesome</span>
+                  <span>✨ Tạo &amp; Nhúng Nhanh HTML Slide Web Tương Tác (Chuẩn GDPT 2018)</span>
+                </button>
+
+                {(currentSlide?.htmlContent ||
+                  existingDeck?.htmlContent ||
+                  currentSlide?.htmlEmbedUrl ||
+                  existingDeck?.htmlEmbedUrl) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clearedSlides = activeSlides.map((sl, idx) =>
+                        idx === previewSlideIdx
+                          ? { ...sl, htmlContent: undefined, htmlEmbedUrl: undefined }
+                          : sl
+                      );
+                      if (onUpdateLiveSession && existingDeck) {
+                        onUpdateLiveSession((prev) => ({
+                          ...prev,
+                          lectureSlidesByLesson: {
+                            ...(prev.lectureSlidesByLesson || {}),
+                            [lessonKey]: {
+                              ...existingDeck,
+                              fileType: 'pptx',
+                              htmlContent: undefined,
+                              htmlEmbedUrl: undefined,
+                              slides: clearedSlides,
+                            },
+                          },
+                          updatedAt: new Date().toISOString(),
+                        }));
+                      }
+                      setViewMode('slides');
+                      onShowToast('🔄 Đã gỡ bản nhúng HTML Web và quay về Slide chuẩn.');
+                    }}
+                    className="px-3 py-2 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-800 text-xs font-bold cursor-pointer"
+                  >
+                    Gỡ HTML Slide
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+              {/* Paste HTML Code */}
+              <div className="lg:col-span-7 flex flex-col gap-2 bg-white p-3 rounded-xl border border-sky-200/80">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-700">
+                    Cách 1: Dán Mã Nguồn HTML Slide Web (hoặc tải tệp .HTML ở nút Nạp Bài Giảng):
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleEmbedHtmlToDeck(
+                        htmlSlideCodeInput,
+                        undefined,
+                        `Slide_HTML_K${selectedGrade}_T${selectedPeriod}.html`
+                      )
+                    }
+                    className="px-3 py-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-bold cursor-pointer"
+                  >
+                    Nhúng Mã HTML vào Slide #{previewSlideIdx + 1}
+                  </button>
+                </div>
+                <textarea
+                  value={htmlSlideCodeInput}
+                  onChange={(e) => setHtmlSlideCodeInput(e.target.value)}
+                  rows={3}
+                  placeholder="<!DOCTYPE html><html><body><h1>Bài giảng HTML tương tác...</h1></body></html>"
+                  className="w-full p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono text-slate-800 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              {/* Paste Web Slide URL */}
+              <div className="lg:col-span-5 flex flex-col justify-between gap-2 bg-white p-3 rounded-xl border border-sky-200/80">
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[11px] font-bold text-slate-700">
+                    Cách 2: Nhúng Đường Dẫn URL Slide Web (HTML5 / Canva / Google Slides Publish):
+                  </span>
+                  <input
+                    type="url"
+                    value={htmlSlideUrlInput}
+                    onChange={(e) => setHtmlSlideUrlInput(e.target.value)}
+                    placeholder="https://example.com/slide-bai-giang.html"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <span className="text-[10px] text-slate-500">
+                    Hiển thị trực tiếp bằng thẻ <code>&lt;iframe&gt;</code> tương tác 2 chiều
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleEmbedHtmlToDeck(
+                        undefined,
+                        htmlSlideUrlInput,
+                        `WebSlide_URL_K${selectedGrade}_T${selectedPeriod}.html`
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold cursor-pointer shrink-0"
+                  >
+                    🔗 Nhúng URL Slide Web
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Explanation Video Attachment Bar per Slide */}
         <div className="p-3.5 rounded-2xl bg-indigo-50/70 border border-indigo-200/80 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs">
@@ -1024,7 +1269,39 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
         </div>
 
         {/* Slide Preview Area */}
-        {viewMode === 'raw-pdf' && existingDeck?.pdfDataUrl ? (
+        {(currentSlide?.htmlContent ||
+          existingDeck?.htmlContent ||
+          currentSlide?.htmlEmbedUrl ||
+          existingDeck?.htmlEmbedUrl) ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <span className="px-3 py-1 rounded-full bg-sky-100 text-sky-900 text-xs font-black">
+                🌐 HTML Slide Web Tương Tác #{currentSlide.slideNumber} / {activeSlides.length}:{' '}
+                {existingDeck?.fileName || currentSlide.title}
+              </span>
+              <span className="text-xs text-emerald-700 font-bold">
+                ✓ Đang nhúng trực tiếp HTML Slide Web &amp; đồng bộ sang màn hình Học sinh
+              </span>
+            </div>
+            <div className="w-full rounded-3xl overflow-hidden border-2 border-sky-300 shadow-xl bg-slate-950">
+              {currentSlide?.htmlContent || existingDeck?.htmlContent ? (
+                <iframe
+                  srcDoc={currentSlide?.htmlContent || existingDeck?.htmlContent}
+                  title={`HTML Slide ${currentSlide.slideNumber}`}
+                  sandbox="allow-scripts allow-forms"
+                  className="w-full h-[440px] border-0 bg-slate-950"
+                />
+              ) : (
+                <iframe
+                  src={currentSlide?.htmlEmbedUrl || existingDeck?.htmlEmbedUrl}
+                  title={`Web Slide URL ${currentSlide.slideNumber}`}
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                  className="w-full h-[440px] border-0 bg-white"
+                />
+              )}
+            </div>
+          </div>
+        ) : viewMode === 'raw-pdf' && existingDeck?.pdfDataUrl ? (
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-700">

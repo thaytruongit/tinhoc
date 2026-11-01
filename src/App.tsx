@@ -33,6 +33,11 @@ import {
   normalizeClassroomList,
   buildEndSlidePresentationState,
 } from './utils/slideAndArenaController';
+import {
+  buildStageCompletionEvent,
+  formatTeacherStageCompletionToast,
+  type ActivityStageCode,
+} from './utils/realtimeProgressAnalytics';
 
 type AppMode = 'login' | 'student' | 'teacher';
 
@@ -140,7 +145,7 @@ export default function App() {
     }
     toastTimeoutRef.current = window.setTimeout(() => {
       setToastMessage(null);
-    }, 3400);
+    }, 5500);
   };
 
   // Sync dark mode class on <html>
@@ -274,19 +279,29 @@ export default function App() {
         setSelectedClass(data.classId);
       } else if (data.type === 'LIVE_SESSION_UPDATED' && data.session) {
         setLiveSession((prev) => normalizeLiveSession(data.session, prev));
-      } else if (
-        data.type === 'WHITEBOARD_UPDATED' &&
-        typeof data.lessonKey === 'string' &&
-        data.whiteboardState
-      ) {
-        setLiveSession((prev) => ({
-          ...prev,
-          whiteboardByLesson: {
-            ...(prev.whiteboardByLesson || {}),
-            [data.lessonKey]: data.whiteboardState,
-          },
-          updatedAt: new Date().toISOString(),
-        }));
+      } else if (data.type === 'STUDENT_STAGE_COMPLETED' && data.completionEvent) {
+        const evt = data.completionEvent;
+        setLiveSession((prev) => {
+          const prevMap = prev.completedStagesByStudent || {};
+          const prevStages = prevMap[evt.studentId] || [];
+          const nextStages = prevStages.includes(evt.stage)
+            ? prevStages
+            : [...prevStages, evt.stage];
+          const prevRecent = prev.recentStageCompletions || [];
+          const alreadyInRecent = prevRecent.some((item) => item.id === evt.id);
+          return {
+            ...prev,
+            lastStudentStageCompletion: evt,
+            recentStageCompletions: alreadyInRecent
+              ? prevRecent
+              : [evt, ...prevRecent].slice(0, 15),
+            completedStagesByStudent: {
+              ...prevMap,
+              [evt.studentId]: nextStages,
+            },
+            updatedAt: evt.timestampIso || new Date().toISOString(),
+          };
+        });
       } else if (data.type === 'SLIDE_ENDED' && typeof data.lessonKey === 'string') {
         setLiveSession((prev) => buildEndSlidePresentationState(prev, data.lessonKey));
       } else if (
@@ -333,6 +348,23 @@ export default function App() {
       broadcastRef.current = null;
     };
   }, []);
+
+  // Real-time Toast notification alert for Teacher when any Student completes an activity stage
+  const lastNotifiedStageCompletionIdRef = useRef<string | null>(
+    liveSession?.lastStudentStageCompletion?.id || null
+  );
+
+  useEffect(() => {
+    const completionEvt = liveSession?.lastStudentStageCompletion;
+    if (!completionEvt || !completionEvt.id) return;
+    if (lastNotifiedStageCompletionIdRef.current === completionEvt.id) return;
+    lastNotifiedStageCompletionIdRef.current = completionEvt.id;
+
+    if (appMode === 'teacher') {
+      triggerSynchronizedCelebration('xp');
+      showToast(formatTeacherStageCompletionToast(completionEvt));
+    }
+  }, [liveSession?.lastStudentStageCompletion, appMode]);
 
   // Supabase Realtime listener for Postgres changes on classes, students, and live_classroom_states
   useEffect(() => {
@@ -711,6 +743,50 @@ export default function App() {
         timestamp: Date.now(),
       }),
     }).catch(() => {});
+
+    // Emit real-time stage completion alert to Teacher Portal
+    const inferredStage: ActivityStageCode =
+      deltaXp <= 20
+        ? 1
+        : deltaXp === 40
+        ? 2
+        : deltaXp >= 50
+        ? 3
+        : (liveSession?.activeStage as ActivityStageCode) || 4;
+
+    const completionEvent = buildStageCompletionEvent({
+      student: currentStudent,
+      period: liveSession?.activePeriod || 1,
+      lessonTitle: `Tiết ${liveSession?.activePeriod || 1}`,
+      stage: inferredStage,
+      score: currentStudent.avgScore,
+      xpEarned: deltaXp,
+    });
+
+    if (broadcastRef.current) {
+      broadcastRef.current.postMessage({
+        type: 'STUDENT_STAGE_COMPLETED',
+        completionEvent,
+      });
+    }
+
+    updateAndBroadcastLiveSession((prev) => {
+      const prevMap = prev.completedStagesByStudent || {};
+      const existingStages = prevMap[currentStudent.id] || [];
+      const nextStages = existingStages.includes(inferredStage)
+        ? existingStages
+        : [...existingStages, inferredStage];
+      const prevRecent = prev.recentStageCompletions || [];
+      return {
+        ...prev,
+        lastStudentStageCompletion: completionEvent,
+        recentStageCompletions: [completionEvent, ...prevRecent].slice(0, 15),
+        completedStagesByStudent: {
+          ...prevMap,
+          [currentStudent.id]: nextStages,
+        },
+      };
+    });
   };
 
   const handleUpdateStudentScore = (studentId: string, newScore: number) => {
@@ -941,12 +1017,21 @@ export default function App() {
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-6 right-6 z-50 bg-inverse-surface text-inverse-on-surface px-5 py-3 rounded-full shadow-2xl font-headline-sm text-headline-sm flex items-center gap-2.5 max-w-md transition-all"
+          data-testid="global-toast-notification"
+          className="fixed bottom-6 right-6 z-50 bg-slate-900 dark:bg-indigo-950 text-white border border-indigo-400/50 px-5 py-3.5 rounded-2xl shadow-2xl text-xs sm:text-sm font-semibold flex items-center gap-3 max-w-lg transition-all"
         >
-          <span className="material-symbols-outlined text-tertiary-fixed text-[22px]">
-            verified
+          <span className="material-symbols-outlined text-emerald-400 text-[22px] shrink-0">
+            notifications_active
           </span>
-          <span>{toastMessage}</span>
+          <span className="leading-snug flex-1">{toastMessage}</span>
+          <button
+            type="button"
+            onClick={() => setToastMessage(null)}
+            aria-label="Đóng thông báo"
+            className="text-slate-400 hover:text-white transition-colors cursor-pointer p-1"
+          >
+            <span className="material-symbols-outlined text-[18px]">close</span>
+          </button>
         </div>
       )}
     </div>

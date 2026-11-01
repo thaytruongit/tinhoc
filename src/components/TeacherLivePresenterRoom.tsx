@@ -20,7 +20,9 @@ import {
   isFileStorageSlideUrl,
   buildEndSlidePresentationState,
 } from '../utils/slideAndArenaController';
-import { VirtualWhiteboardPanel } from './VirtualWhiteboardPanel';
+import { LiveStudentProgressTracker } from './LiveStudentProgressTracker';
+import { ActivityCompletionVisualizer } from './ActivityCompletionVisualizer';
+import { buildInteractiveHtmlSlideTemplate } from '../utils/realtimeProgressAnalytics';
 
 interface TeacherLivePresenterRoomProps {
   grade: 6 | 7 | 8 | 9;
@@ -101,12 +103,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
 
   const activeStage: 1 | 2 | 3 | 4 = (liveSession?.activeStage as 1 | 2 | 3 | 4) || 1;
   const [activeTab, setActiveTab] = useState<
-    'slide' | 'whiteboard' | 'hd1' | 'hd2' | 'hd3' | 'hd3-practice' | 'hd4' | 'ket-qua'
+    'slide' | 'theo-doi-tien-do' | 'hd1' | 'hd2' | 'hd3' | 'hd3-practice' | 'hd4' | 'ket-qua'
   >(
     liveSession?.activeLiveView === 'slide'
       ? 'slide'
-      : liveSession?.activeLiveView === 'whiteboard'
-      ? 'whiteboard'
       : liveSession?.activeLiveView === 'hd3-practice'
       ? 'hd3-practice'
       : (`hd${activeStage}` as 'hd1' | 'hd2' | 'hd3' | 'hd4')
@@ -935,8 +935,24 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
       }),
     }).catch(() => {});
 
+    // Broadcast LIVE_SESSION_ENDED to all student browsers via BroadcastChannel
+    try {
+      const bc = new BroadcastChannel('slide-broadcast-channel');
+      bc.postMessage({
+        type: 'LIVE_SESSION_ENDED',
+        classId,
+        grade,
+        period,
+        lessonKey,
+        timestampIso: new Date().toISOString(),
+      });
+      bc.close();
+    } catch {
+      // BroadcastChannel unsupported fallback
+    }
+
     onShowToast(
-      `🔔 Đã kết thúc phiên Live Tiết ${period} (Lớp ${classId})! Đã đánh dấu hoàn thành tiết học & tự động mở khóa toàn bộ 4 hoạt động tự luyện cho học sinh.`
+      `🔔 Đã thoát & kết thúc phiên Live Tiết ${period} (Lớp ${classId})! Tự động đồng bộ đóng phòng Live trên máy toàn bộ học sinh và mở khóa hoạt động tự luyện.`
     );
 
     onExit();
@@ -1200,15 +1216,15 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
       {/* 1. LEFT SIDEBAR - BRIGHT WHITE SYNCHRONIZED WITH STUDENT LIVE ROOM */}
       <aside className="w-72 bg-white border-r border-slate-200 p-5 flex flex-col justify-between shrink-0 shadow-xs">
         <div className="flex flex-col gap-6">
-          {/* Orange Return Button matching student image */}
+          {/* Nút Thoát phiên Live Đồng bộ Học sinh */}
           <button
             type="button"
             onClick={handleTeacherExitAndFinishLive}
-            className="w-full flex items-center gap-3 px-5 py-3.5 rounded-full bg-gradient-to-r from-orange-400 to-orange-500 hover:from-orange-500 hover:to-orange-600 text-white font-bold text-sm shadow-md transition-all cursor-pointer"
-            title="Rời phòng Live, đánh dấu hoàn thành tiết học & mở khóa 4 hoạt động tự luyện"
+            className="w-full flex items-center justify-center gap-2.5 px-4 py-3.5 rounded-2xl bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-700 hover:to-rose-800 text-white font-black text-xs shadow-md transition-all cursor-pointer border border-rose-800"
+            title="Thoát phiên Live: Đồng bộ kết thúc và tự động đóng phiên Live trên thiết bị học sinh"
           >
-            <span className="material-symbols-outlined text-[22px]">dashboard</span>
-            <span>Trang chủ Quản trị</span>
+            <span className="material-symbols-outlined text-[20px]">exit_to_app</span>
+            <span>Thoát phiên Live (Đóng phòng HS)</span>
           </button>
 
           {/* Navigation Items */}
@@ -1243,7 +1259,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     </span>
                     <div className="flex flex-col min-w-0">
                       <span className="text-xs font-bold text-slate-900 truncate">
-                        Slide Bài Giảng (PDF/PPTX)
+                        Slide Bài Giảng (PDF/PPTX/HTML)
                       </span>
                       <span className="text-[10px] text-slate-500 truncate">
                         Slide {currentSlideIndex + 1}/{slidePages.length} • Đồng bộ HS
@@ -1292,33 +1308,31 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 </div>
               </div>
 
-              {/* 0.5 BẢNG TRẮNG ẢO TIN HỌC (VẼ & GHI CHÚ ĐỒNG BỘ THỜI GIAN THỰC) */}
+              {/* THEO DÕI TIẾN ĐỘ HỌC SINH TRỰC TIẾP (MÔ TẢ CHI TIẾT 4 HOẠT ĐỘNG) */}
               <div
-                onClick={() => setActiveTab('whiteboard')}
+                onClick={() => setActiveTab('theo-doi-tien-do')}
                 className={`p-3 rounded-2xl border transition-all flex items-center justify-between cursor-pointer ${
-                  activeTab === 'whiteboard'
-                    ? 'bg-orange-50/90 border-2 border-orange-300 shadow-xs'
+                  activeTab === 'theo-doi-tien-do'
+                    ? 'bg-indigo-50/90 border-2 border-indigo-400 shadow-xs'
                     : 'bg-white border-slate-200 hover:bg-slate-50'
                 }`}
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="material-symbols-outlined text-[22px] text-orange-600">
-                    draw
+                  <span className="material-symbols-outlined text-[22px] text-indigo-600">
+                    monitoring
                   </span>
                   <div className="flex flex-col min-w-0">
                     <span className="text-xs font-bold text-slate-900 truncate">
-                      🎨 Bảng trắng ảo (Vẽ &amp; Ghi chú)
+                      📊 Theo dõi tiến độ HS (4 HĐ)
                     </span>
                     <span className="text-[10px] text-slate-500 truncate">
-                      Vẽ lưu đồ, sơ đồ &amp; đồng bộ trực tiếp sang HS
+                      Mô tả chi tiết bài làm thời gian thực
                     </span>
                   </div>
                 </div>
-                {liveSession?.whiteboardByLesson?.[lessonKey]?.isOpen && (
-                  <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[10px] font-black border border-rose-200 animate-pulse">
-                    LIVE
-                  </span>
-                )}
+                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-black border border-emerald-200">
+                  Live
+                </span>
               </div>
 
               {[
@@ -1629,13 +1643,13 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
       {/* 2. MAIN TEACHER LIVE STAGE - BRIGHT WHITE */}
       <main className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-slate-50/50">
         {/* Top Control Bar */}
-        <header className="h-16 px-6 bg-white border-b border-slate-200 flex items-center justify-between gap-4 sticky top-0 z-20 shadow-2xs">
+        <header className="min-h-16 py-2.5 px-6 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-20 shadow-2xs">
           <div className="flex items-center gap-3 min-w-0">
             <span className="px-3 py-1 rounded-full bg-red-600 text-white text-xs font-black flex items-center gap-1.5 shrink-0 animate-pulse">
               <span className="w-2 h-2 rounded-full bg-white" />
               <span>PHÒNG LIVE GIÁO VIÊN</span>
             </span>
-            <h1 className="text-base sm:text-lg font-black text-slate-900 truncate">
+            <h1 className="text-sm sm:text-base font-black text-slate-900 truncate max-w-[340px] xl:max-w-[480px]">
               Khối {grade} • Tiết {period}: {periodSpec.lessonTitle} — Lớp {classId}
             </h1>
           </div>
@@ -1664,14 +1678,16 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab('whiteboard')}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                  activeTab === 'whiteboard'
-                    ? 'bg-orange-600 text-white shadow-2xs'
-                    : 'text-orange-700 hover:bg-orange-100'
+                onClick={() => setActiveTab('theo-doi-tien-do')}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                  activeTab === 'theo-doi-tien-do'
+                    ? 'bg-indigo-600 text-white shadow-2xs'
+                    : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200'
                 }`}
+                title="Theo dõi & mô tả tiến độ trực tiếp của học sinh trong 4 hoạt động"
               >
-                🎨 Bảng trắng ảo
+                <span className="material-symbols-outlined text-[15px]">monitoring</span>
+                <span>Tiến độ HS</span>
               </button>
               {([1, 2, 3] as const).map((st) => (
                 <button
@@ -1746,10 +1762,11 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
             <button
               type="button"
               onClick={handleTeacherExitAndFinishLive}
-              className="px-4 py-1.5 rounded-full bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold transition-colors cursor-pointer border border-red-200"
-              title="Kết thúc tiết Live, đánh dấu hoàn thành & đóng phòng live học sinh"
+              className="px-4 py-2 rounded-full bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-black transition-all cursor-pointer shadow-sm border border-rose-700 flex items-center gap-1.5"
+              title="Thoát phiên Live: Đồng bộ kết thúc và tự động đóng phiên Live trên thiết bị học sinh"
             >
-              Rời phòng Live
+              <span className="material-symbols-outlined text-[17px]">exit_to_app</span>
+              <span>Thoát phiên Live (Đóng phòng HS)</span>
             </button>
           </div>
         </header>
@@ -1791,7 +1808,59 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     className="px-3.5 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs cursor-pointer flex items-center gap-1.5"
                   >
                     <span className="material-symbols-outlined text-[16px]">upload_file</span>
-                    <span>Nạp Slide (.PDF, .PPTX) vào File Storage 1GB</span>
+                    <span>Nạp Slide (PDF / PPTX / HTML)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const htmlDoc = buildInteractiveHtmlSlideTemplate({
+                        grade,
+                        period,
+                        lessonTitle: periodSpec.lessonTitle,
+                        topic: periodSpec.topic,
+                        yccd: periodSpec.yccd,
+                      });
+                      const updatedSlides = slidePages.map((sl, idx) =>
+                        idx === currentSlideIndex ? { ...sl, htmlContent: htmlDoc } : sl
+                      );
+                      onUpdateLiveSession((prev) => ({
+                        ...prev,
+                        activeLiveView: 'slide',
+                        lectureSlidesByLesson: {
+                          ...(prev.lectureSlidesByLesson || {}),
+                          [lessonKey]: {
+                            lessonKey,
+                            grade,
+                            period,
+                            fileName: `Slide_Web_Tuong_Tac_K${grade}_T${period}.html`,
+                            fileType: 'html',
+                            fileSize: `${Math.max(1, Math.round(htmlDoc.length / 1024))} KB`,
+                            uploadedAt: new Date().toLocaleTimeString('vi-VN', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            }),
+                            storageBucket: 'slide-storage-1gb',
+                            totalCompressedKb: Math.max(1, Math.round(htmlDoc.length / 1024)),
+                            htmlContent: htmlDoc,
+                            slides: updatedSlides,
+                          },
+                        },
+                        unlockedSlideDeckByLesson: {
+                          ...(prev.unlockedSlideDeckByLesson || {}),
+                          [lessonKey]: true,
+                        },
+                        updatedAt: new Date().toISOString(),
+                      }));
+                      onShowToast(
+                        `🌐 Đã nhúng trực tiếp HTML Slide Web tương tác vào bài giảng Khối ${grade} • Tiết ${period} và đồng bộ sang màn hình Học sinh!`
+                      );
+                    }}
+                    className="px-3.5 py-2 rounded-full bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                    title="Nhúng nhanh Slide HTML tương tác trực tiếp vào bài giảng hiện tại"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">code</span>
+                    <span>🌐 Nhúng HTML Slide Web</span>
                   </button>
 
                   <button
@@ -1808,10 +1877,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
 
                   <button
                     type="button"
-                    onClick={() => setActiveTab('whiteboard')}
-                    className="px-3.5 py-2 rounded-full bg-orange-100 hover:bg-orange-200 text-orange-900 font-bold text-xs cursor-pointer flex items-center gap-1.5"
+                    onClick={() => setActiveTab('theo-doi-tien-do')}
+                    className="px-3.5 py-2 rounded-full bg-indigo-100 hover:bg-indigo-200 text-indigo-900 font-bold text-xs cursor-pointer flex items-center gap-1.5"
+                    title="Mở Bảng theo dõi & mô tả tiến độ học sinh"
                   >
-                    <span>🎨 Bảng trắng ảo</span>
+                    <span className="material-symbols-outlined text-[16px]">monitoring</span>
+                    <span>📊 Tiến độ học sinh (4 HĐ)</span>
                   </button>
 
                   <button
@@ -2042,7 +2113,51 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 } gap-4 items-start`}
               >
                 <div className={isExplanationVideoPlaying ? 'lg:col-span-7' : 'w-full'}>
-                  {activeSlidePage?.imageUrl ? (
+                  {(activeSlidePage?.htmlContent ||
+                    existingSlideDeck?.htmlContent ||
+                    activeSlidePage?.htmlEmbedUrl ||
+                    existingSlideDeck?.htmlEmbedUrl) ? (
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs">
+                        <span className="px-3 py-1 rounded-full bg-sky-500/25 border border-sky-400/40 text-sky-300 font-bold">
+                          🌐 HTML Slide Web #{activeSlidePage.slideNumber} / {slidePages.length}:{' '}
+                          {existingSlideDeck?.fileName || activeSlidePage.title}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-300 font-bold flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                            {isSlideUnlocked
+                              ? `Học sinh Lớp ${classId} đang xem đồng bộ HTML Slide Web này`
+                              : `Đang khóa Slide trên màn hình học sinh`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowSlideUploadModal(true)}
+                            className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] cursor-pointer"
+                          >
+                            Sửa mã HTML / URL
+                          </button>
+                        </div>
+                      </div>
+                      <div className="w-full rounded-3xl overflow-hidden border-2 border-sky-400/70 shadow-xl bg-slate-950">
+                        {activeSlidePage?.htmlContent || existingSlideDeck?.htmlContent ? (
+                          <iframe
+                            srcDoc={activeSlidePage?.htmlContent || existingSlideDeck?.htmlContent}
+                            title={`HTML Slide ${activeSlidePage.slideNumber}`}
+                            sandbox="allow-scripts allow-forms"
+                            className="w-full h-[500px] border-0 bg-slate-950"
+                          />
+                        ) : (
+                          <iframe
+                            src={activeSlidePage?.htmlEmbedUrl || existingSlideDeck?.htmlEmbedUrl}
+                            title={`Web Slide URL ${activeSlidePage.slideNumber}`}
+                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                            className="w-full h-[500px] border-0 bg-white"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ) : activeSlidePage?.imageUrl ? (
                     <div className="flex flex-col gap-3">
                       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs">
                         <span className="px-3 py-1 rounded-full bg-orange-500/25 border border-orange-400/40 text-orange-300 font-bold">
@@ -2204,29 +2319,18 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
             </div>
           )}
 
-          {/* TAB 0.5: BẢNG TRẮNG ẢO TIN HỌC (VẼ & GHI CHÚ ĐỒNG BỘ THỜI GIAN THỰC CHO HỌC SINH) */}
-          {activeTab === 'whiteboard' && (
-            <VirtualWhiteboardPanel
-              lessonKey={lessonKey}
-              lessonTitle={periodSpec.lessonTitle}
+          {/* TAB: THEO DÕI TIẾN ĐỘ HỌC SINH TRỰC TIẾP Ở CÁC HOẠT ĐỘNG HỌC */}
+          {activeTab === 'theo-doi-tien-do' && (
+            <LiveStudentProgressTracker
+              students={students}
+              classId={classId}
               grade={grade}
               period={period}
-              classId={classId}
-              whiteboardState={liveSession?.whiteboardByLesson?.[lessonKey]}
-              slideBackgroundUrl={activeSlidePage?.imageUrl}
-              readOnly={false}
-              onUpdateWhiteboard={(nextWb) => {
-                onUpdateLiveSession((prev) => ({
-                  ...prev,
-                  whiteboardByLesson: {
-                    ...(prev.whiteboardByLesson || {}),
-                    [lessonKey]: nextWb,
-                  },
-                  updatedAt: new Date().toISOString(),
-                }));
-              }}
-              onClose={() => setActiveTab('slide')}
+              periodSpec={periodSpec}
+              liveSession={liveSession}
               onShowToast={onShowToast}
+              onUpdateLiveSession={onUpdateLiveSession}
+              isEmbedded={true}
             />
           )}
 
@@ -2273,6 +2377,19 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     💡 <strong>Gợi ý sư phạm:</strong> Mời 1-2 cặp học sinh sử dụng tính năng "Quay gọi tên HS" để chia sẻ nhanh trước lớp (+30 XP).
                   </div>
                 </div>
+
+                {/* TRỰC QUAN HÓA TIẾN ĐỘ HOÀN THÀNH RIÊNG CỦA HOẠT ĐỘNG 1 */}
+                <ActivityCompletionVisualizer
+                  stage={1}
+                  students={students}
+                  classId={classId}
+                  grade={grade}
+                  period={period}
+                  periodSpec={periodSpec}
+                  liveSession={liveSession}
+                  onShowToast={onShowToast}
+                  onUpdateLiveSession={onUpdateLiveSession}
+                />
               </div>
 
               {/* Embedded Class Leaderboard Chart right inside Activity 1 */}
@@ -2322,32 +2439,18 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-4 rounded-2xl bg-sky-50/60 border border-sky-100 flex flex-col gap-1.5">
-                    <span className="text-xs font-bold text-sky-800">1. Kéo thả phân loại (1.0đ):</span>
-                    <span className="text-xs text-slate-600">
-                      Phân biệt các khái niệm trọng tâm trong bài: {periodSpec.lessonTitle}.
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-2xl bg-sky-50/60 border border-sky-100 flex flex-col gap-1.5">
-                    <span className="text-xs font-bold text-sky-800">2. Điền khuyết vào chỗ trống (1.0đ):</span>
-                    <span className="text-xs text-slate-600">
-                      Điền thuật ngữ đúng định nghĩa sách giáo khoa GDPT 2018.
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-2xl bg-sky-50/60 border border-sky-100 flex flex-col gap-1.5">
-                    <span className="text-xs font-bold text-sky-800">3. Nối cột định nghĩa (1.0đ):</span>
-                    <span className="text-xs text-slate-600">
-                      Ghép thẻ cột A với mô tả phù hợp tại cột B.
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-2xl bg-sky-50/60 border border-sky-100 flex flex-col gap-1.5">
-                    <span className="text-xs font-bold text-sky-800">4. Trả lời ngắn / Tự luận (1.0đ):</span>
-                    <span className="text-xs text-slate-600">
-                      Học sinh tự phân tích ví dụ thực tiễn theo máy tính cá nhân.
-                    </span>
-                  </div>
-                </div>
+                {/* TRỰC QUAN HÓA TIẾN ĐỘ HOÀN THÀNH RIÊNG CỦA HOẠT ĐỘNG 2 (VỊ TRÍ BÔI VÀNG TRONG ẢNH) */}
+                <ActivityCompletionVisualizer
+                  stage={2}
+                  students={students}
+                  classId={classId}
+                  grade={grade}
+                  period={period}
+                  periodSpec={periodSpec}
+                  liveSession={liveSession}
+                  onShowToast={onShowToast}
+                  onUpdateLiveSession={onUpdateLiveSession}
+                />
               </div>
 
               {/* Embedded Class Leaderboard Chart right inside Activity 2 */}
@@ -2492,6 +2595,19 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     </div>
                   </div>
                 </div>
+
+                {/* TRỰC QUAN HÓA TIẾN ĐỘ HOÀN THÀNH RIÊNG CỦA HOẠT ĐỘNG 3 (ĐẤU TRƯỜNG LUYỆN TẬP) */}
+                <ActivityCompletionVisualizer
+                  stage={3}
+                  students={students}
+                  classId={classId}
+                  grade={grade}
+                  period={period}
+                  periodSpec={periodSpec}
+                  liveSession={liveSession}
+                  onShowToast={onShowToast}
+                  onUpdateLiveSession={onUpdateLiveSession}
+                />
               </div>
 
               {/* Embedded Class Leaderboard Chart right inside Activity 3 */}
@@ -2566,6 +2682,19 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     <strong>{periodSpec.lessonTitle}</strong> và tải tệp sản phẩm (Word, Excel, Scratch, Ảnh chụp màn hình...) lên thư mục Google Drive của Lớp {classId}.
                   </p>
                 </div>
+
+                {/* TRỰC QUAN HÓA TIẾN ĐỘ HOÀN THÀNH RIÊNG CỦA HOẠT ĐỘNG 3 (THỰC HÀNH PHÒNG MÁY) */}
+                <ActivityCompletionVisualizer
+                  stage="hd3-practice"
+                  students={students}
+                  classId={classId}
+                  grade={grade}
+                  period={period}
+                  periodSpec={periodSpec}
+                  liveSession={liveSession}
+                  onShowToast={onShowToast}
+                  onUpdateLiveSession={onUpdateLiveSession}
+                />
               </div>
 
               {renderEmbeddedClassLeaderboardChart(3, 'Thực hành Phòng máy')}
@@ -2622,6 +2751,19 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     Học sinh hoàn thành 3 nhiệm vụ vận dụng thực tế. Học sinh có thể quay lại các Hoạt động 1, 2, 3 trước đó để rà soát và hoàn thiện bài làm trước khi kết thúc tiết học.
                   </p>
                 </div>
+
+                {/* TRỰC QUAN HÓA TIẾN ĐỘ HOÀN THÀNH RIÊNG CỦA HOẠT ĐỘNG 4 (VẬN DỤNG) */}
+                <ActivityCompletionVisualizer
+                  stage={4}
+                  students={students}
+                  classId={classId}
+                  grade={grade}
+                  period={period}
+                  periodSpec={periodSpec}
+                  liveSession={liveSession}
+                  onShowToast={onShowToast}
+                  onUpdateLiveSession={onUpdateLiveSession}
+                />
               </div>
 
               {/* Embedded Class Leaderboard Chart right inside Activity 4 */}

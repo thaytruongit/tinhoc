@@ -47,7 +47,7 @@ import {
   resolvePresenterKeyAction,
   buildEndSlidePresentationState,
 } from '../utils/slideAndArenaController';
-import { VirtualWhiteboardPanel } from './VirtualWhiteboardPanel';
+import { LiveStudentProgressTracker } from './LiveStudentProgressTracker';
 
 export type TeacherTab =
   | 'trang-chu'
@@ -130,7 +130,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   >('ALL');
   const [isLivePresenterOpen, setIsLivePresenterOpen] = useState(false);
   const [showLectureSlideModal, setShowLectureSlideModal] = useState(false);
-  const [showWhiteboardModal, setShowWhiteboardModal] = useState(false);
+  const [showLiveProgressModal, setShowLiveProgressModal] = useState(false);
   const [showResetAcademicYearModal, setShowResetAcademicYearModal] = useState(false);
   const [isResettingAcademicYear, setIsResettingAcademicYear] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -298,9 +298,53 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     onShowToast,
   ]);
 
+  const handleTeacherExitLiveFromPortal = useCallback(() => {
+    const targetClassId = liveSession?.activeClassId || selectedClass;
+    if (onUpdateLiveSession) {
+      onUpdateLiveSession((prev) => ({
+        ...prev,
+        isBroadcasting: false,
+        activeLiveView: 'waiting',
+        updatedAt: new Date().toISOString(),
+      }));
+    }
+    if (slideBroadcastChannelRef.current) {
+      slideBroadcastChannelRef.current.postMessage({
+        type: 'LIVE_SESSION_ENDED',
+        classId: targetClassId,
+        grade: portalActiveGrade,
+        period: portalActivePeriod,
+        lessonKey: portalLessonKey,
+        timestampIso: new Date().toISOString(),
+      });
+    }
+    fetch('/api/live-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        isBroadcasting: false,
+        activeClassId: targetClassId,
+        activeGrade: portalActiveGrade,
+        activePeriod: portalActivePeriod,
+      }),
+    }).catch(() => {});
+
+    onShowToast(
+      `🔔 Đã thoát & kết thúc phiên Live! Đồng bộ tự động đóng phiên Live trên thiết bị học sinh Lớp ${targetClassId}.`
+    );
+  }, [
+    liveSession?.activeClassId,
+    selectedClass,
+    portalActiveGrade,
+    portalActivePeriod,
+    portalLessonKey,
+    onUpdateLiveSession,
+    onShowToast,
+  ]);
+
   // Keyboard event listener in TeacherPortal supporting 'Space' and 'ArrowRight' (and 'ArrowLeft')
   useEffect(() => {
-    if (isLivePresenterOpen || showLectureSlideModal || showWhiteboardModal) return;
+    if (isLivePresenterOpen || showLectureSlideModal || showLiveProgressModal) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
@@ -1700,16 +1744,16 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                 className="w-full text-left flex items-center gap-space-sm px-space-md py-2.5 rounded-lg font-label-md text-label-md bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/20 font-bold transition-all cursor-pointer border border-indigo-500/25"
               >
                 <span className="material-symbols-outlined text-[20px]">slideshow</span>
-                <span className="truncate">Nạp bài giảng (PDF, PPTX)</span>
+                <span className="truncate">Nạp bài giảng (PDF, PPTX, HTML)</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => setShowWhiteboardModal(true)}
-                className="w-full text-left flex items-center gap-space-sm px-space-md py-2.5 rounded-lg font-label-md text-label-md bg-orange-500/15 text-orange-800 dark:text-orange-300 hover:bg-orange-500/25 font-bold transition-all cursor-pointer border border-orange-500/30"
+                onClick={() => setShowLiveProgressModal(true)}
+                className="w-full text-left flex items-center gap-space-sm px-space-md py-2.5 rounded-lg font-label-md text-label-md bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 hover:bg-indigo-500/25 font-bold transition-all cursor-pointer border border-indigo-500/30"
               >
-                <span className="material-symbols-outlined text-[20px]">draw</span>
-                <span className="truncate">🎨 Bảng trắng ảo (Đồng bộ HS)</span>
+                <span className="material-symbols-outlined text-[20px]">monitoring</span>
+                <span className="truncate">📊 Tiến độ HS (4 Hoạt động)</span>
               </button>
 
               <button
@@ -1760,67 +1804,36 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           </div>
 
           <div className="flex items-center gap-space-sm">
-            {/* Quick Slide Broadcast & Clicker Control Pill in TeacherPortal Header */}
-            <div
-              className="hidden xl:flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-900 dark:text-indigo-200 text-xs font-bold"
-              title="Sử dụng phím Space hoặc mũi tên Phải (→) để chuyển slide bài giảng đồng bộ trực tiếp tới thiết bị học sinh"
-            >
-              <span className="material-symbols-outlined text-[16px] text-indigo-600 dark:text-indigo-400">
-                present_to_all
-              </span>
-              <span>
-                Slide K{portalActiveGrade}•T{portalActivePeriod}:{' '}
-                <strong className="text-indigo-700 dark:text-indigo-300">
-                  {Math.min(portalCurrentSlideIndex + 1, portalSlides.length)}/{portalSlides.length}
-                </strong>
-              </span>
-              <button
-                type="button"
-                onClick={() => handlePortalSlideStep('prev')}
-                disabled={portalCurrentSlideIndex <= 0}
-                className="px-1.5 py-0.5 rounded bg-white/80 dark:bg-slate-800 hover:bg-white text-indigo-700 dark:text-indigo-300 disabled:opacity-40 cursor-pointer border border-indigo-500/20"
-                title="Slide trước (Phím mũi tên Trái ←)"
-              >
-                ←
-              </button>
-              <button
-                type="button"
-                onClick={() => handlePortalSlideStep('next')}
-                disabled={portalCurrentSlideIndex >= portalSlides.length - 1}
-                className="px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-40 cursor-pointer shadow-2xs"
-                title="Chuyển Slide tiếp theo (Phím Space hoặc Mũi tên Phải →)"
-              >
-                Space / →
-              </button>
-              <button
-                type="button"
-                onClick={handleEndSlideFromPortal}
-                className="px-2 py-0.5 rounded bg-slate-900 hover:bg-rose-700 text-white cursor-pointer shadow-2xs"
-                title="Kết thúc Slide bài giảng: Tự động đóng Slide trên máy HS và giữ nguyên khóa các hoạt động"
-              >
-                ⏹️ Kết thúc Slide
-              </button>
-            </div>
-
             <button
               type="button"
-              onClick={() => setShowWhiteboardModal(true)}
-              className="px-3.5 py-1.5 rounded-full bg-orange-500 hover:bg-orange-600 text-white font-label-sm text-xs font-extrabold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
-              title="Mở Bảng trắng ảo để vẽ, ghi chú trực tiếp và đồng bộ thời gian thực sang màn hình học sinh"
+              onClick={() => setShowLiveProgressModal(true)}
+              className="px-3.5 py-1.5 rounded-full bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 font-label-sm text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer border border-indigo-200 dark:border-indigo-800"
+              title="Theo dõi & mô tả tiến độ học sinh trực tiếp ở 4 hoạt động"
             >
-              <span className="material-symbols-outlined text-[16px]">draw</span>
-              <span>🎨 Bảng trắng ảo</span>
+              <span className="material-symbols-outlined text-[16px]">monitoring</span>
+              <span>Tiến độ HS</span>
             </button>
 
             {liveSession?.isBroadcasting && (
-              <button
-                type="button"
-                onClick={() => setIsLivePresenterOpen(true)}
-                className="px-3.5 py-1.5 rounded-full bg-red-600 hover:bg-red-700 text-white font-label-sm text-xs font-black shadow-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px]">slideshow</span>
-                <span>Phòng Live ({liveSession.activeClassId || selectedClass})</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setIsLivePresenterOpen(true)}
+                  className="px-3.5 py-1.5 rounded-full bg-red-600 hover:bg-red-700 text-white font-label-sm text-xs font-black shadow-xs flex items-center gap-1.5 cursor-pointer animate-pulse"
+                >
+                  <span className="material-symbols-outlined text-[16px]">slideshow</span>
+                  <span>Phòng Live ({liveSession.activeClassId || selectedClass})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTeacherExitLiveFromPortal}
+                  className="px-3 py-1.5 rounded-full bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold transition-colors cursor-pointer shadow-2xs flex items-center gap-1 border border-rose-800"
+                  title="Thoát phiên Live ngay: Đồng bộ tự động đóng phiên Live trên thiết bị học sinh"
+                >
+                  <span className="material-symbols-outlined text-[15px]">exit_to_app</span>
+                  <span>Thoát Live</span>
+                </button>
+              </div>
             )}
 
             <button
@@ -5792,35 +5805,20 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         onShowToast={onShowToast}
       />
 
-      {/* Virtual Whiteboard Modal (Bảng trắng ảo vẽ & ghi chú đồng bộ thời gian thực cho HS) */}
-      {showWhiteboardModal && (
+      {/* Live Student Progress Tracker Modal (Theo dõi & mô tả tiến độ học sinh trực tiếp 4 hoạt động) */}
+      {showLiveProgressModal && (
         <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
           <div className="w-full max-w-6xl my-auto">
-            <VirtualWhiteboardPanel
-              lessonKey={portalLessonKey}
-              lessonTitle={portalPeriodSpec.lessonTitle}
+            <LiveStudentProgressTracker
+              students={students}
+              classId={liveSession?.activeClassId || selectedClass}
               grade={portalActiveGrade}
               period={portalActivePeriod}
-              classId={liveSession?.activeClassId || selectedClass}
-              whiteboardState={liveSession?.whiteboardByLesson?.[portalLessonKey]}
-              slideBackgroundUrl={
-                portalSlides[Math.min(portalCurrentSlideIndex, portalSlides.length - 1)]?.imageUrl
-              }
-              readOnly={false}
-              onUpdateWhiteboard={(nextWb) => {
-                if (onUpdateLiveSession) {
-                  onUpdateLiveSession((prev) => ({
-                    ...prev,
-                    whiteboardByLesson: {
-                      ...(prev.whiteboardByLesson || {}),
-                      [portalLessonKey]: nextWb,
-                    },
-                    updatedAt: new Date().toISOString(),
-                  }));
-                }
-              }}
-              onClose={() => setShowWhiteboardModal(false)}
+              periodSpec={portalPeriodSpec}
+              liveSession={liveSession}
               onShowToast={onShowToast}
+              onUpdateLiveSession={onUpdateLiveSession}
+              onClose={() => setShowLiveProgressModal(false)}
             />
           </div>
         </div>

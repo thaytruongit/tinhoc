@@ -45,7 +45,6 @@ import { StudentLiveRoom } from './StudentLiveRoom';
 import { StudentMetricsDashboard } from './StudentMetricsDashboard';
 import { StudentActivityFeed } from './StudentActivityFeed';
 import { BadgeLibraryPanel } from './BadgeLibraryPanel';
-import { VirtualWhiteboardPanel } from './VirtualWhiteboardPanel';
 import { ClassLeaderboardPanel } from './ClassLeaderboardPanel';
 
 export type StudentView = 'trang-chu' | 'tro-ly-ai-cu-vang' | 'huy-hieu' | 'bang-xep-hang' | 'nhat-ky-hoat-dong';
@@ -2446,26 +2445,6 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       })}
                     </div>
                   </div>
-                  )}
-
-                  {/* SYNCHRONIZED REAL-TIME VIRTUAL WHITEBOARD FROM TEACHER */}
-                  {liveSession?.whiteboardByLesson?.[
-                    `k${selectedGrade}-tiet-${currentPeriodSpec.period}`
-                  ]?.isOpen && (
-                    <VirtualWhiteboardPanel
-                      lessonKey={`k${selectedGrade}-tiet-${currentPeriodSpec.period}`}
-                      lessonTitle={currentPeriodSpec.lessonTitle}
-                      grade={selectedGrade}
-                      period={currentPeriodSpec.period}
-                      classId={currentStudent.classId}
-                      whiteboardState={
-                        liveSession?.whiteboardByLesson?.[
-                          `k${selectedGrade}-tiet-${currentPeriodSpec.period}`
-                        ]
-                      }
-                      readOnly={true}
-                      onShowToast={onShowToast}
-                    />
                   )}
 
                   {/* ================= INLINE STAGE CONTENT RENDERED DIRECTLY BELOW THE SERPENTINE ROADMAP ================= */}
