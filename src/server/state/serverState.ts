@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { GoogleGenAI } from '@google/genai';
 import {
@@ -11,29 +10,10 @@ import {
 import {
   ensureDatabaseTablesExist,
   getLiveSessionStateFromDb,
-  getAllLectureSlideDecksFromDb,
   getAllLessonWorksheetsFromDb,
 } from '../../db/repository.ts';
-import {
-  isLegacyDemoSlideDeck,
-  isRealRenderedPdfSlideDeck,
-} from '../../utils/slideDeckManager.ts';
 
 export const DATA_DIR = path.resolve(process.cwd(), 'data');
-export const FILE_STORAGE_DIR = path.join(DATA_DIR, 'file-storage-slides');
-export const SLIDES_BACKUP_FILE = path.join(DATA_DIR, 'lecture_slides_store.json');
-export const FILE_STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024; // 1 GB
-export const DB_QUOTA_BYTES = 500 * 1024 * 1024; // 500 MB
-
-export interface FileStorageItem {
-  buffer: Buffer;
-  mimeType: string;
-  createdAt: string;
-  lessonKey: string;
-  sizeBytes: number;
-}
-
-export const fileStorageMemoryMap = new Map<string, FileStorageItem>();
 
 export let inMemoryClasses: ClassroomItem[] = [...INITIAL_CLASSES];
 export let inMemoryStudents: StudentRosterItem[] = [...INITIAL_STUDENTS];
@@ -82,9 +62,6 @@ export let liveClassroomSession: Record<string, any> = {
   activeClassId: '6A10',
   roomPin: '', // Mã PIN phòng học nếu bật bảo mật
   unlockedStagesByLesson: defaultUnlockedStagesByLesson,
-  lectureSlidesByLesson: {},
-  activeSlideIndexByLesson: {},
-  slideSyncVersionByLesson: {},
   wheelCall: null,
   taughtPeriodsByClass: { '6A10': [1], '7A10': [1] },
   learnedPeriodsByStudent: { '61008': ['k6-tiet-1'], '71001': ['k7-tiet-1'] },
@@ -235,17 +212,9 @@ export async function hydrateFromPostgresIfNeeded() {
         for (const [k, v] of Object.entries(rawCustomMap)) {
           sanitizedMap[k] = sanitizeWorksheetRecord(v, k);
         }
-        const rawSlidesMap = (parsed.lectureSlidesByLesson || {}) as Record<string, any>;
-        const cleanedSlidesMap: Record<string, any> = {};
-        for (const [k, deck] of Object.entries(rawSlidesMap)) {
-          if (deck && !isLegacyDemoSlideDeck(deck)) {
-            cleanedSlidesMap[k] = deck;
-          }
-        }
         liveClassroomSession = {
           ...liveClassroomSession,
           ...parsed,
-          lectureSlidesByLesson: cleanedSlidesMap,
           customWorksheetsByLesson: sanitizedMap,
           verifiedLessonsMap: {
             ...defaultVerifiedLessonsMap,
@@ -253,23 +222,6 @@ export async function hydrateFromPostgresIfNeeded() {
           },
         };
       }
-    }
-    const slideRows = await getAllLectureSlideDecksFromDb();
-    if (slideRows.length > 0) {
-      const slidesMap = {
-        ...((liveClassroomSession.lectureSlidesByLesson || {}) as Record<string, any>),
-      };
-      slideRows.forEach((row) => {
-        try {
-          const parsedDeck = JSON.parse(row.slidesJson);
-          if (parsedDeck && !isLegacyDemoSlideDeck(parsedDeck)) {
-            slidesMap[row.lessonKey] = parsedDeck;
-          }
-        } catch {
-          // ignore malformed slide row
-        }
-      });
-      liveClassroomSession.lectureSlidesByLesson = slidesMap;
     }
     const wsRows = await getAllLessonWorksheetsFromDb();
     if (wsRows.length > 0) {
@@ -299,208 +251,6 @@ export async function hydrateFromPostgresIfNeeded() {
   }
 }
 
-export function saveSlidesBackupToDisk() {
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    const decks = liveClassroomSession.lectureSlidesByLesson || {};
-    fs.writeFileSync(SLIDES_BACKUP_FILE, JSON.stringify(decks, null, 2), 'utf-8');
-  } catch (e) {
-    console.warn('[Server] Failed to save slides backup to disk:', e);
-  }
-}
-
-export function loadSlidesBackupFromDisk() {
-  try {
-    if (fs.existsSync(SLIDES_BACKUP_FILE)) {
-      const raw = fs.readFileSync(SLIDES_BACKUP_FILE, 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        const existing = (liveClassroomSession.lectureSlidesByLesson as Record<string, any>) || {};
-        const cleaned: Record<string, any> = { ...existing };
-        let purgedAny = false;
-        for (const [k, deck] of Object.entries(parsed as Record<string, any>)) {
-          if (deck && !isLegacyDemoSlideDeck(deck) && isRealRenderedPdfSlideDeck(deck)) {
-            cleaned[k] = deck;
-          } else {
-            purgedAny = true;
-          }
-        }
-        liveClassroomSession.lectureSlidesByLesson = cleaned;
-        if (purgedAny) {
-          saveSlidesBackupToDisk();
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('[Server] Failed to load slides backup from disk:', e);
-  }
-}
-
-// Khởi tạo thư mục file storage và nạp lại slide từ đĩa
-export function initFileStorageSystem() {
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    if (!fs.existsSync(FILE_STORAGE_DIR)) {
-      fs.mkdirSync(FILE_STORAGE_DIR, { recursive: true });
-    } else {
-      const savedFiles = fs.readdirSync(FILE_STORAGE_DIR);
-      for (const f of savedFiles) {
-        if (f.endsWith('.meta.json')) continue;
-        const filePath = path.join(FILE_STORAGE_DIR, f);
-        const metaPath = path.join(FILE_STORAGE_DIR, `${f}.meta.json`);
-        try {
-          const buffer = fs.readFileSync(filePath);
-          let mimeType = f.endsWith('.webp')
-            ? 'image/webp'
-            : f.endsWith('.png')
-            ? 'image/png'
-            : f.endsWith('.pdf')
-            ? 'application/pdf'
-            : f.endsWith('.mp4')
-            ? 'video/mp4'
-            : 'image/jpeg';
-          let lessonKey = 'general';
-          if (fs.existsSync(metaPath)) {
-            try {
-              const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-              if (meta.mimeType) mimeType = meta.mimeType;
-              if (meta.lessonKey) lessonKey = meta.lessonKey;
-            } catch {}
-          }
-          fileStorageMemoryMap.set(f, {
-            buffer,
-            mimeType,
-            createdAt: new Date().toISOString(),
-            lessonKey,
-            sizeBytes: buffer.length,
-          });
-        } catch {}
-      }
-    }
-    loadSlidesBackupFromDisk();
-  } catch (initErr) {
-    console.warn('[Server File Storage Init] Warning:', initErr);
-  }
-}
-
-export function storeDataUrlInFileStorage(
-  dataUrl: string,
-  lessonKey: string,
-  prefix = 'slide'
-): { fileId: string; url: string; sizeKb: number } | null {
-  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
-    return null;
-  }
-  const match = dataUrl.match(/^data:([a-zA-Z0-9.+/-]+);base64,(.+)$/);
-  if (!match) return null;
-  const mimeType = match[1] || 'image/webp';
-  const base64Data = match[2];
-  const buffer = Buffer.from(base64Data, 'base64');
-  const ext = mimeType.includes('webp')
-    ? 'webp'
-    : mimeType.includes('png')
-    ? 'png'
-    : mimeType.includes('pdf')
-    ? 'pdf'
-    : mimeType.includes('mp4')
-    ? 'mp4'
-    : 'jpg';
-  const safeKey = String(lessonKey || 'general').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const fileId = `${prefix}-${safeKey}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
-
-  fileStorageMemoryMap.set(fileId, {
-    buffer,
-    mimeType,
-    createdAt: new Date().toISOString(),
-    lessonKey: safeKey,
-    sizeBytes: buffer.length,
-  });
-
-  try {
-    fs.writeFileSync(path.join(FILE_STORAGE_DIR, fileId), buffer);
-    fs.writeFileSync(
-      path.join(FILE_STORAGE_DIR, `${fileId}.meta.json`),
-      JSON.stringify({ mimeType, lessonKey: safeKey, sizeBytes: buffer.length })
-    );
-  } catch {
-    // ignore disk write warning
-  }
-
-  // Supabase Storage sync nếu có cấu hình
-  const supaUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-  if (supaUrl && supaKey) {
-    fetch(`${supaUrl.replace(/\/$/, '')}/storage/v1/object/slide-storage-1gb/${fileId}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${supaKey}`,
-        apikey: supaKey,
-        'Content-Type': mimeType,
-        'x-upsert': 'true',
-      },
-      body: new Uint8Array(buffer),
-    }).catch(() => {});
-  }
-
-  return {
-    fileId,
-    url: `/api/file-storage/slides/file/${fileId}`,
-    sizeKb: Math.max(1, Math.round(buffer.length / 1024)),
-  };
-}
-
-export function offloadSessionBase64ToFileStorage(sessionObj: Record<string, any>): Record<string, any> {
-  if (!sessionObj || typeof sessionObj !== 'object') return sessionObj;
-  const decks = sessionObj.lectureSlidesByLesson as Record<string, any> | undefined;
-  if (!decks || typeof decks !== 'object') return sessionObj;
-
-  const updatedDecks: Record<string, any> = { ...decks };
-  for (const [lKey, deck] of Object.entries(updatedDecks)) {
-    if (!deck || typeof deck !== 'object') continue;
-    let nextDeck = { ...deck, storageBucket: 'file-storage-1gb' };
-
-    if (typeof nextDeck.pdfDataUrl === 'string' && nextDeck.pdfDataUrl.startsWith('data:')) {
-      const storedPdf = storeDataUrlInFileStorage(nextDeck.pdfDataUrl, lKey, 'pdf');
-      if (storedPdf) {
-        nextDeck.pdfDataUrl = storedPdf.url;
-      }
-    }
-
-    if (Array.isArray(nextDeck.slides)) {
-      let totalKb = 0;
-      nextDeck.slides = nextDeck.slides.map((sl: any, idx: number) => {
-        if (!sl || typeof sl !== 'object') return sl;
-        if (typeof sl.imageUrl === 'string' && sl.imageUrl.startsWith('data:')) {
-          const stored = storeDataUrlInFileStorage(sl.imageUrl, lKey, `slide-${idx + 1}`);
-          if (stored) {
-            totalKb += stored.sizeKb;
-            return {
-              ...sl,
-              imageUrl: stored.url,
-              storageFileId: stored.fileId,
-              compressedSizeKb: stored.sizeKb,
-            };
-          }
-        }
-        totalKb += Number(sl.compressedSizeKb) || 45;
-        return sl;
-      });
-      nextDeck.totalCompressedKb = totalKb;
-      nextDeck.fileSize = `${totalKb} KB`;
-    }
-    updatedDecks[lKey] = nextDeck;
-  }
-
-  return {
-    ...sessionObj,
-    lectureSlidesByLesson: updatedDecks,
-  };
-}
-
 export function getGenAIClient(customApiKey?: string): GoogleGenAI | null {
   const apiKey =
     customApiKey && typeof customApiKey === 'string' && customApiKey.trim().length > 0
@@ -518,4 +268,3 @@ export function getGenAIClient(customApiKey?: string): GoogleGenAI | null {
     },
   });
 }
-

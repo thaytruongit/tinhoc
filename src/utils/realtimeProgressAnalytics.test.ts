@@ -5,7 +5,6 @@ import {
   formatTeacherStageCompletionToast,
   computeClassProgressAnalytics,
   computeSingleActivityVisualization,
-  buildInteractiveHtmlSlideTemplate,
   getStageVietnameseName,
 } from './realtimeProgressAnalytics';
 import { INITIAL_STUDENTS } from '../data/mockCurriculumData';
@@ -126,19 +125,6 @@ test('computeSingleActivityVisualization returns distinct subTasks and station s
   assert.ok(hd2Viz.subTasks[1].title.includes('2. Điền khuyết vào chỗ trống'));
   assert.ok(hd2Viz.subTasks[2].title.includes('3. Nối cột định nghĩa'));
   assert.ok(hd2Viz.subTasks[3].title.includes('4. Trả lời ngắn / Tự luận'));
-});
-
-test('buildInteractiveHtmlSlideTemplate generates valid interactive HTML5 slide deck', () => {
-  const html = buildInteractiveHtmlSlideTemplate({
-    grade: 6,
-    period: 1,
-    lessonTitle: 'Bài 1: Thông tin và dữ liệu',
-    topic: 'Chủ đề A: Máy tính và cộng đồng',
-    yccd: 'Phân biệt được thông tin và dữ liệu',
-  });
-  assert.ok(html.startsWith('<!DOCTYPE html>'));
-  assert.ok(html.includes('Bài 1: Thông tin và dữ liệu'));
-  assert.ok(html.includes('HTML SLIDE WEB TƯƠNG TÁC'));
 });
 
 

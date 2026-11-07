@@ -14,7 +14,6 @@ import {
   type ClassroomItem,
   type LiveClassroomSession,
   type StudentRosterItem,
-  type LectureSlideDeck,
 } from './data/mockCurriculumData';
 import {
   auth,
@@ -32,20 +31,7 @@ import {
   normalizeLiveSession,
   normalizeStudentRosterList,
   normalizeClassroomList,
-  buildEndSlidePresentationState,
 } from './utils/slideAndArenaController';
-import {
-  getAllSlideDecksFromIndexedDb,
-  saveSlideDeckToIndexedDb,
-  getSlideDeckForLessonFromIndexedDb,
-  deleteSlideDeckFromIndexedDb,
-} from './utils/indexedDbSlideStorage';
-import {
-  stripLargeBlobsForLocalStorage,
-  ensureDeckSlideImages,
-  filterActiveSlideDecksForMemory,
-  isRealRenderedPdfSlideDeck,
-} from './utils/slideDeckManager';
 import {
   buildStageCompletionEvent,
   formatTeacherStageCompletionToast,
@@ -55,10 +41,6 @@ import {
   loadGitHubPublicSnapshotFromStaticUrl,
   mergeGitHubPublicSnapshotIntoLiveSession,
 } from './utils/githubPublicSync';
-import {
-  getSavedGoogleSheetsConfig,
-  saveGoogleSheetsConfig,
-} from './utils/googleSheetsConnector';
 
 type AppMode = 'login' | 'student' | 'teacher';
 
@@ -203,74 +185,10 @@ export default function App() {
     }
   }, [classes]);
 
-  // Persist genuine rendered PDF slide decks to IndexedDB asynchronously (never save blank placeholders or synthetic SVG decks)
-  useEffect(() => {
-    const decks = liveSession?.lectureSlidesByLesson;
-    if (decks && typeof decks === 'object') {
-      for (const [k, d] of Object.entries(decks)) {
-        if (d && typeof d === 'object') {
-          if ((d as any).isLazyLoaded !== false && isRealRenderedPdfSlideDeck(d)) {
-            saveSlideDeckToIndexedDb(k, d as any).catch(() => {});
-          }
-        }
-      }
-    }
-  }, [liveSession?.lectureSlidesByLesson]);
-
-  // On-demand Lazy Loading hydration for active lesson: loads full high-res images from IndexedDB ONLY if it is a real rendered PDF
-  useEffect(() => {
-    let isCancelled = false;
-    async function hydrateActiveLesson() {
-      const currentDeck = liveSession?.lectureSlidesByLesson?.[activeLessonKey];
-      const needsHydration =
-        !currentDeck ||
-        (currentDeck as any).isLazyLoaded === false ||
-        (Array.isArray(currentDeck.slides) &&
-          currentDeck.slides.some((s: any) => s.isLazyPlaceholder));
-
-      if (needsHydration) {
-        try {
-          const hydrated = await getSlideDeckForLessonFromIndexedDb(activeLessonKey);
-          if (hydrated && !isCancelled) {
-            if (isRealRenderedPdfSlideDeck(hydrated)) {
-              setLiveSession((prev) => {
-                const prevDecks = prev.lectureSlidesByLesson || {};
-                const nextDecks = {
-                  ...prevDecks,
-                  [activeLessonKey]: {
-                    ...hydrated,
-                    isLazyLoaded: true,
-                  },
-                };
-                const governedDecks = filterActiveSlideDecksForMemory(
-                  nextDecks,
-                  activeLessonKey
-                ) as Record<string, LectureSlideDeck>;
-                return {
-                  ...prev,
-                  lectureSlidesByLesson: governedDecks,
-                };
-              });
-            } else {
-              await deleteSlideDeckFromIndexedDb(activeLessonKey).catch(() => {});
-            }
-          }
-        } catch {
-          // ignore
-        }
-      }
-    }
-    hydrateActiveLesson();
-    return () => {
-      isCancelled = true;
-    };
-  }, [activeLessonKey]);
-
-  // Persist live session to localStorage with large blob stripping to avoid QuotaExceededError
+  // Persist live session to localStorage
   useEffect(() => {
     try {
-      const sanitizedSession = stripLargeBlobsForLocalStorage(liveSession);
-      localStorage.setItem('cloudplay_live_session_v5', JSON.stringify(sanitizedSession));
+      localStorage.setItem('cloudplay_live_session_v5', JSON.stringify(liveSession));
     } catch {
       // ignore
     }
@@ -278,38 +196,12 @@ export default function App() {
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Fetch initial classes, students, liveSession, and dedicated DB slides from backend database
+  // Fetch initial classes, students, and liveSession from backend database
   useEffect(() => {
     async function fetchBackendData() {
       setIsLoading(true);
       try {
-        // 1. Immediately hydrate any saved genuine PDF slide decks from IndexedDB (purging legacy synthetic SVG decks)
-        const rawIdbDecks = await getAllSlideDecksFromIndexedDb().catch(() => ({}));
-        const idbDecks: Record<string, LectureSlideDeck> = {};
-        if (rawIdbDecks && typeof rawIdbDecks === 'object') {
-          for (const [k, deck] of Object.entries(rawIdbDecks)) {
-            if (isRealRenderedPdfSlideDeck(deck)) {
-              idbDecks[k] = deck;
-            } else {
-              deleteSlideDeckFromIndexedDb(k).catch(() => {});
-            }
-          }
-        }
-        if (Object.keys(idbDecks).length > 0) {
-          const governed = filterActiveSlideDecksForMemory(
-            idbDecks,
-            activeLessonKey
-          ) as Record<string, LectureSlideDeck>;
-          setLiveSession((prev) => ({
-            ...prev,
-            lectureSlidesByLesson: {
-              ...(prev.lectureSlidesByLesson || {}),
-              ...governed,
-            },
-          }));
-        }
-
-        const [clsRes, stRes, liveRes, slidesRes, githubSnap] = await Promise.all([
+        const [clsRes, stRes, liveRes, githubSnap] = await Promise.all([
           fetch('/api/db/classes')
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
@@ -317,9 +209,6 @@ export default function App() {
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
           fetch('/api/live-session')
-            .then((r) => (r.ok ? r.json() : null))
-            .catch(() => null),
-          fetch('/api/db/slides')
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
           loadGitHubPublicSnapshotFromStaticUrl().catch(() => null),
@@ -349,36 +238,7 @@ export default function App() {
         if (liveRes && typeof liveRes === 'object') {
           setLiveSession((prev) => {
             const normalized = normalizeLiveSession(liveRes, prev);
-            const rawServerDecks =
-              slidesRes?.ok && slidesRes.decks && typeof slidesRes.decks === 'object'
-                ? slidesRes.decks
-                : {};
-            const serverDecks: Record<string, any> = {};
-            for (const [k, d] of Object.entries(rawServerDecks)) {
-              if (isRealRenderedPdfSlideDeck(d)) {
-                serverDecks[k] = d;
-              }
-            }
-            const mergedDecks = {
-              ...(idbDecks || {}),
-              ...(prev.lectureSlidesByLesson || {}),
-              ...((normalized.lectureSlidesByLesson as Record<string, any>) || {}),
-              ...serverDecks,
-            };
-            const governedDecks = filterActiveSlideDecksForMemory(
-              mergedDecks,
-              activeLessonKey
-            ) as Record<string, LectureSlideDeck>;
-            const withDecks = {
-              ...normalized,
-              googleSheetsCsdlConfig:
-                normalized.googleSheetsCsdlConfig ||
-                getSavedGoogleSheetsConfig() ||
-                githubSnap?.googleSheetsCsdlConfig ||
-                undefined,
-              lectureSlidesByLesson: governedDecks,
-            };
-            return mergeGitHubPublicSnapshotIntoLiveSession(withDecks, githubSnap);
+            return mergeGitHubPublicSnapshotIntoLiveSession(normalized, githubSnap);
           });
         } else if (supabase && isSupabaseRealtimeConfigured) {
           const { data: sbLiveRow } = await supabase
@@ -441,14 +301,6 @@ export default function App() {
         setSelectedClass(data.classId);
       } else if (data.type === 'LIVE_SESSION_UPDATED' && data.session) {
         setLiveSession((prev) => normalizeLiveSession(data.session, prev));
-      } else if (data.type === 'GOOGLE_SHEETS_CONFIG_CHANGED') {
-        if (data.config?.spreadsheetId) {
-          saveGoogleSheetsConfig(data.config);
-        }
-        setLiveSession((prev) => ({
-          ...prev,
-          googleSheetsCsdlConfig: data.config || undefined,
-        }));
       } else if (data.type === 'GITHUB_PUBLIC_SNAPSHOT_SYNCED' && data.snapshot) {
         setLiveSession((prev) => mergeGitHubPublicSnapshotIntoLiveSession(prev, data.snapshot));
       } else if (data.type === 'STUDENT_STAGE_COMPLETED' && data.completionEvent) {
@@ -472,57 +324,6 @@ export default function App() {
               [evt.studentId]: nextStages,
             },
             updatedAt: evt.timestampIso || new Date().toISOString(),
-          };
-        });
-      } else if (data.type === 'SLIDE_ENDED' && typeof data.lessonKey === 'string') {
-        lastLocalMutationAtRef.current = Date.now();
-        setLiveSession((prev) => buildEndSlidePresentationState(prev, data.lessonKey));
-      } else if (
-        data.type === 'SLIDE_CHANGED' &&
-        typeof data.lessonKey === 'string' &&
-        typeof data.slideIndex === 'number'
-      ) {
-        lastLocalMutationAtRef.current = Date.now();
-        setLiveSession((prev) => {
-          const incomingVer =
-            typeof data.slideSyncVersion === 'number' ? data.slideSyncVersion : Date.now();
-          const currentVer = prev.slideSyncVersionByLesson?.[data.lessonKey] ?? 0;
-          if (incomingVer < currentVer) {
-            return prev;
-          }
-          return {
-            ...prev,
-            isBroadcasting: true,
-            activeGrade: data.grade || prev.activeGrade,
-            activePeriod: data.period || prev.activePeriod,
-            activeClassId: data.classId || prev.activeClassId,
-            activeLiveView: data.activeLiveView || 'slide',
-            unlockedSlideDeckByLesson: {
-              ...(prev.unlockedSlideDeckByLesson || {}),
-              [data.lessonKey]: true,
-            },
-            unlockedStagesByLesson: {
-              ...(prev.unlockedStagesByLesson || {}),
-              [data.lessonKey]: {
-                1: false,
-                2: false,
-                3: false,
-                4: false,
-              },
-            },
-            unlockedPracticeStage3ByLesson: {
-              ...(prev.unlockedPracticeStage3ByLesson || {}),
-              [data.lessonKey]: false,
-            },
-            activeSlideIndexByLesson: {
-              ...(prev.activeSlideIndexByLesson || {}),
-              [data.lessonKey]: data.slideIndex,
-            },
-            slideSyncVersionByLesson: {
-              ...(prev.slideSyncVersionByLesson || {}),
-              [data.lessonKey]: incomingVer,
-            },
-            updatedAt: data.timestampIso || new Date().toISOString(),
           };
         });
       }

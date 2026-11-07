@@ -18,7 +18,6 @@ import {
   ApplicationThreeTasksActivity,
 } from './InteractiveActivities';
 import { PeerReviewModal } from './PeerReviewModal';
-import { getDefaultLectureSlides } from './LectureSlideManagerModal';
 import {
   playStageBroadcastSound,
   triggerSynchronizedCelebration,
@@ -33,20 +32,9 @@ import {
   isStudentLiveViewUnlocked,
   computeArenaRemainingSeconds,
   formatCountdownMmSs,
-  isFileStorageSlideUrl,
   getArenaCountdownVisualState,
-  generateFallbackSlideSvgDataUrl,
   isActivityFinalized,
 } from '../utils/slideAndArenaController';
-import {
-  buildFixedFolderPdfSlideCacheDeck,
-  isRealRenderedPdfSlideDeck,
-  BLANK_WHITE_SLIDE_DATA_URL,
-} from '../utils/slideDeckManager';
-import {
-  getSavedGoogleSheetsConfig,
-  loadLessonSlideDeckFromGoogleSheet,
-} from '../utils/googleSheetsConnector';
 import { LiveClassroomWaitingRoom } from './LiveClassroomWaitingRoom';
 
 interface StudentLiveRoomProps {
@@ -64,7 +52,7 @@ interface StudentLiveRoomProps {
   onSaveSubmission?: (sub: Partial<TaggedLessonSubmission>) => void;
 }
 
-type StudentLiveViewId = 'waiting' | 'slide' | 1 | 2 | 3 | 'hd3-practice' | 4;
+type StudentLiveViewId = 'waiting' | 1 | 2 | 3 | 'hd3-practice' | 4;
 
 export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
   currentStudent,
@@ -91,7 +79,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
 
   const resolveInitialView = (): StudentLiveViewId => {
     if (!teacherActiveView || teacherActiveView === 'waiting') return 'waiting';
-    if (teacherActiveView === 'slide') return 'slide';
     if (teacherActiveView === 'hd3-practice') return 'hd3-practice';
     if (teacherActiveView === 'hd1') return 1;
     if (teacherActiveView === 'hd2') return 2;
@@ -124,7 +111,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
       } catch {}
       onShowToast(
         next
-          ? '🎯 Đã BẬT Chế độ tập trung: Đã ẩn thanh điều hướng để em dồn 100% sự tập trung vào bài tập & slide!'
+          ? '🎯 Đã BẬT Chế độ tập trung: Đã ẩn thanh điều hướng để em dồn 100% sự tập trung vào bài tập!'
           : '👁️ Đã TẮT Chế độ tập trung: Hiển thị lại thanh điều hướng bài học.'
       );
       return next;
@@ -233,148 +220,31 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     setIsStudentArenaReady(false);
   }, [lessonKey]);
 
-  // Slide state synchronized with Teacher & Google Sheet CSDL (monotonic version-guarded to prevent erratic jumping)
-  const [studentSheetDeck, setStudentSheetDeck] = useState<any>(null);
-  const uploadedDeck =
-    isRealRenderedPdfSlideDeck(liveSession?.lectureSlidesByLesson?.[lessonKey])
-      ? liveSession?.lectureSlidesByLesson?.[lessonKey]
-      : isRealRenderedPdfSlideDeck(studentSheetDeck)
-      ? studentSheetDeck
-      : liveSession?.lectureSlidesByLesson?.[lessonKey];
-
-  // Tự động tải Slide bài giảng từ Google Sheet "CSDL" phía Học sinh nếu Giáo viên đã gắn Sheet CSDL
-  useEffect(() => {
-    if (isRealRenderedPdfSlideDeck(liveSession?.lectureSlidesByLesson?.[lessonKey])) {
-      return;
-    }
-    const activeSheetId =
-      liveSession?.googleSheetsCsdlConfig?.spreadsheetId ||
-      getSavedGoogleSheetsConfig()?.spreadsheetId;
-    if (!activeSheetId) return;
-
-    let cancelled = false;
-    const validGrade = ([6, 7, 8, 9].includes(Number(periodSpec.grade))
-      ? Number(periodSpec.grade)
-      : 6) as 6 | 7 | 8 | 9;
-
-    loadLessonSlideDeckFromGoogleSheet({
-      spreadsheetId: activeSheetId,
-      grade: validGrade,
-      period: periodSpec.period,
-      lessonTitle: periodSpec.lessonTitle,
-    })
-      .then((res) => {
-        if (!cancelled && res.foundInSheet && !res.isBlankSlide && res.deck) {
-          setStudentSheetDeck(res.deck);
-        }
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    lessonKey,
-    periodSpec.grade,
-    periodSpec.period,
-    periodSpec.lessonTitle,
-    liveSession?.googleSheetsCsdlConfig?.spreadsheetId,
-    liveSession?.lectureSlidesByLesson,
-  ]);
-
-  const blankFallbackSlides = buildFixedFolderPdfSlideCacheDeck({
-    grade: ([6, 7, 8, 9].includes(Number(periodSpec.grade)) ? Number(periodSpec.grade) : 6) as
-      | 6
-      | 7
-      | 8
-      | 9,
-    period: periodSpec.period,
-    lessonTitle: periodSpec.lessonTitle,
-    topic: periodSpec.topic,
-    yccd: periodSpec.yccd,
-  }).slides;
-  const slidesList = isRealRenderedPdfSlideDeck(uploadedDeck)
-    ? uploadedDeck!.slides
-    : blankFallbackSlides;
-  const deckFileName =
-    uploadedDeck?.fileName ||
-    `Bai_giang_Khoi_${periodSpec.grade}_Tiet_${periodSpec.period}.pdf`;
-  const deckFileType = uploadedDeck?.fileType || 'pdf';
-  const teacherSlideIndex = liveSession?.activeSlideIndexByLesson?.[lessonKey] ?? 0;
-  const teacherSlideSyncVer = liveSession?.slideSyncVersionByLesson?.[lessonKey] ?? 0;
-  const lastAppliedSlideSyncVerRef = useRef<number>(teacherSlideSyncVer);
-  const [studentSlideIndex, setStudentSlideIndex] = useState<number>(teacherSlideIndex);
-
-  useEffect(() => {
-    if (teacherSlideSyncVer >= lastAppliedSlideSyncVerRef.current) {
-      lastAppliedSlideSyncVerRef.current = teacherSlideSyncVer;
-      setStudentSlideIndex(teacherSlideIndex);
-    }
-  }, [teacherSlideIndex, teacherSlideSyncVer]);
-
-  // Direct BroadcastChannel listener for instant slide & lock synchronization from TeacherPortal / TeacherLivePresenterRoom
+  // Direct BroadcastChannel listener for live session events from TeacherPortal / TeacherLivePresenterRoom
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return;
     const ch = new BroadcastChannel('cloudplay_realtime_sync');
     ch.onmessage = (event) => {
       const data = event.data;
       if (!data || typeof data !== 'object') return;
-      if (data.type === 'SLIDE_CHANGED') {
-        if (!data.lessonKey || data.lessonKey === lessonKey) {
-          const incomingVer =
-            typeof data.slideSyncVersion === 'number' ? data.slideSyncVersion : Date.now();
-          if (incomingVer >= lastAppliedSlideSyncVerRef.current) {
-            lastAppliedSlideSyncVerRef.current = incomingVer;
-            if (typeof data.slideIndex === 'number') {
-              setStudentSlideIndex(data.slideIndex);
-            }
-            if (data.activeLiveView === 'slide') {
-              setActiveView('slide');
-            }
-          }
-        }
-      } else if (data.type === 'SLIDE_ENDED') {
-        if (!data.lessonKey || data.lessonKey === lessonKey) {
-          onShowToast(
-            '⏹️ Giáo viên đã kết thúc hoạt động đang phát — Màn hình dừng tại chỗ và chờ Giáo viên phát hoạt động tiếp theo!'
-          );
-        }
-      } else if (data.type === 'LIVE_SESSION_ENDED') {
+      if (data.type === 'LIVE_SESSION_ENDED') {
         if (!data.classId || data.classId === currentStudent.classId) {
           onShowToast(
             '🔔 Giáo viên đã kết thúc & thoát phiên Live! Phiên học trực tiếp của lớp đã đóng lại, em có thể tiếp tục tự luyện tập.'
           );
           onExitLiveRoom();
         }
-      } else if (data.type === 'LIVE_SESSION_UPDATED' && data.session) {
-        const incomingVer = data.session.slideSyncVersionByLesson?.[lessonKey] ?? 0;
-        const nextIdx = data.session.activeSlideIndexByLesson?.[lessonKey];
-        if (incomingVer >= lastAppliedSlideSyncVerRef.current && typeof nextIdx === 'number') {
-          lastAppliedSlideSyncVerRef.current = incomingVer;
-          setStudentSlideIndex(nextIdx);
-        }
-        if (data.session.activeLiveView === 'slide') {
-          setActiveView('slide');
-        }
       }
     };
     return () => {
       ch.close();
     };
-  }, [lessonKey, onShowToast, onExitLiveRoom, currentStudent.classId]);
+  }, [onShowToast, onExitLiveRoom, currentStudent.classId]);
 
-  // Synchronized lock states for Slide Deck and Stage 3 Practical Activity
-  const isSlideDeckUnlocked =
-    teacherActiveView === 'waiting'
-      ? false
-      : Boolean(liveSession?.unlockedSlideDeckByLesson?.[lessonKey]);
+  // Synchronized lock state for Stage 3 Practical Activity
   const isPracticeStage3Unlocked = Boolean(
     liveSession?.unlockedPracticeStage3ByLesson?.[lessonKey]
   );
-
-  // Synchronized Explanation Video state accompanying Slide Image
-  const slideVideoState = liveSession?.slideVideoStateByLesson?.[lessonKey];
-  const isSlideVideoPlaying = Boolean(slideVideoState?.isPlaying && slideVideoState?.videoUrl);
 
   // Synchronized Practice Arena Countdown Clock state (when Hoạt động 3 is opened AND student clicked Sẵn sàng luyện tập)
   const arenaCountdownState = liveSession?.arenaCountdownStateByLesson?.[lessonKey];
@@ -417,7 +287,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
       if (!document.fullscreenElement) {
         await document.documentElement.requestFullscreen();
         setIsFullscreen(true);
-        onShowToast('🖥️ Đã bật chế độ Phóng to toàn màn hình (Fullscreen) để xem rõ bài giảng!');
+        onShowToast('🖥️ Đã bật chế độ Phóng to toàn màn hình (Fullscreen) để xem rõ bài học!');
       } else {
         await document.exitFullscreen();
         setIsFullscreen(false);
@@ -427,18 +297,11 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
       setIsFullscreen((prev) => !prev);
       onShowToast(
         !isFullscreen
-          ? '🖥️ Đã tối ưu không gian hiển thị phóng to Slide Bài Giảng!'
+          ? '🖥️ Đã tối ưu không gian hiển thị phóng to toàn màn hình!'
           : '🖥️ Đã thu nhỏ khung hiển thị về mặc định.'
       );
     }
   };
-
-  // Force activeView to 'slide' ONLY when Teacher explicitly broadcasts Slide Image
-  useEffect(() => {
-    if (teacherActiveView === 'slide' && activeView !== 'slide') {
-      setActiveView('slide');
-    }
-  }, [teacherActiveView, activeView]);
 
   // Track real-time Top Performers in Class
   const rankedLiveStudents = [...students]
@@ -480,7 +343,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     id: string;
     title: string;
     body: string;
-    stage?: 'slide' | 'whiteboard' | 'hd3-practice' | 1 | 2 | 3 | 4;
+    stage?: 'whiteboard' | 'hd3-practice' | 1 | 2 | 3 | 4;
     stageLabel?: string;
     timestampIso: string;
   } | null>(null);
@@ -532,14 +395,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
   useEffect(() => {
     if (teacherActiveView && teacherActiveView !== lastTeacherViewRef.current) {
       lastTeacherViewRef.current = teacherActiveView;
-      if (teacherActiveView === 'slide') {
-        setActiveView('slide');
-        playStageBroadcastSound();
-        onShowToast(
-          '📢 Giáo viên vừa phát trực tiếp Slide Bài Giảng — Màn hình của em đã tự động chuyển sang Slide Bài Giảng!'
-        );
-        return;
-      }
       if (teacherActiveView === 'waiting') {
         setActiveView('waiting');
         playStageBroadcastSound();
@@ -615,7 +470,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     return isStudentLiveViewUnlocked({
       viewId,
       teacherActiveView,
-      isSlideDeckUnlocked,
       isPracticeStage3Unlocked,
       unlockedStages: effectiveUnlockedStages,
       teacherCurrentStage,
@@ -633,12 +487,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
       label: 'Phòng Chờ Lớp',
       icon: 'meeting_room',
       points: 'Sảnh Live',
-    },
-    {
-      id: 'slide',
-      label: 'Slide Bài Giảng',
-      icon: 'slideshow',
-      points: 'PDF/PPTX',
     },
     {
       id: 1,
@@ -693,14 +541,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     onShowToast(msg);
   };
 
-  // When teacher is actively broadcasting slides, lock directly to teacherSlideIndex so student never sees erratic slide jumps
-  const rawSlideIdx = teacherActiveView === 'slide' ? teacherSlideIndex : studentSlideIndex;
-  const safeSlideIdx =
-    slidesList.length > 0 ? Math.max(0, Math.min(rawSlideIdx, slidesList.length - 1)) : 0;
-  const activeSlide = slidesList.length > 0 ? slidesList[safeSlideIdx] : undefined;
-  const activeSlideImageSrc = activeSlide
-    ? activeSlide.imageUrl || BLANK_WHITE_SLIDE_DATA_URL
-    : BLANK_WHITE_SLIDE_DATA_URL;
   const isArenaStage3Unlocked = isViewUnlocked(3);
 
   return (
@@ -720,7 +560,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
             <span>Trang chủ</span>
           </button>
 
-          {/* Activities + Slide + Practice Menu */}
+          {/* Activities + Practice Menu */}
           <div className="flex flex-col gap-1.5">
             <span className="px-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
               Tiến trình bài học Live
@@ -730,7 +570,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                 const unlocked = isViewUnlocked(item.id);
                 const isActive = activeView === item.id;
                 const isTeacherBroadcastingThis =
-                  (item.id === 'slide' && teacherActiveView === 'slide') ||
                   (item.id === 'hd3-practice' && teacherActiveView === 'hd3-practice') ||
                   (typeof item.id === 'number' && teacherActiveView === `hd${item.id}`);
                 const isDone = Boolean(completedStages[String(item.id)]);
@@ -741,11 +580,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     type="button"
                     onClick={() => {
                       if (!unlocked) {
-                        onShowToast(
-                          teacherActiveView === 'slide'
-                            ? `🔒 Giáo viên đang trình chiếu Slide Bài Giảng — Các hoạt động khác tạm khóa để em tập trung xem Slide!`
-                            : `🔒 "${item.label}" đang khóa — Chờ Giáo viên mở khóa trên màn hình điều khiển!`
-                        );
+                        onShowToast(`🔒 "${item.label}" đang khóa — Chờ Giáo viên mở khóa trên màn hình điều khiển!`);
                         return;
                       }
                       setActiveView(item.id);
@@ -813,7 +648,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
               <span>Đồng bộ tự động &amp; Quay lại</span>
             </div>
             <p className="text-[11px] text-sky-700 leading-relaxed">
-              Màn hình tự động chuyển khi Giáo viên phát Slide hoặc hoạt động mới. Em có thể bấm vào các mục đã mở khóa để hoàn thiện bài!
+              Màn hình tự động chuyển khi Giáo viên phát hoạt động mới. Em có thể bấm vào các mục đã mở khóa để hoàn thiện bài!
             </p>
           </div>
         </div>
@@ -880,9 +715,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
               <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
               <span>
                 ĐANG HỌC LIVE (
-                {teacherActiveView === 'slide'
-                  ? 'Slide Bài Giảng'
-                  : teacherActiveView === 'hd3-practice'
+                {teacherActiveView === 'hd3-practice'
                   ? 'HĐ 3 Thực Hành'
                   : teacherActiveView === 'hd1'
                   ? 'HĐ 1'
@@ -948,7 +781,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
               title={
                 isFocusMode
                   ? 'Đang bật Chế độ tập trung (Phím F). Bấm để hiển thị lại menu bên trái'
-                  : 'Bật Chế độ tập trung (Ẩn menu bên trái để mở rộng 100% không gian cho câu hỏi & slide) (Phím F)'
+                  : 'Bật Chế độ tập trung (Ẩn menu bên trái để mở rộng 100% không gian cho câu hỏi) (Phím F)'
               }
             >
               <span className={`material-symbols-outlined text-[16px] ${isFocusMode ? 'animate-pulse' : ''}`}>
@@ -970,7 +803,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
               title={
                 isFullscreen
                   ? 'Thu nhỏ màn hình (Thoát Fullscreen)'
-                  : 'Phóng to toàn màn hình (Fullscreen) tối ưu hiển thị Slide'
+                  : 'Phóng to toàn màn hình (Fullscreen) tối ưu hiển thị bài học'
               }
             >
               <span className="material-symbols-outlined text-[16px]">
@@ -1010,14 +843,12 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
             isFullscreen ? 'max-w-7xl' : 'max-w-5xl'
           }`}
         >
-          {/* TOP HORIZONTAL NAVIGATION BAR: SLIDE BÀI GIẢNG & HOẠT ĐỘNG 1, 2, 3, 3-THỰC HÀNH, 4 (WITH LOCK ICONS WHEN SLIDE IS BROADCAST) */}
+          {/* TOP HORIZONTAL NAVIGATION BAR: HOẠT ĐỘNG 1, 2, 3, 3-THỰC HÀNH, 4 */}
           <div className="p-2.5 rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 flex-wrap">
               {navItems.map((item) => {
                 const unlocked = isViewUnlocked(item.id);
                 const isActive = activeView === item.id;
-                const isLockedBySlideBroadcast =
-                  teacherActiveView === 'slide' && item.id !== 'slide';
 
                 return (
                   <button
@@ -1025,11 +856,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     type="button"
                     onClick={() => {
                       if (!unlocked) {
-                        onShowToast(
-                          teacherActiveView === 'slide'
-                            ? `🔒 Giáo viên đang trình chiếu Slide Bài Giảng — Các hoạt động khác tạm khóa để em tập trung xem Slide!`
-                            : `🔒 "${item.label}" đang khóa — Chờ Giáo viên mở khóa trên màn hình điều khiển!`
-                        );
+                        onShowToast(`🔒 "${item.label}" đang khóa — Chờ Giáo viên mở khóa trên màn hình điều khiển!`);
                         return;
                       }
                       setActiveView(item.id);
@@ -1043,9 +870,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     }`}
                     title={
                       !unlocked
-                        ? isLockedBySlideBroadcast
-                          ? `Đang khóa "${item.label}" vì Giáo viên đang chiếu Slide Bài Giảng`
-                          : `"${item.label}" đang chờ Giáo viên mở khóa`
+                        ? `"${item.label}" đang chờ Giáo viên mở khóa`
                         : item.label
                     }
                   >
@@ -1062,17 +887,10 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                 );
               })}
             </div>
-
-            {teacherActiveView === 'slide' && (
-              <span className="px-3 py-1 rounded-full bg-red-50 border border-red-200 text-red-700 text-[11px] font-black flex items-center gap-1">
-                <span className="material-symbols-outlined text-[14px]">lock</span>
-                <span>Chế độ Chiếu Slide: Đã khóa HĐ 1, 2, 3, 3-TH, 4</span>
-              </span>
-            )}
           </div>
 
           {/* GLOBAL REAL-TIME PRACTICE ARENA COUNTDOWN CLOCK BAR WHEN HOẠT ĐỘNG 3 IS UNLOCKED */}
-          {isArenaStage3Unlocked && teacherActiveView !== 'slide' && (
+          {isArenaStage3Unlocked && (
             <div className="rounded-2xl bg-gradient-to-r from-purple-950 via-indigo-950 to-slate-900 text-white p-4 shadow-md border border-purple-400/30 flex flex-col gap-2.5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
@@ -1246,269 +1064,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
             </div>
           ) : (
             <div className="flex flex-col gap-6">
-              {/* VIEW 0: SLIDE BÀI GIẢNG (PDF/PPTX) ĐỒNG BỘ — CHỈ HIỂN THỊ SLIDE ẢNH (& VIDEO GIẢI THÍCH NẾU BẬT) KHI GV PHÁT */}
-              {activeView === 'slide' && (
-                <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-5">
-                  {teacherActiveView === 'slide' && (
-                    <div className="px-4 py-3 rounded-2xl bg-gradient-to-r from-orange-500 via-amber-500 to-orange-600 text-white text-xs font-bold flex flex-wrap items-center justify-between gap-2 shadow-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-[18px]">lock</span>
-                        <span>
-                          📢 Giáo viên đang phát trực tiếp Slide Bài Giảng — Các hoạt động khác đã tạm khóa để chỉ hiển thị Slide ảnh đồng bộ!
-                        </span>
-                      </div>
-                      <span className="px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[11px] font-black">
-                        Slide {safeSlideIdx + 1}/{slidesList.length}
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-800 flex items-center justify-center">
-                        <span className="material-symbols-outlined text-[22px]">slideshow</span>
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h2 className="text-lg font-bold text-slate-900">
-                            Slide Bài Giảng Đồng Bộ: {deckFileName}
-                          </h2>
-                          {isFileStorageSlideUrl(activeSlide?.imageUrl) && (
-                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black">
-                              ☁️ File Storage 1GB
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-slate-500">
-                          Đồng bộ trực tiếp theo trang trình chiếu của Giáo viên ({deckFileType.toUpperCase()})
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[15px]">sync</span>
-                        <span>Đồng bộ trực tiếp với GV</span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleToggleFullscreen}
-                        className="px-3 py-1 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
-                        title="Phóng to toàn màn hình để xem rõ Slide Bài Giảng"
-                      >
-                        <span className="material-symbols-outlined text-[15px]">
-                          {isFullscreen ? 'fullscreen_exit' : 'fullscreen'}
-                        </span>
-                        <span>{isFullscreen ? 'Thu nhỏ Slide' : 'Phóng to Slide'}</span>
-                      </button>
-                      {studentSlideIndex !== teacherSlideIndex && (
-                        <button
-                          type="button"
-                          onClick={() => setStudentSlideIndex(teacherSlideIndex)}
-                          className="px-3 py-1 rounded-full bg-indigo-600 text-white text-xs font-bold cursor-pointer"
-                        >
-                          Đồng bộ về Slide {teacherSlideIndex + 1} của GV
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Synchronized Slide Image / HTML / Video + Optional Synchronized Explanation Video */}
-                  {slidesList.length === 0 || !activeSlide ? (
-                    <div className="rounded-3xl border-2 border-dashed border-slate-200 bg-slate-50 p-10 text-center flex flex-col items-center justify-center gap-3 min-h-[300px]">
-                      <div className="w-14 h-14 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center">
-                        <span className="material-symbols-outlined text-[30px]">slideshow</span>
-                      </div>
-                      <h3 className="text-base font-black text-slate-900">
-                        Giáo viên đang chuẩn bị hoặc chưa nạp Slide cho tiết học này
-                      </h3>
-                      <p className="text-xs text-slate-500 max-w-md">
-                        Khi Giáo viên nạp Slide bài giảng (PDF, PPTX, HTML, Video, Ảnh) và phát trực tiếp, nội dung Slide sẽ hiển thị đồng bộ ngay tại đây.
-                      </p>
-                    </div>
-                  ) : (
-                    <div
-                      className={`grid grid-cols-1 ${
-                        isSlideVideoPlaying ? 'lg:grid-cols-12' : ''
-                      } gap-4 items-start`}
-                    >
-                      <div className={isSlideVideoPlaying ? 'lg:col-span-7' : 'w-full'}>
-                        <div className="flex flex-col gap-4">
-                          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs">
-                            <span className="px-3 py-1 rounded-full bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 font-black uppercase tracking-wider">
-                              Khối {periodSpec.grade} • Tiết {periodSpec.period} • Slide{' '}
-                              {safeSlideIdx + 1}/{slidesList.length}
-                            </span>
-                            <span className="text-emerald-300 font-bold">
-                              {activeSlide.title || periodSpec.lessonTitle}
-                            </span>
-                          </div>
-                          <div className="w-full rounded-3xl overflow-hidden border-2 border-slate-200 shadow-xl bg-white flex items-center justify-center min-h-[420px]">
-                            {liveSession?.slideDisplayMode === 'web-embed' && liveSession?.webEmbedSlideUrl ? (
-                              <iframe
-                                src={liveSession.webEmbedSlideUrl}
-                                title={`Slide Web / Mô phỏng tương tác: ${periodSpec.lessonTitle}`}
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-                                allowFullScreen
-                                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                                className={`w-full border-0 bg-white ${
-                                  isFullscreen ? 'h-[75vh]' : 'h-[560px]'
-                                }`}
-                              />
-                            ) : activeSlide.htmlContent ? (
-                              <iframe
-                                srcDoc={activeSlide.htmlContent}
-                                title={`HTML Slide ${safeSlideIdx + 1}: ${
-                                  activeSlide.title || periodSpec.lessonTitle
-                                }`}
-                                sandbox="allow-scripts allow-forms"
-                                className={`w-full border-0 bg-slate-950 ${
-                                  isFullscreen ? 'h-[75vh]' : 'h-[540px]'
-                                }`}
-                              />
-                            ) : activeSlide.htmlEmbedUrl ? (
-                              <iframe
-                                src={activeSlide.htmlEmbedUrl}
-                                title={`Web Slide URL ${safeSlideIdx + 1}: ${
-                                  activeSlide.title || periodSpec.lessonTitle
-                                }`}
-                                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                                className={`w-full border-0 bg-white ${
-                                  isFullscreen ? 'h-[75vh]' : 'h-[540px]'
-                                }`}
-                              />
-                            ) : activeSlide.videoUrl ? (
-                              <video
-                                key={activeSlide.videoUrl}
-                                src={activeSlide.videoUrl}
-                                controls
-                                className={`w-full object-contain bg-black ${
-                                  isFullscreen ? 'max-h-[75vh]' : 'max-h-[540px]'
-                                }`}
-                              />
-                            ) : (() => {
-                              const isStudentBlankSlide =
-                                Boolean((activeSlide as any)?.isBlankSlide) ||
-                                activeSlideImageSrc === BLANK_WHITE_SLIDE_DATA_URL;
-                              return (
-                                <div
-                                  data-testid="student-live-slide-canvas"
-                                  data-blank-slide={isStudentBlankSlide ? 'true' : 'false'}
-                                  className="relative w-full h-full flex items-center justify-center min-h-[420px]"
-                                >
-                                  <img
-                                    src={activeSlideImageSrc}
-                                    alt={`Slide ${safeSlideIdx + 1}: ${
-                                      activeSlide.title || periodSpec.lessonTitle
-                                    }`}
-                                    className={`w-full object-contain bg-white ${
-                                      isFullscreen ? 'max-h-[75vh]' : 'max-h-[540px]'
-                                    }`}
-                                    onError={(e) => {
-                                      if (e.currentTarget.src !== BLANK_WHITE_SLIDE_DATA_URL) {
-                                        e.currentTarget.src = BLANK_WHITE_SLIDE_DATA_URL;
-                                      }
-                                    }}
-                                  />
-                                  {isStudentBlankSlide && (
-                                    <div
-                                      data-testid="student-blank-slide-notice"
-                                      className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-white/95"
-                                    >
-                                      <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-300 text-slate-500 flex items-center justify-center mb-2.5">
-                                        <span className="material-symbols-outlined text-[30px]">
-                                          insert_drive_file
-                                        </span>
-                                      </div>
-                                      <span className="px-3 py-1 rounded-full bg-amber-100 border border-amber-300 text-amber-900 text-xs font-black uppercase tracking-wider mb-1.5">
-                                        ⬜ TRANG SLIDE TRẮNG (CHƯA CÓ DỮ LIỆU TRONG GOOGLE SHEET)
-                                      </span>
-                                      <h4 className="text-base font-black text-slate-900 max-w-md">
-                                        Tiết học này (Khối {periodSpec.grade} • Tiết {periodSpec.period}) chưa có dữ liệu Slide ảnh trong Google Sheet
-                                      </h4>
-                                      <p className="text-xs text-slate-500 max-w-md mt-1 leading-relaxed">
-                                        Khi Giáo viên nạp bài giảng PDF vào Google Sheet CSDL, các trang ảnh Slide sẽ tự động hiển thị đồng bộ mượt mà ngay tại đây.
-                                      </p>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })()}
-                          </div>
-                          {teacherActiveView !== 'slide' && (
-                            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                              <span className="text-xs text-slate-600 font-medium">
-                                💡{' '}
-                                {activeSlide.highlightNote ||
-                                  'Theo dõi bài giảng đồng bộ của Giáo viên trên lớp'}
-                              </span>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  disabled={safeSlideIdx === 0}
-                                  onClick={() =>
-                                    setStudentSlideIndex(Math.max(0, safeSlideIdx - 1))
-                                  }
-                                  className="px-3.5 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-800 text-xs font-bold cursor-pointer flex items-center gap-1"
-                                >
-                                  <span className="material-symbols-outlined text-[16px]">
-                                    arrow_back
-                                  </span>
-                                  <span>Trang trước</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={safeSlideIdx >= slidesList.length - 1}
-                                  onClick={() =>
-                                    setStudentSlideIndex(
-                                      Math.min(slidesList.length - 1, safeSlideIdx + 1)
-                                    )
-                                  }
-                                  className="px-3.5 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-xs font-bold cursor-pointer flex items-center gap-1"
-                                >
-                                  <span>Trang tiếp</span>
-                                  <span className="material-symbols-outlined text-[16px]">
-                                    arrow_forward
-                                  </span>
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                    {/* Synchronized Explanation Video Player (when Teacher activates video alongside slide) */}
-                    {isSlideVideoPlaying && slideVideoState && (
-                      <div className="lg:col-span-5 rounded-3xl bg-slate-950 text-white p-4 border-2 border-indigo-500/40 shadow-xl flex flex-col gap-3">
-                        <div className="flex items-center justify-between gap-2 pb-2 border-b border-white/10">
-                          <span className="text-xs font-black text-indigo-300 flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                            <span>🎬 VIDEO GIẢI THÍCH KIẾN THỨC TỪ GIÁO VIÊN</span>
-                          </span>
-                        </div>
-                        <video
-                          key={slideVideoState.videoUrl}
-                          src={slideVideoState.videoUrl}
-                          controls
-                          autoPlay
-                          className="w-full rounded-2xl bg-black aspect-video object-contain"
-                        />
-                        <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-xs text-slate-300">
-                          <strong className="text-white block">
-                            {slideVideoState.videoTitle ||
-                              `Video giải thích Slide #${safeSlideIdx + 1}`}
-                          </strong>
-                          <span>
-                            Quan sát video giải thích đi kèm Slide ảnh bài giảng của Thầy/Cô.
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                    </div>
-                  )}
-                </div>
-              )}
-
               {/* STAGE 1: KHỞI ĐỘNG */}
               {activeView === 1 && (
                 <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-5">

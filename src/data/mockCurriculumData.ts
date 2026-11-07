@@ -928,46 +928,6 @@ export interface TaggedLessonSubmission {
   pedagogicalEvaluation: string;
 }
 
-export interface LectureSlidePage {
-  slideNumber: number;
-  title: string;
-  subtitle?: string;
-  bulletPoints: string[];
-  highlightNote?: string;
-  imageUrl?: string;
-  imageBlob?: Blob;
-  isLazyPlaceholder?: boolean;
-  lazyLoadKey?: string;
-  originalSizeKb?: number;
-  htmlContent?: string;
-  htmlEmbedUrl?: string;
-  videoUrl?: string;
-  videoTitle?: string;
-  storageFileId?: string;
-  compressedSizeKb?: number;
-  hasIndexedDbBackup?: boolean;
-  embedMode?: 'simulation-single' | 'full-deck-end';
-}
-
-export interface LectureSlideDeck {
-  lessonKey: string;
-  grade: 6 | 7 | 8 | 9;
-  period: number;
-  fileName: string;
-  fileType: 'pdf' | 'pptx' | 'html' | 'video' | 'image';
-  fileSize: string;
-  uploadedAt: string;
-  pdfDataUrl?: string;
-  htmlContent?: string;
-  htmlEmbedUrl?: string;
-  storageBucket?: string;
-  totalCompressedKb?: number;
-  defaultVideoUrl?: string;
-  isUserUploaded?: boolean;
-  isLazyLoaded?: boolean;
-  slides: LectureSlidePage[];
-}
-
 export interface WhiteboardPoint {
   x: number; // normalized 0..1000
   y: number; // normalized 0..562.5 (16:9 canvas)
@@ -992,9 +952,9 @@ export interface WhiteboardTextNote {
 
 export interface LessonWhiteboardState {
   isOpen: boolean;
-  mode?: 'standalone' | 'slide-overlay';
-  background?: 'grid' | 'chalkboard' | 'plain' | 'slide';
-  backgroundMode?: 'grid' | 'chalkboard' | 'slide';
+  mode?: 'standalone';
+  background?: 'grid' | 'chalkboard' | 'plain';
+  backgroundMode?: 'grid' | 'chalkboard';
   strokes: WhiteboardStroke[];
   textNotes: WhiteboardTextNote[];
   title?: string;
@@ -1007,7 +967,6 @@ export interface LiveClassroomSession {
   activePeriod: number;
   activeStage: 1 | 2 | 3 | 4;
   activeLiveView?:
-    | 'slide'
     | 'waiting'
     | 'whiteboard'
     | 'hd1'
@@ -1019,27 +978,7 @@ export interface LiveClassroomSession {
   unlockedStagesByLesson: Record<string, Record<1 | 2 | 3 | 4, boolean>>;
   finalizedActivitiesByLesson?: Record<string, Record<string, boolean>>;
   unlockedPracticeStage3ByLesson?: Record<string, boolean>;
-  unlockedSlideDeckByLesson?: Record<string, boolean>;
-  activeSlideIndexByLesson?: Record<string, number>;
-  slideSyncVersionByLesson?: Record<string, number>;
-  lectureSlidesByLesson?: Record<string, LectureSlideDeck>;
   whiteboardByLesson?: Record<string, LessonWhiteboardState>;
-  slideVideoStateByLesson?: Record<
-    string,
-    {
-      isPlaying: boolean;
-      videoUrl: string;
-      videoTitle?: string;
-      updatedAt: string;
-    }
-  >;
-  slideAutoAdvanceStateByLesson?: Record<
-    string,
-    {
-      enabled: boolean;
-      intervalSec: number;
-    }
-  >;
   arenaCountdownStateByLesson?: Record<
     string,
     {
@@ -1062,7 +1001,7 @@ export interface LiveClassroomSession {
     id: string;
     title: string;
     body: string;
-    stage?: 1 | 2 | 3 | 4 | 'slide' | 'hd3-practice' | 'whiteboard';
+    stage?: 1 | 2 | 3 | 4 | 'hd3-practice' | 'whiteboard';
     stageLabel?: string;
     lessonTitle?: string;
     classId?: string;
@@ -1105,8 +1044,6 @@ export interface LiveClassroomSession {
   completedStagesByStudent?: Record<string, (1 | 2 | 3 | 4 | 'hd3-practice')[]>;
   lowBandwidthMode?: boolean;
   studentFocusAlerts?: Record<string, StudentFocusAlertItem>;
-  webEmbedSlideUrl?: string;
-  slideDisplayMode?: 'pdf-canvas' | 'web-embed';
   waitingRoomByLesson?: Record<string, WaitingRoomState>;
   googleSheetsCsdlConfig?: {
     spreadsheetId: string;
@@ -1115,17 +1052,6 @@ export interface LiveClassroomSession {
     connectedAtIso: string;
     lastSyncedAtIso?: string;
   } | null;
-  googleSheetsSlideIndex?: Array<{
-    lessonKey: string;
-    grade: 6 | 7 | 8 | 9;
-    period: number;
-    lessonTitle: string;
-    fileName: string;
-    slideCount: number;
-    totalSizeKb: number;
-    updatedAtIso: string;
-    teacherEmail: string;
-  }>;
   updatedAt: string;
 }
 
@@ -1409,9 +1335,6 @@ export function createDefaultLiveSession(): LiveClassroomSession {
     activeClassId: '6A10',
     unlockedStagesByLesson: createDefaultUnlockedMap(),
     finalizedActivitiesByLesson: {},
-    lectureSlidesByLesson: {},
-    activeSlideIndexByLesson: {},
-    slideSyncVersionByLesson: {},
     wheelCall: null,
     taughtPeriodsByClass: {
       '6A10': [1],

@@ -26,7 +26,7 @@ function extractToken(req: Request): string | null {
 
 /**
  * Middleware: Bắt buộc quyền Giáo viên (Teacher / Admin)
- * Bảo vệ các thao tác quản trị: xóa/sửa học sinh, lớp học, reset CSDL, điều khiển Live slide.
+ * Bảo vệ các thao tác quản trị: xóa/sửa học sinh, lớp học, reset CSDL, điều khiển Live phòng học.
  */
 export async function requireTeacherAuth(
   req: AuthenticatedRequest,

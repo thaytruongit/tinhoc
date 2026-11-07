@@ -453,10 +453,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     const isActiveLiveLesson =
       liveSession?.activeGrade === grade && liveSession?.activePeriod === period;
 
-    // When Teacher is actively projecting Slide or just ended Slide ('waiting'), all 4 activities are strictly locked
+    // When Teacher is in standby mode ('waiting'), all 4 activities are strictly locked
     if (
       isActiveLiveLesson &&
-      (liveSession?.activeLiveView === 'slide' || liveSession?.activeLiveView === 'waiting')
+      liveSession?.activeLiveView === 'waiting'
     ) {
       return { 1: false, 2: false, 3: false, 4: false };
     }
@@ -1026,8 +1026,6 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       `Đã đồng bộ vào Tiết Live của Lớp ${currentStudent.classId}: Khối ${selectedGrade} • Tiết ${liveSession.activePeriod} (${
         liveSession.activeLiveView === 'waiting'
           ? 'Phòng Chờ Lớp Học'
-          : liveSession.activeLiveView === 'slide'
-          ? 'Slide Bài Giảng'
           : `Hoạt động ${liveSession.activeStage}`
       })!`
     );
@@ -1226,7 +1224,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     sendGeminiChatMessage(tutorInput);
   };
 
-  // DEDICATED STUDENT LIVE ROOM (BRIGHT WHITE THEME, AUTO-FOLLOWS TEACHER BROADCAST STAGE & SLIDE)
+  // DEDICATED STUDENT LIVE ROOM (BRIGHT WHITE THEME, AUTO-FOLLOWS TEACHER BROADCAST STAGE)
   if ((isInLiveRoom || (isLiveForStudentClass && !studentManuallyExitedLive)) && openedPeriodNumber !== null) {
     return (
       <StudentLiveRoom

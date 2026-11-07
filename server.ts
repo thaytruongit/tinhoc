@@ -14,14 +14,12 @@ import { createServer as createViteServer } from 'vite';
 
 // Database & Core Storage
 import { healthCheckDb } from './src/lib/db.ts';
-import { initFileStorageSystem } from './src/server/state/serverState.ts';
 
 // Modular Express Routers
 import authRoutes from './src/server/routes/authRoutes.ts';
 import curriculumRoutes from './src/server/routes/curriculumRoutes.ts';
 import classroomRoutes from './src/server/routes/classroomRoutes.ts';
 import liveSessionRoutes from './src/server/routes/liveSessionRoutes.ts';
-import slideRoutes from './src/server/routes/slideRoutes.ts';
 import aiRoutes from './src/server/routes/aiRoutes.ts';
 import cronRoutes from './src/server/routes/cronRoutes.ts';
 import databaseAdminRoutes from './src/server/routes/databaseAdminRoutes.ts';
@@ -45,10 +43,7 @@ async function startServer() {
     next();
   });
 
-  // 2. Initialize Slide File Storage & Cache System
-  initFileStorageSystem();
-
-  // 3. Database Health Check on Startup
+  // 2. Database Health Check on Startup
   console.log('[CloudPlay DB Startup]: Validating PostgreSQL / Supabase connection via pg pool...');
   try {
     const health = await healthCheckDb();
@@ -62,12 +57,11 @@ async function startServer() {
     console.error('[CloudPlay DB Startup Error]: Failed to check pg pool:', startupErr.message);
   }
 
-  // 4. Mount Modular API Routers
+  // 3. Mount Modular API Routers
   app.use(authRoutes);
   app.use(curriculumRoutes);
   app.use(classroomRoutes);
   app.use(liveSessionRoutes);
-  app.use(slideRoutes);
   app.use(aiRoutes);
   app.use(cronRoutes);
   app.use(databaseAdminRoutes);

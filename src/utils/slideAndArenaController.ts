@@ -1,16 +1,7 @@
-import {
-  resolveMonotonicSlideSyncState,
-  isLegacyDemoSlideDeck,
-  generateFallbackSlideSvgDataUrl,
-  ensureDeckSlideImages,
-} from './slideDeckManager';
-
-export { generateFallbackSlideSvgDataUrl };
-
 export type PresenterKeyAction = 'next' | 'prev' | 'fullscreen' | 'exit-fullscreen' | null;
 
 /**
- * Resolves keyboard / wireless presenter clicker key events into slide navigation & fullscreen actions.
+ * Resolves keyboard / wireless presenter clicker key events into navigation & fullscreen actions.
  * Supports:
  * - 'next': Space, ArrowRight, PageDown, ArrowDown, N
  * - 'prev': ArrowLeft, PageUp, ArrowUp, P
@@ -76,21 +67,19 @@ export function resolvePresenterKeyAction(
 /**
  * Determines whether a student live room view is unlocked.
  * - When teacherActiveView === 'waiting', NO activity is active/unlocked (clean standby state).
- * - When teacher broadcasts a specific activity ('slide', 'hd1', 'hd2', 'hd3', 'hd3-practice', 'hd4'),
+ * - When teacher broadcasts a specific activity ('hd1', 'hd2', 'hd3', 'hd3-practice', 'hd4'),
  *   each activity operates independently without coupling to other activities.
  */
 export function isStudentLiveViewUnlocked(params: {
-  viewId: 'slide' | 1 | 2 | 3 | 'hd3-practice' | 4;
+  viewId: 1 | 2 | 3 | 'hd3-practice' | 4;
   teacherActiveView?: string;
-  isSlideDeckUnlocked: boolean;
-  isPracticeStage3Unlocked: boolean;
+  isPracticeStage3Unlocked?: boolean;
   unlockedStages: Record<number, boolean>;
   teacherCurrentStage?: number;
 }): boolean {
   const {
     viewId,
     teacherActiveView,
-    isSlideDeckUnlocked,
     isPracticeStage3Unlocked,
     unlockedStages,
   } = params;
@@ -98,15 +87,6 @@ export function isStudentLiveViewUnlocked(params: {
   // When in standby/waiting state (entering Live room or after ending an activity), all activities stop and remain locked
   if (teacherActiveView === 'waiting') {
     return false;
-  }
-
-  // When teacher broadcasts slide image, lock all other activities
-  if (teacherActiveView === 'slide') {
-    return viewId === 'slide';
-  }
-
-  if (viewId === 'slide') {
-    return Boolean(isSlideDeckUnlocked);
   }
 
   if (viewId === 'hd3-practice') {
@@ -162,17 +142,6 @@ export function estimateBase64Bytes(dataUrl: string): number {
     ? dataUrl.split(';base64,')[1]
     : dataUrl;
   return Math.round((base64Part.length * 3) / 4);
-}
-
-/**
- * Checks if a slide imageUrl is already stored in the 1GB File Storage bucket.
- */
-export function isFileStorageSlideUrl(url?: string): boolean {
-  if (!url) return false;
-  return (
-    url.startsWith('/api/file-storage/slides/file/') ||
-    url.includes('/storage/v1/object/public/')
-  );
 }
 
 /**
@@ -239,9 +208,7 @@ export function getArenaCountdownVisualState(
   };
 }
 
-
 export type IsolatedLiveActivityId =
-  | 'slide'
   | 'hd1'
   | 'hd2'
   | 'hd3'
@@ -251,7 +218,7 @@ export type IsolatedLiveActivityId =
 /**
  * Builds the initial Live session state when the Teacher clicks "Live Tiết X" in TeacherPortal:
  * - Enters the Live room in standby mode (`activeLiveView: 'waiting'`)
- * - Does NOT automatically activate or unlock any learning activity (Slide, HĐ 1, HĐ 2, HĐ 3, HĐ 3 Thực hành, HĐ 4 are all locked).
+ * - Does NOT automatically activate or unlock any learning activity.
  */
 export function buildStartLiveSessionStandbyState<T extends Record<string, any>>(
   prev: T,
@@ -271,10 +238,6 @@ export function buildStartLiveSessionStandbyState<T extends Record<string, any>>
     activeClassId: classId,
     activeStage: prev.activeStage || 1,
     activeLiveView: 'waiting',
-    unlockedSlideDeckByLesson: {
-      ...(prev.unlockedSlideDeckByLesson || {}),
-      [lessonKey]: false,
-    },
     unlockedPracticeStage3ByLesson: {
       ...(prev.unlockedPracticeStage3ByLesson || {}),
       [lessonKey]: false,
@@ -304,8 +267,6 @@ export function buildBroadcastSingleActivityState<T extends Record<string, any>>
     period: number;
     classId: string;
     activity: IsolatedLiveActivityId;
-    slideIndex?: number;
-    slideSyncVersion?: number;
     arenaDurationSec?: number;
     pushPayload?: any;
   }
@@ -315,8 +276,6 @@ export function buildBroadcastSingleActivityState<T extends Record<string, any>>
     period,
     classId,
     activity,
-    slideIndex,
-    slideSyncVersion,
     arenaDurationSec = 300,
     pushPayload,
   } = params;
@@ -342,10 +301,6 @@ export function buildBroadcastSingleActivityState<T extends Record<string, any>>
     activeClassId: classId,
     activeStage: stageForActivity,
     activeLiveView: activity,
-    unlockedSlideDeckByLesson: {
-      ...(prev.unlockedSlideDeckByLesson || {}),
-      [lessonKey]: activity === 'slide',
-    },
     unlockedPracticeStage3ByLesson: {
       ...(prev.unlockedPracticeStage3ByLesson || {}),
       [lessonKey]: activity === 'hd3-practice',
@@ -359,18 +314,6 @@ export function buildBroadcastSingleActivityState<T extends Record<string, any>>
         4: activity === 'hd4',
       },
     },
-    ...(activity === 'slide' && typeof slideIndex === 'number'
-      ? {
-          activeSlideIndexByLesson: {
-            ...(prev.activeSlideIndexByLesson || {}),
-            [lessonKey]: slideIndex,
-          },
-          slideSyncVersionByLesson: {
-            ...(prev.slideSyncVersionByLesson || {}),
-            [lessonKey]: slideSyncVersion ?? Date.now(),
-          },
-        }
-      : {}),
     ...(activity === 'hd3'
       ? {
           arenaCountdownStateByLesson: {
@@ -389,26 +332,19 @@ export function buildBroadcastSingleActivityState<T extends Record<string, any>>
 }
 
 /**
- * Builds the updated session state when the Teacher ends any individual activity or Slide presentation:
- * - Sets `activeLiveView = 'waiting'` so the session stops cleanly at that exact spot without jumping to any other activity.
- * - Closes/locks Slide and all activities ({ 1: false, 2: false, 3: false, 4: false }) until the Teacher explicitly starts another activity.
- * - Stops slide auto-advance, explanation video playback, and arena timer.
+ * Builds the updated session state when the Teacher ends any individual activity:
+ * - Sets `activeLiveView = 'waiting'` so the session stops cleanly at that exact spot.
+ * - Closes/locks all activities ({ 1: false, 2: false, 3: false, 4: false }).
  */
 export function buildStopSingleActivityState<T extends Record<string, any>>(
   prev: T,
   lessonKey: string
 ): T & Record<string, any> {
-  const prevVideo = prev.slideVideoStateByLesson?.[lessonKey];
-  const prevAuto = prev.slideAutoAdvanceStateByLesson?.[lessonKey];
   const prevArena = prev.arenaCountdownStateByLesson?.[lessonKey];
   const nowIso = new Date().toISOString();
   return {
     ...prev,
     activeLiveView: 'waiting',
-    unlockedSlideDeckByLesson: {
-      ...(prev.unlockedSlideDeckByLesson || {}),
-      [lessonKey]: false,
-    },
     unlockedStagesByLesson: {
       ...(prev.unlockedStagesByLesson || {}),
       [lessonKey]: {
@@ -422,25 +358,6 @@ export function buildStopSingleActivityState<T extends Record<string, any>>(
       ...(prev.unlockedPracticeStage3ByLesson || {}),
       [lessonKey]: false,
     },
-    slideVideoStateByLesson: prevVideo
-      ? {
-          ...(prev.slideVideoStateByLesson || {}),
-          [lessonKey]: {
-            ...prevVideo,
-            isPlaying: false,
-            updatedAt: nowIso,
-          },
-        }
-      : prev.slideVideoStateByLesson,
-    slideAutoAdvanceStateByLesson: prevAuto
-      ? {
-          ...(prev.slideAutoAdvanceStateByLesson || {}),
-          [lessonKey]: {
-            ...prevAuto,
-            enabled: false,
-          },
-        }
-      : prev.slideAutoAdvanceStateByLesson,
     arenaCountdownStateByLesson: prevArena
       ? {
           ...(prev.arenaCountdownStateByLesson || {}),
@@ -452,13 +369,6 @@ export function buildStopSingleActivityState<T extends Record<string, any>>(
       : prev.arenaCountdownStateByLesson,
     updatedAt: nowIso,
   };
-}
-
-export function buildEndSlidePresentationState<T extends Record<string, any>>(
-  prev: T,
-  lessonKey: string
-): T {
-  return buildStopSingleActivityState(prev, lessonKey);
 }
 
 /**
@@ -479,12 +389,7 @@ export function normalizeActivityKey(activityKey: string | number): string {
 }
 
 /**
- * Checks whether an activity or specific exercise has been finalized ("Chốt") by the teacher,
- * preventing any student from submitting or modifying their answers.
- *
- * Rules:
- * - If the overall activity is finalized (e.g. Activity 2), all its sub-exercises ('hd2_drag', 'hd2_fill', etc.) are also considered finalized.
- * - If a specific sub-exercise is finalized, it returns true for that exercise.
+ * Checks whether an activity or specific exercise has been finalized ("Chốt") by the teacher.
  */
 export function isActivityFinalized(
   session: { finalizedActivitiesByLesson?: Record<string, Record<string, boolean>> } | undefined | null,
@@ -497,7 +402,6 @@ export function isActivityFinalized(
 
   const normKey = normalizeActivityKey(activityKey);
 
-  // Direct check
   if (lessonFinalized[normKey] === true) return true;
 
   // Check aliases
@@ -519,7 +423,6 @@ export function isActivityFinalized(
 
 /**
  * Toggles or sets the finalized ("Chốt") state of a specific activity or exercise.
- * When an activity is finalized, students cannot submit further work.
  */
 export function buildToggleFinalizeActivityState<T extends Record<string, any>>(
   prev: T,
@@ -543,11 +446,9 @@ export function buildToggleFinalizeActivityState<T extends Record<string, any>>(
     [normKey]: nextFinalized,
   };
 
-  // Keep aliases in sync
   if (normKey === '1') updatedLessonMap['hd1'] = nextFinalized;
   if (normKey === '2') {
     updatedLessonMap['hd2'] = nextFinalized;
-    // When locking the whole Stage 2, also mark sub-exercises
     if (nextFinalized) {
       updatedLessonMap['hd2_drag'] = true;
       updatedLessonMap['hd2_fill'] = true;
@@ -580,8 +481,7 @@ export function buildToggleFinalizeActivityState<T extends Record<string, any>>(
 }
 
 /**
- * Safely normalizes any LiveClassroomSession object loaded from PostgreSQL / Supabase / localStorage
- * so missing or null nested maps never cause a white-screen TypeError during render.
+ * Safely normalizes any LiveClassroomSession object loaded from backend / database / localStorage.
  */
 export function normalizeLiveSession<T extends Record<string, any>>(
   raw: any,
@@ -590,7 +490,6 @@ export function normalizeLiveSession<T extends Record<string, any>>(
   if (!raw || typeof raw !== 'object') {
     return defaultSession;
   }
-  // Reject diagnostic or keep-alive payloads that are not actual LiveClassroomSession objects
   if ('testMessage' in raw || 'pingCount' in raw || 'scheduleCron' in raw) {
     return defaultSession;
   }
@@ -653,128 +552,10 @@ export function normalizeLiveSession<T extends Record<string, any>>(
       typeof raw.unlockedPracticeStage3ByLesson === 'object'
         ? raw.unlockedPracticeStage3ByLesson
         : defaultSession.unlockedPracticeStage3ByLesson || {},
-    unlockedSlideDeckByLesson:
-      raw.unlockedSlideDeckByLesson &&
-      typeof raw.unlockedSlideDeckByLesson === 'object'
-        ? raw.unlockedSlideDeckByLesson
-        : defaultSession.unlockedSlideDeckByLesson || {},
-    ...(() => {
-      const syncResolved = resolveMonotonicSlideSyncState({
-        currentSlideIndices: defaultSession.activeSlideIndexByLesson || {},
-        currentSyncVersions: defaultSession.slideSyncVersionByLesson || {},
-        incomingSlideIndices:
-          raw.activeSlideIndexByLesson &&
-          typeof raw.activeSlideIndexByLesson === 'object'
-            ? raw.activeSlideIndexByLesson
-            : {},
-        incomingSyncVersions:
-          raw.slideSyncVersionByLesson &&
-          typeof raw.slideSyncVersionByLesson === 'object'
-            ? raw.slideSyncVersionByLesson
-            : {},
-      });
-      return {
-        activeSlideIndexByLesson: syncResolved.activeSlideIndexByLesson,
-        slideSyncVersionByLesson: syncResolved.slideSyncVersionByLesson,
-      };
-    })(),
-    lectureSlidesByLesson: (() => {
-      const sourceDecks =
-        raw.lectureSlidesByLesson && typeof raw.lectureSlidesByLesson === 'object'
-          ? raw.lectureSlidesByLesson
-          : defaultSession.lectureSlidesByLesson || {};
-      const fallbackDecks =
-        defaultSession.lectureSlidesByLesson &&
-        typeof defaultSession.lectureSlidesByLesson === 'object'
-          ? defaultSession.lectureSlidesByLesson
-          : {};
-
-      const allDeckKeys = Array.from(
-        new Set([...Object.keys(sourceDecks), ...Object.keys(fallbackDecks)])
-      );
-      const cleanedDecks: Record<string, any> = {};
-
-      for (const k of allDeckKeys) {
-        const rawDeck = sourceDecks[k];
-        const fallbackDeck = fallbackDecks[k];
-        const baseDeck = rawDeck || fallbackDeck;
-        if (!baseDeck) {
-          continue;
-        }
-
-        const isUserUploaded = Boolean(
-          rawDeck?.isUserUploaded ?? fallbackDeck?.isUserUploaded ?? true
-        );
-        const mergedDeck = {
-          ...fallbackDeck,
-          ...rawDeck,
-          isUserUploaded,
-        };
-
-        // Parse grade and period from key (e.g. "k6-tiet-1" or "k7-tiet-12")
-        const keyMatch = /^k(\d+)-tiet-(\d+)$/.exec(k);
-        const deckGrade = keyMatch ? Number(keyMatch[1]) : safeGrade;
-        const deckPeriod = keyMatch ? Number(keyMatch[2]) : safePeriod;
-
-        const fallbackSlides = Array.isArray(fallbackDeck?.slides)
-          ? fallbackDeck.slides
-          : [];
-        const rawSlides = Array.isArray(mergedDeck.slides) ? mergedDeck.slides : [];
-
-        // Merge raw slides with fallback slides if raw lost imageUrl
-        const mergedSlides = rawSlides.map((slide: any, idx: number) => {
-          if (!slide || typeof slide !== 'object') return slide;
-          const fallback = fallbackSlides[idx];
-          const hasImage =
-            typeof slide.imageUrl === 'string' &&
-            slide.imageUrl.trim().length > 0;
-          const hasFallbackImage =
-            typeof fallback?.imageUrl === 'string' &&
-            fallback.imageUrl.trim().length > 0;
-
-          return {
-            ...fallback,
-            ...slide,
-            imageUrl: hasImage
-              ? slide.imageUrl
-              : hasFallbackImage
-              ? fallback.imageUrl
-              : slide.imageUrl,
-          };
-        });
-
-        if (isLegacyDemoSlideDeck({ ...mergedDeck, slides: mergedSlides })) {
-          continue;
-        }
-
-        // Ensure EVERY slide has a valid, sharp imageUrl so it NEVER falls back to plain text
-        const safeSlides = ensureDeckSlideImages(mergedSlides, {
-          grade: deckGrade,
-          period: deckPeriod,
-        });
-
-        cleanedDecks[k] = {
-          ...mergedDeck,
-          slides: safeSlides,
-          isUserUploaded,
-        };
-      }
-      return cleanedDecks;
-    })(),
     whiteboardByLesson:
       raw.whiteboardByLesson && typeof raw.whiteboardByLesson === 'object'
         ? raw.whiteboardByLesson
         : defaultSession.whiteboardByLesson || {},
-    slideAutoAdvanceStateByLesson:
-      raw.slideAutoAdvanceStateByLesson &&
-      typeof raw.slideAutoAdvanceStateByLesson === 'object'
-        ? raw.slideAutoAdvanceStateByLesson
-        : defaultSession.slideAutoAdvanceStateByLesson || {},
-    slideVideoStateByLesson:
-      raw.slideVideoStateByLesson &&
-      typeof raw.slideVideoStateByLesson === 'object'
-        ? raw.slideVideoStateByLesson
-        : defaultSession.slideVideoStateByLesson || {},
     arenaCountdownStateByLesson:
       raw.arenaCountdownStateByLesson &&
       typeof raw.arenaCountdownStateByLesson === 'object'
@@ -815,11 +596,6 @@ export function normalizeLiveSession<T extends Record<string, any>>(
             ),
           }
         : defaultSession.googleSheetsCsdlConfig || null,
-    googleSheetsSlideIndex: Array.isArray(raw.googleSheetsSlideIndex)
-      ? raw.googleSheetsSlideIndex
-      : Array.isArray(defaultSession.googleSheetsSlideIndex)
-      ? defaultSession.googleSheetsSlideIndex
-      : [],
     updatedAt:
       typeof raw.updatedAt === 'string' && raw.updatedAt.length > 0
         ? raw.updatedAt
@@ -849,7 +625,7 @@ export function normalizeStudentRosterList<T extends Record<string, any> = Recor
         username: String(r.username || id),
         dob: String(r.dob || '15/05/2013'),
         stationNumber: String(r.stationNumber || r.station_number || '01'),
-        name: String(r.name || r.fullName || r.full_name || r.display_name || 'Học sinh CloudPlay'),
+        name: String(r.name || r.fullName || r.full_name || r.display_name || 'Học sinh'),
         classId,
         grade,
         passwordDefault: String(r.passwordDefault || r.password_default || '12345'),
@@ -859,7 +635,7 @@ export function normalizeStudentRosterList<T extends Record<string, any> = Recor
           : 1,
         stars: Number.isFinite(Number(r.stars)) ? Number(r.stars) : 3,
         groupNumber: (Number(r.groupNumber ?? r.group_number) || 1) as 1 | 2 | 3 | 4,
-        partnerName: String(r.partnerName || r.partner_name || 'Bạn cùng bàn Cloud'),
+        partnerName: String(r.partnerName || r.partner_name || 'Bạn cùng bàn'),
         partnerId: String(r.partnerId || r.partner_id || '61008'),
         avgScore: Number.isFinite(Number(r.avgScore ?? r.avg_score))
           ? Number(r.avgScore ?? r.avg_score)
@@ -893,7 +669,7 @@ export function normalizeClassroomList<T extends Record<string, any> = Record<st
         name: String(c.name || `Lớp ${id}`),
         grade,
         schoolYear: String(c.schoolYear || c.school_year || '2024 - 2025'),
-        roomName: String(c.roomName || c.room_name || 'Phòng Lab Cloud'),
+        roomName: String(c.roomName || c.room_name || 'Phòng Tin học'),
         studentCount: Number.isFinite(Number(c.studentCount ?? c.student_count))
           ? Number(c.studentCount ?? c.student_count)
           : 40,
@@ -916,9 +692,6 @@ export interface TeacherPortalStudentFilterOptions {
   liveSession?: any;
 }
 
-/**
- * Extracts a Set of student IDs who have submitted in the given liveSession or ID collection.
- */
 function resolveSubmittedIdSet(
   source?: Set<string> | string[] | Record<string, any>
 ): Set<string> | undefined {
@@ -948,8 +721,7 @@ function resolveSubmittedIdSet(
 }
 
 /**
- * Resolves a student's effective submission status ('Đã nộp' | 'Chưa nộp')
- * from their roster status or any recorded live/tagged submissions.
+ * Resolves a student's effective submission status ('Đã nộp' | 'Chưa nộp').
  */
 export function getEffectiveStudentSubmissionStatus(
   student: { id?: string; submissionStatus?: string },
@@ -964,8 +736,7 @@ export function getEffectiveStudentSubmissionStatus(
 }
 
 /**
- * Filters the TeacherPortal student list by Grade, Class, Submission Status ('Đã nộp' / 'Chưa nộp'),
- * Learning Group (Nhóm 1, 2, 3, 4), and text search query.
+ * Filters the TeacherPortal student list by Grade, Class, Submission Status, Group, and Search Query.
  */
 export function filterTeacherPortalStudents<
   T extends {
@@ -1038,8 +809,7 @@ export interface StudentFilterSummary {
 }
 
 /**
- * Computes summary counts for the Submission Status filter ('Đã nộp' / 'Chưa nộp')
- * and Learning Group filter (Nhóm 1, 2, 3, 4) for a given class/grade scope.
+ * Computes summary counts for submission status and groups.
  */
 export function computeStudentFilterSummary<
   T extends {
@@ -1091,6 +861,3 @@ export function computeStudentFilterSummary<
     groupCounts,
   };
 }
-
-
-

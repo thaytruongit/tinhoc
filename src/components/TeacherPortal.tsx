@@ -37,15 +37,8 @@ import { BulkImportForm } from './BulkImportForm';
 import { ClassQRCodeModal } from './ClassQRCodeModal';
 import { QuestionMasterInspectorModal } from './QuestionMasterInspectorModal';
 import { DataBoundary } from './DataBoundary';
-import { SlidePresenterManager } from './SlidePresenterManager';
 import { TeacherLivePresenterRoom } from './TeacherLivePresenterRoom';
 import {
-  getDefaultLectureSlides,
-  convertSlideFileToPages,
-} from './LectureSlideManagerModal';
-import {
-  resolvePresenterKeyAction,
-  buildEndSlidePresentationState,
   buildStartLiveSessionStandbyState,
   filterTeacherPortalStudents,
   computeStudentFilterSummary,
@@ -53,26 +46,10 @@ import {
   type StudentSubmissionFilterMode,
   type StudentGroupFilterMode,
 } from '../utils/slideAndArenaController';
-import {
-  buildFixedSlideFolderMapping,
-  buildFixedFolderPdfSlideCacheDeck,
-  normalizeFixedSlideRootFolder,
-  matchFileToGradeAndPeriod,
-  isRealRenderedPdfSlideDeck,
-  DEFAULT_FIXED_SLIDE_ROOT_FOLDER,
-} from '../utils/slideDeckManager';
-import {
-  saveSlideDeckToIndexedDb,
-  getSlideDeckFromIndexedDb,
-  deleteSlideDeckFromIndexedDb,
-} from '../utils/indexedDbSlideStorage';
 import { LiveStudentProgressTracker } from './LiveStudentProgressTracker';
-import { GoogleSheetsSlideDbPanel } from './GoogleSheetsSlideDbPanel';
-import { type GoogleSheetSlideIndexRecord } from '../utils/googleSheetsConnector';
 
 export type TeacherTab =
   | 'trang-chu'
-  | 'csdl-google-sheets'
   | 'bien-soan-stage-1'
   | 'bien-soan-stage-2'
   | 'bien-soan-stage-3'
@@ -155,9 +132,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const [showResetAcademicYearModal, setShowResetAcademicYearModal] = useState(false);
   const [isResettingAcademicYear, setIsResettingAcademicYear] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showCsdlGoogleSheetsModal, setShowCsdlGoogleSheetsModal] = useState(false);
-  const [sheetIndexRecords, setSheetIndexRecords] = useState<GoogleSheetSlideIndexRecord[]>([]);
-  const csdlHomeSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -190,158 +164,13 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     NOTEBOOK_GRADE_SOURCES.find((g) => g.grade === selectedNotebookGrade) ||
     NOTEBOOK_GRADE_SOURCES[0];
 
-  // Active lesson slide deck & BroadcastChannel reference for Space / ArrowRight slide navigation in TeacherPortal
-  const slideBroadcastChannelRef = useRef<BroadcastChannel | null>(null);
   const portalActiveGrade = liveSession?.activeGrade || selectedNotebookGrade;
   const portalActivePeriod = liveSession?.activePeriod || selectedNotebookPeriod;
   const portalLessonKey = `k${portalActiveGrade}-tiet-${portalActivePeriod}`;
   const portalPeriodSpec =
-    getPeriodsForGrade(portalActiveGrade).find((p) => p.period === portalActivePeriod) ||
-    selectedPeriodSpec;
-  const portalSlideDeck = liveSession?.lectureSlidesByLesson?.[portalLessonKey];
-  const portalSlides =
-    portalSlideDeck?.slides && portalSlideDeck.slides.length > 0
-      ? portalSlideDeck.slides
-      : getDefaultLectureSlides(portalPeriodSpec);
-  const portalCurrentSlideIndex =
-    liveSession?.activeSlideIndexByLesson?.[portalLessonKey] ?? 0;
-
-  useEffect(() => {
-    if (typeof BroadcastChannel === 'undefined') return;
-    const ch = new BroadcastChannel('cloudplay_realtime_sync');
-    slideBroadcastChannelRef.current = ch;
-    return () => {
-      ch.close();
-      slideBroadcastChannelRef.current = null;
-    };
-  }, []);
-
-  const handlePortalSlideStep = useCallback(
-    (direction: 'next' | 'prev') => {
-      if (portalSlides.length === 0) return;
-      const targetIdx =
-        direction === 'next'
-          ? Math.min(portalSlides.length - 1, portalCurrentSlideIndex + 1)
-          : Math.max(0, portalCurrentSlideIndex - 1);
-      if (targetIdx === portalCurrentSlideIndex) return;
-
-      const targetClassId = liveSession?.activeClassId || selectedClass;
-      const syncVer = Date.now();
-      const nowIso = new Date().toISOString();
-
-      // Update liveSession state & persist to backend / localStorage
-      if (onUpdateLiveSession) {
-        onUpdateLiveSession((prev) => ({
-          ...prev,
-          isBroadcasting: true,
-          activeGrade: portalActiveGrade,
-          activePeriod: portalActivePeriod,
-          activeClassId: targetClassId,
-          activeLiveView: 'slide',
-          unlockedSlideDeckByLesson: {
-            ...(prev.unlockedSlideDeckByLesson || {}),
-            [portalLessonKey]: true,
-          },
-          unlockedStagesByLesson: {
-            ...(prev.unlockedStagesByLesson || {}),
-            [portalLessonKey]: {
-              1: false,
-              2: false,
-              3: false,
-              4: false,
-            },
-          },
-          unlockedPracticeStage3ByLesson: {
-            ...(prev.unlockedPracticeStage3ByLesson || {}),
-            [portalLessonKey]: false,
-          },
-          activeSlideIndexByLesson: {
-            ...(prev.activeSlideIndexByLesson || {}),
-            [portalLessonKey]: targetIdx,
-          },
-          slideSyncVersionByLesson: {
-            ...(prev.slideSyncVersionByLesson || {}),
-            [portalLessonKey]: syncVer,
-          },
-          updatedAt: nowIso,
-        }));
-      }
-
-      fetch('/api/live-session/slide', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lessonKey: portalLessonKey,
-          slideIndex: targetIdx,
-          slideSyncVersion: syncVer,
-          activeLiveView: 'slide',
-          grade: portalActiveGrade,
-          period: portalActivePeriod,
-          classId: targetClassId,
-        }),
-      }).catch(() => {});
-
-      // Broadcast slide state directly via BroadcastChannel to student devices
-      if (slideBroadcastChannelRef.current) {
-        slideBroadcastChannelRef.current.postMessage({
-          type: 'SLIDE_CHANGED',
-          lessonKey: portalLessonKey,
-          grade: portalActiveGrade,
-          period: portalActivePeriod,
-          classId: targetClassId,
-          slideIndex: targetIdx,
-          slideSyncVersion: syncVer,
-          totalSlides: portalSlides.length,
-          activeLiveView: 'slide',
-          timestampIso: nowIso,
-        });
-      }
-
-      onShowToast(
-        direction === 'next'
-          ? `⏭️ Phím tắt / Bút trình chiếu (Space / →): Chuyển sang Slide ${targetIdx + 1}/${portalSlides.length} (Đã đồng bộ tới HS)`
-          : `⏮️ Phím tắt / Bút trình chiếu (←): Lùi về Slide ${targetIdx + 1}/${portalSlides.length} (Đã đồng bộ tới HS)`
-      );
-    },
-    [
-      portalSlides.length,
-      portalCurrentSlideIndex,
-      portalActiveGrade,
-      portalActivePeriod,
-      portalLessonKey,
-      liveSession?.activeClassId,
-      selectedClass,
-      onUpdateLiveSession,
-      onShowToast,
-    ]
-  );
-
-  const handleEndSlideFromPortal = useCallback(() => {
-    if (onUpdateLiveSession) {
-      onUpdateLiveSession((prev) => buildEndSlidePresentationState(prev, portalLessonKey));
-    }
-    if (slideBroadcastChannelRef.current) {
-      slideBroadcastChannelRef.current.postMessage({
-        type: 'SLIDE_ENDED',
-        lessonKey: portalLessonKey,
-        grade: portalActiveGrade,
-        period: portalActivePeriod,
-        classId: liveSession?.activeClassId || selectedClass,
-        timestampIso: new Date().toISOString(),
-      });
-    }
-    onShowToast(
-      `⏹️ Đã kết thúc Slide bài giảng! Slide trên máy HS đã tự động đóng và các hoạt động (HĐ 1, 2, 3, 4) vẫn giữ khóa nghiêm ngặt!`
-    );
-  }, [
-    onUpdateLiveSession,
-    portalLessonKey,
-    portalActiveGrade,
-    portalActivePeriod,
-    liveSession?.activeClassId,
-    selectedClass,
-    onShowToast,
-  ]);
+    getPeriodsForGrade(portalActiveGrade as any).find(
+      (p) => p.period === portalActivePeriod
+    ) || selectedPeriodSpec;
 
   const handleTeacherExitLiveFromPortal = useCallback(() => {
     const targetClassId = liveSession?.activeClassId || selectedClass;
@@ -353,16 +182,21 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         updatedAt: new Date().toISOString(),
       }));
     }
-    if (slideBroadcastChannelRef.current) {
-      slideBroadcastChannelRef.current.postMessage({
-        type: 'LIVE_SESSION_ENDED',
-        classId: targetClassId,
-        grade: portalActiveGrade,
-        period: portalActivePeriod,
-        lessonKey: portalLessonKey,
-        timestampIso: new Date().toISOString(),
-      });
-    }
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('cloudplay_realtime_sync');
+        ch.postMessage({
+          type: 'LIVE_SESSION_ENDED',
+          classId: targetClassId,
+          grade: portalActiveGrade,
+          period: portalActivePeriod,
+          lessonKey: portalLessonKey,
+          timestampIso: new Date().toISOString(),
+        });
+        ch.close();
+      }
+    } catch {}
+
     fetch('/api/live-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -387,57 +221,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     onShowToast,
   ]);
 
-  // Keyboard event listener in TeacherPortal supporting 'Space' and 'ArrowRight' (and 'ArrowLeft') ONLY when actively broadcasting slides
-  useEffect(() => {
-    if (
-      isLivePresenterOpen ||
-      showLiveProgressModal ||
-      !liveSession?.isBroadcasting ||
-      liveSession?.activeLiveView !== 'slide' ||
-      portalSlides.length === 0
-    ) {
-      return;
-    }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.repeat) return;
-      const target = e.target as HTMLElement | null;
-      const action = resolvePresenterKeyAction(
-        e.key,
-        e.code,
-        target?.tagName,
-        target?.isContentEditable
-      );
-      if (!action) return;
-
-      if (action === 'fullscreen') {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsLivePresenterOpen(true);
-        return;
-      }
-
-      if (action !== 'next' && action !== 'prev') return;
-
-      if (target && target.tagName === 'BUTTON') {
-        target.blur();
-      }
-      e.preventDefault();
-      e.stopPropagation();
-      handlePortalSlideStep(action);
-    };
-
-    window.addEventListener('keydown', handleKeyDown, { capture: true });
-    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
-  }, [
-    isLivePresenterOpen,
-    showLiveProgressModal,
-    liveSession?.isBroadcasting,
-    liveSession?.activeLiveView,
-    portalSlides.length,
-    handlePortalSlideStep,
-  ]);
-
   // Classes belonging to the currently selected grade (6, 7, 8, 9)
   const classesForSelectedGrade = classes.filter((c: ClassroomItem) => c.grade === selectedNotebookGrade);
   const displayClassesForGrade: ClassroomItem[] =
@@ -455,72 +238,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     useState<StudentGroupFilterMode>('ALL');
   const [studentSearchKeyword, setStudentSearchKeyword] = useState('');
   const [showHomeStudentQuickFilter, setShowHomeStudentQuickFilter] = useState(true);
-
-  // Fixed root folder for automatic PDF slide image extraction & caching (Tin 6..9 / Tiết 1..29)
-  const [fixedSlideRootFolder, setFixedSlideRootFolder] = useState<string>(() => {
-    try {
-      const saved =
-        localStorage.getItem('cloudplay_fixed_slide_folder_v1') || DEFAULT_FIXED_SLIDE_ROOT_FOLDER;
-      return normalizeFixedSlideRootFolder(saved);
-    } catch {
-      return DEFAULT_FIXED_SLIDE_ROOT_FOLDER;
-    }
-  });
-  const homePdfFolderInputRef = useRef<HTMLInputElement | null>(null);
-  const [isCachingPdfFolder, setIsCachingPdfFolder] = useState(false);
-
-  const handleUpdateFixedSlideRootFolder = (nextRoot: string) => {
-    const cleaned = normalizeFixedSlideRootFolder(nextRoot);
-    setFixedSlideRootFolder(cleaned);
-    try {
-      localStorage.setItem('cloudplay_fixed_slide_folder_v1', cleaned);
-    } catch {
-      // ignore storage errors
-    }
-    const sampleMap = buildFixedSlideFolderMapping(
-      selectedNotebookGrade,
-      selectedNotebookPeriod,
-      cleaned
-    );
-    onShowToast(
-      `📂 Đã cố định đường dẫn thư mục PDF: "${cleaned}" → Tự động trích xuất Ảnh Slide từ "${sampleMap.primaryFilePath}" lên bộ nhớ đệm khi mở Live!`
-    );
-  };
-
-  // Link local PDF directory: store File handles by lessonKey so mapping & extraction ONLY run when a period is selected
-  const handleLinkLocalPdfDirectoryOnHome = async (fileList: FileList | null) => {
-    if (!fileList || fileList.length === 0) return;
-    setIsCachingPdfFolder(true);
-    let matchedPdfCount = 0;
-    try {
-      const files = Array.from(fileList);
-      if (typeof window !== 'undefined') {
-        if (!(window as any).__cloudplayLinkedPdfFilesByLesson) {
-          (window as any).__cloudplayLinkedPdfFilesByLesson = {};
-        }
-      }
-      for (const file of files) {
-        const relPath = (file as any).webkitRelativePath || file.name;
-        const matched = matchFileToGradeAndPeriod(relPath, selectedNotebookGrade);
-        if (!matched || matched.inferredFileType !== 'pdf') continue;
-        if (typeof window !== 'undefined') {
-          (window as any).__cloudplayLinkedPdfFilesByLesson[matched.lessonKey] = file;
-        }
-        matchedPdfCount++;
-      }
-      if (matchedPdfCount > 0) {
-        onShowToast(
-          `✅ Đã liên kết ${matchedPdfCount} tệp PDF bản gốc trong thư mục! Khi thầy/cô chọn tiết học sẽ bắt đầu ánh xạ và nạp đúng tệp PDF của tiết đó.`
-        );
-      } else {
-        onShowToast(
-          `⚠️ Không tìm thấy tệp .PDF nào khớp cấu trúc Tin 6–9 / Tiết 1–29 trong thư mục đã chọn (khi mở tiết không có tệp sẽ hiển thị trang Slide trắng).`
-        );
-      }
-    } finally {
-      setIsCachingPdfFolder(false);
-    }
-  };
 
   // Gradebook & Reports filters
   const [gradebookGradeFilter, setGradebookGradeFilter] = useState<6 | 7 | 8 | 9 | 'ALL'>('ALL');
@@ -1520,22 +1237,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     targetClassOverride?: string
   ) => {
     const targetClass = targetClassOverride || selectedClass;
-    const normalizedRoot = normalizeFixedSlideRootFolder(fixedSlideRootFolder);
-    const mapping = buildFixedSlideFolderMapping(grade, periodNum, normalizedRoot);
-    const targetLessonKey = mapping.lessonKey;
-    const targetPeriodSpec =
-      getPeriodsForGrade(grade).find((p) => p.period === periodNum) || selectedPeriodSpec;
-
-    // Default to a Blank White Slide ("trang slide trắng") until on-demand PDF mapping resolves a real PDF file
-    const blankFallbackDeck = buildFixedFolderPdfSlideCacheDeck({
-      grade,
-      period: periodNum,
-      rootFolder: normalizedRoot,
-      lessonTitle: targetPeriodSpec?.lessonTitle,
-      topic: targetPeriodSpec?.topic,
-      yccd: targetPeriodSpec?.yccd,
-    });
-
     if (onUpdateLiveSession) {
       onUpdateLiveSession((prev) => {
         const standbyState = buildStartLiveSessionStandbyState(prev, {
@@ -1543,44 +1244,16 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           period: periodNum,
           classId: targetClass,
         });
-        const existingDeck = standbyState.lectureSlidesByLesson?.[targetLessonKey];
-        const keepExistingRealPdf = isRealRenderedPdfSlideDeck(existingDeck);
-
         return {
           ...standbyState,
           activeLiveView: 'waiting',
-          lectureSlidesByLesson: {
-            ...(standbyState.lectureSlidesByLesson || {}),
-            [targetLessonKey]:
-              keepExistingRealPdf && existingDeck ? existingDeck : blankFallbackDeck,
-          },
-          activeSlideIndexByLesson: {
-            ...(standbyState.activeSlideIndexByLesson || {}),
-            [targetLessonKey]: 0,
-          },
-          unlockedSlideDeckByLesson: {
-            ...(standbyState.unlockedSlideDeckByLesson || {}),
-            [targetLessonKey]: false,
-          },
         };
       });
     }
 
-    // Purge any stale synthetic SVG deck from IndexedDB if it is not a real rendered PDF
-    (async () => {
-      try {
-        const cachedDeck = await getSlideDeckFromIndexedDb(targetLessonKey);
-        if (cachedDeck && !isRealRenderedPdfSlideDeck(cachedDeck)) {
-          await deleteSlideDeckFromIndexedDb(targetLessonKey).catch(() => {});
-        }
-      } catch {
-        // Ignore background cache errors
-      }
-    })();
-
     setIsLivePresenterOpen(true);
     onShowToast(
-      `🔴 Đã mở Phòng Live Khối ${grade} • Tiết ${periodNum} (Lớp ${targetClass}) — Đang đồng bộ Slide từ Google Sheet "CSDL" (${targetLessonKey})!`
+      `🔴 Đã mở Phòng Live Khối ${grade} • Tiết ${periodNum} (Lớp ${targetClass})!`
     );
   };
 
@@ -1835,7 +1508,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
   const navItems: { id: TeacherTab; icon: string; label: string }[] = [
     { id: 'trang-chu', icon: 'dashboard', label: 'Trang chủ' },
-    { id: 'csdl-google-sheets', icon: 'table_chart', label: 'CSDL Slide (Sheet)' },
     { id: 'bien-soan-stage-1', icon: 'psychology_alt', label: 'Khởi động' },
     { id: 'bien-soan-stage-2', icon: 'menu_book', label: 'Khám phá' },
     { id: 'bien-soan-stage-3', icon: 'extension', label: 'Luyện tập' },
@@ -1927,16 +1599,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
               <button
                 type="button"
-                data-testid="sidebar-open-csdl-sheet-btn"
-                onClick={() => setShowCsdlGoogleSheetsModal(true)}
-                className="w-full text-left flex items-center gap-space-sm px-space-md py-2.5 rounded-lg font-label-md text-label-md bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/25 font-bold transition-all cursor-pointer border border-emerald-500/35"
-              >
-                <span className="material-symbols-outlined text-[20px]">table_chart</span>
-                <span className="truncate">📊 Nạp PDF → Sheet &quot;CSDL&quot;</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={() => setShowLiveProgressModal(true)}
                 className="w-full text-left flex items-center gap-space-sm px-space-md py-2.5 rounded-lg font-label-md text-label-md bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 hover:bg-indigo-500/25 font-bold transition-all cursor-pointer border border-indigo-500/30"
               >
@@ -1994,17 +1656,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           <div className="flex items-center gap-space-sm">
             <button
               type="button"
-              data-testid="header-open-csdl-modal-btn"
-              onClick={() => setShowCsdlGoogleSheetsModal(true)}
-              className="px-3.5 py-1.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-label-sm text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer border border-emerald-300"
-              title="Mở cửa sổ Nạp bài giảng PDF (pdf.js -> WebP) và đẩy lên Google Sheets CSDL"
-            >
-              <span className="material-symbols-outlined text-[16px]">table_chart</span>
-              <span>CSDL Slide (&quot;CSDL&quot;)</span>
-            </button>
-
-            <button
-              type="button"
               onClick={() => setShowLiveProgressModal(true)}
               className="px-3.5 py-1.5 rounded-full bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 font-label-sm text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer border border-indigo-200 dark:border-indigo-800"
               title="Theo dõi & mô tả tiến độ học sinh trực tiếp ở 4 hoạt động"
@@ -2020,7 +1671,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   onClick={() => setIsLivePresenterOpen(true)}
                   className="px-3.5 py-1.5 rounded-full bg-red-600 hover:bg-red-700 text-white font-label-sm text-xs font-black shadow-xs flex items-center gap-1.5 cursor-pointer animate-pulse"
                 >
-                  <span className="material-symbols-outlined text-[16px]">slideshow</span>
+                  <span className="material-symbols-outlined text-[16px]">sensors</span>
                   <span>Phòng Live ({liveSession.activeClassId || selectedClass})</span>
                 </button>
                 <button
@@ -2043,7 +1694,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               title={
                 isFullscreen
                   ? 'Thu nhỏ màn hình (Esc)'
-                  : 'Phóng to toàn màn hình để tối ưu hiển thị Slide bài giảng trên máy chiếu / màn hình tương tác'
+                  : 'Phóng to toàn màn hình'
               }
             >
               <span className="material-symbols-outlined text-[18px]">
@@ -2290,116 +1941,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     </div>
                   </div>
 
-                  {/* SECTION 4B: CHỨC NĂNG RIÊNG TRANG CHỦ GIÁO VIÊN — QUẢN TRỊ CSDL SLIDE BÀI GIẢNG TRÊN GOOGLE SHEETS (FILE "CSDL") */}
-                  <div ref={csdlHomeSectionRef} id="teacher-home-csdl-google-sheets">
-                    <GoogleSheetsSlideDbPanel
-                      grade={selectedNotebookGrade}
-                      period={selectedNotebookPeriod}
-                      classId={selectedClass}
-                      lessonTitle={
-                        gradePeriods.find((p) => p.period === selectedNotebookPeriod)
-                          ?.lessonTitle ||
-                        `Bài giảng Tin học Khối ${selectedNotebookGrade} • Tiết ${selectedNotebookPeriod}`
-                      }
-                      currentDeck={
-                        liveSession?.lectureSlidesByLesson?.[
-                          `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`
-                        ]
-                      }
-                      liveSession={liveSession}
-                      periodList={gradePeriods.map((p) => ({
-                        period: p.period,
-                        lessonTitle: p.lessonTitle,
-                      }))}
-                      onChangeGradeAndPeriod={(nextGrade, nextPeriod) => {
-                        handleSelectGradeAndPeriod(nextGrade, nextPeriod);
-                      }}
-                      onOpenLiveRoomForLesson={(targetGrade, targetPeriod) => {
-                        handleSelectGradeAndPeriod(targetGrade, targetPeriod);
-                        handleBroadcastLivePeriod(
-                          targetGrade,
-                          targetPeriod,
-                          true,
-                          selectedClass
-                        );
-                      }}
-                      onSheetIndexChange={(records) => {
-                        setSheetIndexRecords(records);
-                      }}
-                      onSyncSheetConfigToLiveSession={(nextCfg, nextRecords) => {
-                        if (onUpdateLiveSession) {
-                          onUpdateLiveSession((prev) => ({
-                            ...prev,
-                            googleSheetsCsdlConfig: nextCfg || prev.googleSheetsCsdlConfig,
-                            googleSheetsSlideIndex: nextRecords || prev.googleSheetsSlideIndex,
-                          }));
-                        }
-                      }}
-                      onApplyLoadedDeck={async (
-                        nextDeck,
-                        toastMsg,
-                        autoBroadcast,
-                        explicitLessonKey
-                      ) => {
-                        const targetKey =
-                          explicitLessonKey ||
-                          `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`;
-                        const syncVer = Date.now();
-                        if (isRealRenderedPdfSlideDeck(nextDeck)) {
-                          await saveSlideDeckToIndexedDb(targetKey, nextDeck).catch(() => {});
-                          fetch('/api/db/slides', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              lessonKey: targetKey,
-                              deck: nextDeck,
-                              activeSlideIndex: 0,
-                            }),
-                          }).catch(() => {});
-                        } else {
-                          await deleteSlideDeckFromIndexedDb(targetKey).catch(() => {});
-                        }
-
-                        if (onUpdateLiveSession) {
-                          onUpdateLiveSession((prev) => ({
-                            ...prev,
-                            ...(autoBroadcast
-                              ? {
-                                  isBroadcasting: true,
-                                  activeGrade: selectedNotebookGrade,
-                                  activePeriod: selectedNotebookPeriod,
-                                  activeClassId: selectedClass,
-                                  activeLiveView: 'slide' as const,
-                                }
-                              : {}),
-                            lectureSlidesByLesson: {
-                              ...(prev.lectureSlidesByLesson || {}),
-                              [targetKey]: nextDeck,
-                            },
-                            activeSlideIndexByLesson: {
-                              ...(prev.activeSlideIndexByLesson || {}),
-                              [targetKey]: 0,
-                            },
-                            slideSyncVersionByLesson: {
-                              ...(prev.slideSyncVersionByLesson || {}),
-                              [targetKey]: syncVer,
-                            },
-                            unlockedSlideDeckByLesson: {
-                              ...(prev.unlockedSlideDeckByLesson || {}),
-                              [targetKey]: true,
-                            },
-                            updatedAt: new Date().toISOString(),
-                          }));
-                        }
-
-                        if (toastMsg) {
-                          onShowToast(toastMsg);
-                        }
-                      }}
-                      onShowToast={onShowToast}
-                    />
-                  </div>
-
                   {/* SECTION 5: GRID OF 29-PERIOD CARDS — CLICKING ANY PERIOD IMMEDIATELY ENTERS LIVE ROOM */}
                   {(() => {
                     const filteredGradePeriods = gradePeriods.filter((spec) => {
@@ -2446,11 +1987,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                                 : `${spec.period * 3 - 2}–${spec.period * 3}`;
                               const bookName = spec.sgkFile || `SGK Tin${selectedNotebookGrade}.pdf`;
                               const typeText = spec.lessonType === 'practice' ? 'Thực hành' : 'Lý thuyết';
-                              const slideMapping = buildFixedSlideFolderMapping(
-                                spec.grade,
-                                spec.period,
-                                fixedSlideRootFolder
-                              );
 
                               const enterLiveRoomForPeriod = () => {
                                 handleSelectGradeAndPeriod(spec.grade, spec.period);
@@ -2494,27 +2030,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                                         <p className="text-xs text-slate-500 mt-1">
                                           Trang {pageRange} ({bookName}) • {typeText}
                                         </p>
-                                        {(() => {
-                                          const cardLessonKey = `k${spec.grade}-tiet-${spec.period}`;
-                                          const sheetRec = sheetIndexRecords.find(
-                                            (r) => r.lessonKey === cardLessonKey
-                                          );
-                                          return sheetRec ? (
-                                            <span className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded-lg w-fit">
-                                              <span className="material-symbols-outlined text-[13px]">table_chart</span>
-                                              <span>
-                                                CSDL Google Sheet: ✓ {sheetRec.slideCount} Slide Ảnh ({cardLessonKey})
-                                              </span>
-                                            </span>
-                                          ) : (
-                                            <span className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-teal-800 bg-teal-50/80 border border-teal-200 px-2 py-0.5 rounded-lg w-fit">
-                                              <span className="material-symbols-outlined text-[13px]">table_chart</span>
-                                              <span>
-                                                CSDL Google Sheet: {cardLessonKey}
-                                              </span>
-                                            </span>
-                                          );
-                                        })()}
                                       </div>
                                     </div>
 
@@ -2603,285 +2118,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       </DataBoundary>
                     );
                   })()}
-              </div>
-            </div>
-          )}
-
-          {/* TAB RIÊNG: QUẢN TRỊ CSDL SLIDE BÀI GIẢNG TRÊN GOOGLE SHEETS (FILE "CSDL" • PDF.JS -> WEBP) */}
-          {activeTab === 'csdl-google-sheets' && (
-            <div className="flex flex-col gap-6" data-testid="teacher-csdl-google-sheets-tab">
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-5 rounded-3xl border border-emerald-200 shadow-2xs">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
-                    <span className="material-symbols-outlined text-[26px]">cloud_upload</span>
-                  </div>
-                  <div>
-                    <h1 className="text-lg font-black text-slate-900">
-                      Quản Trị CSDL Slide Bài Giảng Trên Google Sheets (File Google Drive: &quot;CSDL&quot;)
-                    </h1>
-                    <p className="text-xs text-slate-600">
-                      Module <code>src/utils/googleSheetsConnector.ts</code> • Chuyển đổi mỗi trang PDF thành ảnh WebP độ nét cao bằng <code>pdf.js</code> và phân mảnh tối đa 6 chunk Base64 lưu vào 2 bảng <code>Slides_Index</code> &amp; <code>Slides_Pages</code>
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onChangeTab('trang-chu')}
-                  className="px-4 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold cursor-pointer flex items-center gap-1.5"
-                >
-                  <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-                  <span>Quay lại Trang chủ 29 Tiết</span>
-                </button>
-              </div>
-
-              <GoogleSheetsSlideDbPanel
-                grade={selectedNotebookGrade}
-                period={selectedNotebookPeriod}
-                classId={selectedClass}
-                lessonTitle={
-                  gradePeriods.find((p) => p.period === selectedNotebookPeriod)
-                    ?.lessonTitle ||
-                  `Bài giảng Tin học Khối ${selectedNotebookGrade} • Tiết ${selectedNotebookPeriod}`
-                }
-                currentDeck={
-                  liveSession?.lectureSlidesByLesson?.[
-                    `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`
-                  ]
-                }
-                liveSession={liveSession}
-                periodList={gradePeriods.map((p) => ({
-                  period: p.period,
-                  lessonTitle: p.lessonTitle,
-                }))}
-                onChangeGradeAndPeriod={(nextGrade, nextPeriod) => {
-                  handleSelectGradeAndPeriod(nextGrade, nextPeriod);
-                }}
-                onOpenLiveRoomForLesson={(targetGrade, targetPeriod) => {
-                  handleSelectGradeAndPeriod(targetGrade, targetPeriod);
-                  handleBroadcastLivePeriod(
-                    targetGrade,
-                    targetPeriod,
-                    true,
-                    selectedClass
-                  );
-                }}
-                onSheetIndexChange={(records) => {
-                  setSheetIndexRecords(records);
-                }}
-                onSyncSheetConfigToLiveSession={(nextCfg, nextRecords) => {
-                  if (onUpdateLiveSession) {
-                    onUpdateLiveSession((prev) => ({
-                      ...prev,
-                      googleSheetsCsdlConfig: nextCfg || prev.googleSheetsCsdlConfig,
-                      googleSheetsSlideIndex: nextRecords || prev.googleSheetsSlideIndex,
-                    }));
-                  }
-                }}
-                onApplyLoadedDeck={async (
-                  nextDeck,
-                  toastMsg,
-                  autoBroadcast,
-                  explicitLessonKey
-                ) => {
-                  const targetKey =
-                    explicitLessonKey ||
-                    `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`;
-                  const syncVer = Date.now();
-                  if (isRealRenderedPdfSlideDeck(nextDeck)) {
-                    await saveSlideDeckToIndexedDb(targetKey, nextDeck).catch(() => {});
-                    fetch('/api/db/slides', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        lessonKey: targetKey,
-                        deck: nextDeck,
-                        activeSlideIndex: 0,
-                      }),
-                    }).catch(() => {});
-                  } else {
-                    await deleteSlideDeckFromIndexedDb(targetKey).catch(() => {});
-                  }
-
-                  if (onUpdateLiveSession) {
-                    onUpdateLiveSession((prev) => ({
-                      ...prev,
-                      ...(autoBroadcast
-                        ? {
-                            isBroadcasting: true,
-                            activeGrade: selectedNotebookGrade,
-                            activePeriod: selectedNotebookPeriod,
-                            activeClassId: selectedClass,
-                            activeLiveView: 'slide' as const,
-                          }
-                        : {}),
-                      lectureSlidesByLesson: {
-                        ...(prev.lectureSlidesByLesson || {}),
-                        [targetKey]: nextDeck,
-                      },
-                      activeSlideIndexByLesson: {
-                        ...(prev.activeSlideIndexByLesson || {}),
-                        [targetKey]: 0,
-                      },
-                      slideSyncVersionByLesson: {
-                        ...(prev.slideSyncVersionByLesson || {}),
-                        [targetKey]: syncVer,
-                      },
-                      unlockedSlideDeckByLesson: {
-                        ...(prev.unlockedSlideDeckByLesson || {}),
-                        [targetKey]: true,
-                      },
-                      updatedAt: new Date().toISOString(),
-                    }));
-                  }
-
-                  if (toastMsg) {
-                    onShowToast(toastMsg);
-                  }
-                }}
-                onShowToast={onShowToast}
-              />
-            </div>
-          )}
-
-          {/* MODAL RIÊNG: QUẢN TRỊ CSDL SLIDE GOOGLE SHEETS ("CSDL") */}
-          {showCsdlGoogleSheetsModal && (
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label="Cửa sổ quản trị CSDL Slide trên Google Sheets"
-              className="fixed inset-0 z-[110] bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
-            >
-              <div className="bg-white rounded-3xl max-w-5xl w-full p-5 sm:p-6 border-2 border-emerald-500 shadow-2xl flex flex-col gap-4 my-auto max-h-[92vh] overflow-y-auto">
-                <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-200">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center">
-                      <span className="material-symbols-outlined text-[22px]">table_chart</span>
-                    </span>
-                    <div>
-                      <h3 className="text-base font-black text-slate-900">
-                        Nạp PDF Bài Giảng (pdf.js → WebP) &amp; Đẩy Lên Google Sheets &quot;CSDL&quot;
-                      </h3>
-                      <p className="text-xs text-slate-500">
-                        Connector: <code>src/utils/googleSheetsConnector.ts</code> • 2 bảng chuẩn hóa <code>Slides_Index</code> &amp; <code>Slides_Pages</code>
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowCsdlGoogleSheetsModal(false)}
-                    className="px-3.5 py-1.5 rounded-full bg-slate-100 hover:bg-rose-100 text-slate-700 hover:text-rose-700 text-xs font-bold cursor-pointer"
-                  >
-                    ✕ Đóng cửa sổ
-                  </button>
-                </div>
-
-                <GoogleSheetsSlideDbPanel
-                  grade={selectedNotebookGrade}
-                  period={selectedNotebookPeriod}
-                  classId={selectedClass}
-                  lessonTitle={
-                    gradePeriods.find((p) => p.period === selectedNotebookPeriod)
-                      ?.lessonTitle ||
-                    `Bài giảng Tin học Khối ${selectedNotebookGrade} • Tiết ${selectedNotebookPeriod}`
-                  }
-                  currentDeck={
-                    liveSession?.lectureSlidesByLesson?.[
-                      `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`
-                    ]
-                  }
-                  liveSession={liveSession}
-                  periodList={gradePeriods.map((p) => ({
-                    period: p.period,
-                    lessonTitle: p.lessonTitle,
-                  }))}
-                  onChangeGradeAndPeriod={(nextGrade, nextPeriod) => {
-                    handleSelectGradeAndPeriod(nextGrade, nextPeriod);
-                  }}
-                  onOpenLiveRoomForLesson={(targetGrade, targetPeriod) => {
-                    setShowCsdlGoogleSheetsModal(false);
-                    handleSelectGradeAndPeriod(targetGrade, targetPeriod);
-                    handleBroadcastLivePeriod(
-                      targetGrade,
-                      targetPeriod,
-                      true,
-                      selectedClass
-                    );
-                  }}
-                  onSheetIndexChange={(records) => {
-                    setSheetIndexRecords(records);
-                  }}
-                  onSyncSheetConfigToLiveSession={(nextCfg, nextRecords) => {
-                    if (onUpdateLiveSession) {
-                      onUpdateLiveSession((prev) => ({
-                        ...prev,
-                        googleSheetsCsdlConfig: nextCfg || prev.googleSheetsCsdlConfig,
-                        googleSheetsSlideIndex: nextRecords || prev.googleSheetsSlideIndex,
-                      }));
-                    }
-                  }}
-                  onApplyLoadedDeck={async (
-                    nextDeck,
-                    toastMsg,
-                    autoBroadcast,
-                    explicitLessonKey
-                  ) => {
-                    const targetKey =
-                      explicitLessonKey ||
-                      `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`;
-                    const syncVer = Date.now();
-                    if (isRealRenderedPdfSlideDeck(nextDeck)) {
-                      await saveSlideDeckToIndexedDb(targetKey, nextDeck).catch(() => {});
-                      fetch('/api/db/slides', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          lessonKey: targetKey,
-                          deck: nextDeck,
-                          activeSlideIndex: 0,
-                        }),
-                      }).catch(() => {});
-                    } else {
-                      await deleteSlideDeckFromIndexedDb(targetKey).catch(() => {});
-                    }
-
-                    if (onUpdateLiveSession) {
-                      onUpdateLiveSession((prev) => ({
-                        ...prev,
-                        ...(autoBroadcast
-                          ? {
-                              isBroadcasting: true,
-                              activeGrade: selectedNotebookGrade,
-                              activePeriod: selectedNotebookPeriod,
-                              activeClassId: selectedClass,
-                              activeLiveView: 'slide' as const,
-                            }
-                          : {}),
-                        lectureSlidesByLesson: {
-                          ...(prev.lectureSlidesByLesson || {}),
-                          [targetKey]: nextDeck,
-                        },
-                        activeSlideIndexByLesson: {
-                          ...(prev.activeSlideIndexByLesson || {}),
-                          [targetKey]: 0,
-                        },
-                        slideSyncVersionByLesson: {
-                          ...(prev.slideSyncVersionByLesson || {}),
-                          [targetKey]: syncVer,
-                        },
-                        unlockedSlideDeckByLesson: {
-                          ...(prev.unlockedSlideDeckByLesson || {}),
-                          [targetKey]: true,
-                        },
-                        updatedAt: new Date().toISOString(),
-                      }));
-                    }
-
-                    if (toastMsg) {
-                      onShowToast(toastMsg);
-                    }
-                  }}
-                  onShowToast={onShowToast}
-                />
               </div>
             </div>
           )}

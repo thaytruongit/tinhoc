@@ -50,19 +50,13 @@ router.get('/api/github/sync-snapshot', (_req: Request, res: Response) => {
         appTitle: 'Dạy học số — Tin Học GDPT 2018 (Khối 6-9)',
         syncedAtIso: new Date().toISOString(),
         prioritizeGitHubPublic: true,
-        googleSheetsCsdlConfig: liveClassroomSession.googleSheetsCsdlConfig || null,
-        sheetLessonsIndex: liveClassroomSession.googleSheetsSlideIndex || [],
         activeLiveLesson: {
           classId: String(liveClassroomSession.activeClassId || '6A10'),
           grade: Number(liveClassroomSession.activeGrade) || 6,
           period: Number(liveClassroomSession.activePeriod) || 1,
           lessonKey: `k${Number(liveClassroomSession.activeGrade) || 6}-tiet-${Number(liveClassroomSession.activePeriod) || 1}`,
-          currentSlideNumber: 1,
-          totalSlides: 15,
-          slideViewMode: 'LARGE_16_9',
           isBroadcasting: Boolean(liveClassroomSession.isBroadcasting ?? true),
         },
-        slideDecksSummaryByLesson: {},
         taughtPeriodsByClass: liveClassroomSession.taughtPeriodsByClass || {},
         classesCount: inMemoryClasses.length,
         studentsCount: inMemoryStudents.length,
@@ -84,12 +78,6 @@ router.post('/api/github/sync-snapshot', requireTeacherAuth, async (req: Authent
       return res.status(400).json({ ok: false, error: 'Missing snapshot payload' });
     }
 
-    if (incoming.googleSheetsCsdlConfig?.spreadsheetId) {
-      liveClassroomSession.googleSheetsCsdlConfig = incoming.googleSheetsCsdlConfig;
-    }
-    if (Array.isArray(incoming.sheetLessonsIndex)) {
-      liveClassroomSession.googleSheetsSlideIndex = incoming.sheetLessonsIndex;
-    }
     liveClassroomSession.updatedAt = new Date().toISOString();
 
     const jsonFormatted = JSON.stringify(incoming, null, 2);

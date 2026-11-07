@@ -112,7 +112,6 @@ interface LiveClassroomWaitingRoomProps {
     updater: (prev: LiveClassroomSession) => LiveClassroomSession
   ) => void;
   onReadyForLearning?: () => void;
-  onStartSlidePresentation?: () => void;
   onStartActivityStage?: (stage: 1 | 2 | 3 | 4) => void;
   onAwardXp?: (delta: number) => void;
   onShowToast: (msg: string) => void;
@@ -174,7 +173,6 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
   liveSession,
   onUpdateLiveSession,
   onReadyForLearning,
-  onStartSlidePresentation,
   onStartActivityStage,
   onAwardXp,
   onShowToast,
@@ -890,8 +888,6 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
     }
     if (onReadyForLearning) {
       onReadyForLearning();
-    } else if (onStartSlidePresentation) {
-      onStartSlidePresentation();
     }
   };
 
@@ -1275,7 +1271,7 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
               </span>
             </div>
             <p className="text-[11px] text-amber-200/90">
-              Điểm khởi động: Tổ 1 ({waitingState.team1Score}đ) vs Tổ 2 ({waitingState.team2Score}đ) • Đang trình chiếu Slide Bài Giảng bên dưới
+              Điểm khởi động: Tổ 1 ({waitingState.team1Score}đ) vs Tổ 2 ({waitingState.team2Score}đ) • Đang tiến hành Hoạt động học bên dưới
             </p>
           </div>
         </div>
@@ -1412,10 +1408,10 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
                 type="button"
                 onClick={handleTeacherMarkReadyForLearning}
                 className="px-4 py-2 rounded-full bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-600 hover:to-teal-700 text-white font-black text-xs cursor-pointer shadow-lg border-2 border-emerald-200 transition-all flex items-center gap-1.5 animate-pulse"
-                title="Nhấn Sẵn sàng cho việc học để bắt đầu chiếu Slide bài giảng và mở tiến trình các hoạt động học"
+                title="Nhấn Sẵn sàng cho việc học để bắt đầu mở tiến trình các hoạt động học"
               >
                 <span>🚀</span>
-                <span>Sẵn sàng cho việc học (Bắt đầu Slide &amp; Hoạt động)</span>
+                <span>Sẵn sàng cho việc học (Bắt đầu Hoạt động)</span>
               </button>
 
               {defaultCollapsedAfterReady && (
@@ -1423,7 +1419,7 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
                   type="button"
                   onClick={() => setIsCollapsed(true)}
                   className="px-2.5 py-1.5 rounded-full bg-black/30 hover:bg-black/50 text-amber-200 text-[11px] font-bold cursor-pointer border border-white/15"
-                  title="Thu gọn Phòng Chờ xuống thanh trạng thái phía trên Slide Bài Giảng"
+                  title="Thu gọn Phòng Chờ xuống thanh trạng thái phía trên Hoạt động học"
                 >
                   Thu gọn ▲
                 </button>

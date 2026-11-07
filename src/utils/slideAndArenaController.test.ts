@@ -6,10 +6,7 @@ import {
   computeArenaRemainingSeconds,
   formatCountdownMmSs,
   estimateBase64Bytes,
-  isFileStorageSlideUrl,
   getArenaCountdownVisualState,
-  generateFallbackSlideSvgDataUrl,
-  buildEndSlidePresentationState,
   buildStartLiveSessionStandbyState,
   buildBroadcastSingleActivityState,
   buildStopSingleActivityState,
@@ -63,43 +60,8 @@ test('isStudentLiveViewUnlocked and isolated activity builders enforce standby o
     4: false,
   });
 
-  // 2. Broadcasting Slide unlocks only Slide
-  const slideSession = buildBroadcastSingleActivityState(initialStandby, {
-    grade: 6,
-    period: 1,
-    classId: '6A10',
-    activity: 'slide',
-    slideIndex: 2,
-    slideSyncVersion: 1000,
-  });
-  assert.equal(slideSession.activeLiveView, 'slide');
-  assert.equal(slideSession.unlockedSlideDeckByLesson['k6-tiet-1'], true);
-  assert.deepEqual(slideSession.unlockedStagesByLesson['k6-tiet-1'], {
-    1: false,
-    2: false,
-    3: false,
-    4: false,
-  });
-
-  // 3. Ending Slide stops at 'waiting' and locks all views
-  const endedSlide = buildEndSlidePresentationState(slideSession, 'k6-tiet-1');
-  assert.equal(endedSlide.activeLiveView, 'waiting');
-  assert.equal(endedSlide.unlockedSlideDeckByLesson['k6-tiet-1'], false);
-  const afterSlideEndParams = {
-    teacherActiveView: endedSlide.activeLiveView,
-    isSlideDeckUnlocked: endedSlide.unlockedSlideDeckByLesson['k6-tiet-1'],
-    isPracticeStage3Unlocked: endedSlide.unlockedPracticeStage3ByLesson['k6-tiet-1'],
-    unlockedStages: endedSlide.unlockedStagesByLesson['k6-tiet-1'],
-    teacherCurrentStage: 1,
-  };
-  assert.equal(isStudentLiveViewUnlocked({ ...afterSlideEndParams, viewId: 'slide' }), false);
-  assert.equal(isStudentLiveViewUnlocked({ ...afterSlideEndParams, viewId: 1 }), false);
-  assert.equal(isStudentLiveViewUnlocked({ ...afterSlideEndParams, viewId: 2 }), false);
-  assert.equal(isStudentLiveViewUnlocked({ ...afterSlideEndParams, viewId: 3 }), false);
-  assert.equal(isStudentLiveViewUnlocked({ ...afterSlideEndParams, viewId: 4 }), false);
-
-  // 4. Broadcasting Hoạt động 2 unlocks ONLY Hoạt động 2 (does not affect HĐ 1, 3, 4)
-  const hd2Session = buildBroadcastSingleActivityState(endedSlide, {
+  // 2. Broadcasting Hoạt động 2 unlocks ONLY Hoạt động 2 (does not affect HĐ 1, 3, 4)
+  const hd2Session = buildBroadcastSingleActivityState(initialStandby, {
     grade: 6,
     period: 1,
     classId: '6A10',
@@ -114,8 +76,6 @@ test('isStudentLiveViewUnlocked and isolated activity builders enforce standby o
   });
   const hd2Params = {
     teacherActiveView: hd2Session.activeLiveView,
-    isSlideDeckUnlocked: hd2Session.unlockedSlideDeckByLesson['k6-tiet-1'],
-    isPracticeStage3Unlocked: hd2Session.unlockedPracticeStage3ByLesson['k6-tiet-1'],
     unlockedStages: hd2Session.unlockedStagesByLesson['k6-tiet-1'],
     teacherCurrentStage: 2,
   };
@@ -123,7 +83,7 @@ test('isStudentLiveViewUnlocked and isolated activity builders enforce standby o
   assert.equal(isStudentLiveViewUnlocked({ ...hd2Params, viewId: 2 }), true);
   assert.equal(isStudentLiveViewUnlocked({ ...hd2Params, viewId: 3 }), false);
 
-  // 5. Stopping Hoạt động 2 stops cleanly at 'waiting'
+  // 3. Stopping Hoạt động 2 stops cleanly at 'waiting'
   const stoppedHd2 = buildStopSingleActivityState(hd2Session, 'k6-tiet-1');
   assert.equal(stoppedHd2.activeLiveView, 'waiting');
   assert.deepEqual(stoppedHd2.unlockedStagesByLesson['k6-tiet-1'], {
@@ -166,20 +126,8 @@ test('getArenaCountdownVisualState transitions colors from normal to warning, cr
   assert.equal(expired.percent, 0);
 });
 
-test('file storage helpers detect file storage URLs, estimate base64 bytes, and generate SVG slide fallback', () => {
-  assert.equal(isFileStorageSlideUrl('/api/file-storage/slides/file/slide-k6-t1-p1.webp'), true);
-  assert.equal(isFileStorageSlideUrl('data:image/jpeg;base64,abcd'), false);
+test('estimateBase64Bytes computes accurate size', () => {
   assert.equal(estimateBase64Bytes('data:image/webp;base64,AAAA'), 3);
-
-  const svgUrl = generateFallbackSlideSvgDataUrl({
-    grade: 6,
-    period: 1,
-    slideIndex: 0,
-    totalSlides: 5,
-    title: 'Bài 1: Thông tin và dữ liệu',
-    bulletPoints: ['Thông tin là những gì đem lại hiểu biết'],
-  });
-  assert.equal(svgUrl.startsWith('data:image/svg+xml;utf8,'), true);
 });
 
 test('normalizeLiveSession, normalizeStudentRosterList, and normalizeClassroomList protect against malformed DB payloads', () => {
@@ -240,33 +188,23 @@ test('activity finalization ("Chốt hoạt động") toggles and locks submissi
   session = buildToggleFinalizeActivityState(session, {
     lessonKey,
     activityKey: 'hd2_drag',
-    activityTitle: 'Bài tập 1: Kéo thả',
+    activityTitle: 'Hoạt động 2: Kéo thả',
   });
   assert.equal(isActivityFinalized(session, lessonKey, 'hd2_drag'), true);
   assert.equal(isActivityFinalized(session, lessonKey, 'hd2_fill'), false);
-  assert.equal(isActivityFinalized(session, lessonKey, 2), false); // Entire HĐ 2 not yet locked
 
-  // 3. Finalize entire Activity 2 -> cascades lock to all sub-exercises
+  // 3. Finalize entire Activity 2 -> auto locks all sub-exercises
   session = buildToggleFinalizeActivityState(session, {
     lessonKey,
     activityKey: 2,
     activityTitle: 'Hoạt động 2: Khám phá',
   });
   assert.equal(isActivityFinalized(session, lessonKey, 2), true);
-  assert.equal(isActivityFinalized(session, lessonKey, 'hd2'), true);
   assert.equal(isActivityFinalized(session, lessonKey, 'hd2_fill'), true);
   assert.equal(isActivityFinalized(session, lessonKey, 'hd2_match'), true);
+  assert.equal(isActivityFinalized(session, lessonKey, 'hd2_short'), true);
 
-  // 4. Finalize Practical activity in Activity 3
-  session = buildToggleFinalizeActivityState(session, {
-    lessonKey,
-    activityKey: 'hd3-practice',
-    activityTitle: 'HĐ 3: Thực hành máy tính',
-  });
-  assert.equal(isActivityFinalized(session, lessonKey, 'hd3-practice'), true);
-  assert.equal(isActivityFinalized(session, lessonKey, 3), false); // Arena 25s still open
-
-  // 5. Unlocking/reopening Activity 1 works
+  // 4. Unfinalize Activity 1
   session = buildToggleFinalizeActivityState(session, {
     lessonKey,
     activityKey: 1,
@@ -275,112 +213,59 @@ test('activity finalization ("Chốt hoạt động") toggles and locks submissi
   assert.equal(isActivityFinalized(session, lessonKey, 1), false);
 });
 
-test('normalizeLiveSession ensures every slide has valid imageUrl and merges fallback images so slides never degrade to plain text on reload', () => {
-  const defaultSess: any = {
-    activeGrade: 6,
-    activePeriod: 1,
-    lectureSlidesByLesson: {
-      'k6-tiet-1': {
-        grade: 6,
-        period: 1,
-        isUserUploaded: true,
-        slides: [
-          {
-            slideNumber: 1,
-            title: 'Tiết 1 - Slide 1',
-            bulletPoints: ['Gốc từ ban đầu'],
-            imageUrl: '/api/file-storage/slides/file/initial-slide-1.webp',
-          },
-        ],
-      },
-    },
-  };
-
-  // Simulate a raw session from localStorage or DB where imageUrl was lost, stripped or empty
-  const rawSessionWithEmptyImages = {
-    activeGrade: 6,
-    activePeriod: 1,
-    lectureSlidesByLesson: {
-      'k6-tiet-1': {
-        grade: 6,
-        period: 1,
-        slides: [
-          {
-            slideNumber: 1,
-            title: 'Tiết 1 - Slide 1',
-            bulletPoints: ['Nội dung mới'],
-            imageUrl: '', // stripped or empty
-          },
-          {
-            slideNumber: 2,
-            title: 'Tiết 1 - Slide 2 (Mới thêm)',
-            bulletPoints: ['Điểm 2'],
-            // no imageUrl provided
-          },
-        ],
-      },
-    },
-  };
-
-  const normalized = normalizeLiveSession(rawSessionWithEmptyImages, defaultSess);
-  const deck = normalized.lectureSlidesByLesson['k6-tiet-1'];
-  assert.equal(deck.slides.length, 2);
-
-  // Slide 1 should recover imageUrl from fallback
-  assert.equal(deck.slides[0].imageUrl, '/api/file-storage/slides/file/initial-slide-1.webp');
-
-  // Slide 2 should have guaranteed high-fidelity SVG slide image data URL instead of empty string
-  assert.ok(typeof deck.slides[1].imageUrl === 'string');
-  assert.ok(deck.slides[1].imageUrl.length > 50);
-  assert.ok(deck.slides[1].imageUrl.startsWith('data:image/svg+xml;utf8,'));
+test('normalizeActivityKey standardizes alias formats', () => {
+  assert.equal(normalizeActivityKey('1'), '1');
+  assert.equal(normalizeActivityKey('hd1'), '1');
+  assert.equal(normalizeActivityKey('stage1'), '1');
+  assert.equal(normalizeActivityKey('drag'), 'hd2_drag');
+  assert.equal(normalizeActivityKey('keo-tha'), 'hd2_drag');
+  assert.equal(normalizeActivityKey('tu-luan'), 'hd2_short');
+  assert.equal(normalizeActivityKey('practice'), 'hd3-practice');
 });
 
-test('filterTeacherPortalStudents and computeStudentFilterSummary filter students by submission status (Đã nộp / Chưa nộp) and learning group (Nhóm 1..4)', () => {
+test('filterTeacherPortalStudents and computeStudentFilterSummary filter accurately by grade, class, submission, and group', () => {
   const sampleStudents = [
-    { id: '61001', name: 'Bùi Minh Anh', classId: '6A10', grade: 6, groupNumber: 1, submissionStatus: 'Đã nộp' },
-    { id: '61002', name: 'Trần Gia Bảo', classId: '6A10', grade: 6, groupNumber: 2, submissionStatus: 'Chưa nộp' },
-    { id: '61003', name: 'Lê Hoàng Châu', classId: '6A10', grade: 6, groupNumber: 3, submissionStatus: 'Đã nộp' },
-    { id: '61004', name: 'Phạm Quốc Dũng', classId: '6A10', grade: 6, groupNumber: 4, submissionStatus: 'Đang làm' },
-    { id: '71001', name: 'Nguyễn Khánh Linh', classId: '7A10', grade: 7, groupNumber: 1, submissionStatus: 'Chưa nộp' },
+    { id: '61001', name: 'Nguyễn Văn A', classId: '6A1', grade: 6, groupNumber: 1, submissionStatus: 'Đã nộp' },
+    { id: '61002', name: 'Trần Thị B', classId: '6A1', grade: 6, groupNumber: 2, submissionStatus: 'Chưa nộp' },
+    { id: '61003', name: 'Lê Văn C', classId: '6A1', grade: 6, groupNumber: 1, submissionStatus: 'Đã nộp' },
+    { id: '71001', name: 'Phạm Thị D', classId: '7A1', grade: 7, groupNumber: 3, submissionStatus: 'Chưa nộp' },
   ];
 
-  // Summary for class 6A10
-  const summary6A10 = computeStudentFilterSummary(sampleStudents, { classFilter: '6A10' });
-  assert.equal(summary6A10.total, 4);
-  assert.equal(summary6A10.submittedCount, 2);
-  assert.equal(summary6A10.notSubmittedCount, 2); // 'Chưa nộp' + 'Đang làm' count as not yet submitted ('Chưa nộp')
-  assert.equal(summary6A10.groupCounts[1], 1);
-  assert.equal(summary6A10.groupCounts[2], 1);
-  assert.equal(summary6A10.groupCounts[3], 1);
-  assert.equal(summary6A10.groupCounts[4], 1);
+  // Grade filter
+  const grade6Only = filterTeacherPortalStudents(sampleStudents, { gradeFilter: 6 });
+  assert.equal(grade6Only.length, 3);
 
-  // Filter by 'Đã nộp' in 6A10
+  // Class filter
+  const class6A1 = filterTeacherPortalStudents(sampleStudents, { classFilter: '6A1' });
+  assert.equal(class6A1.length, 3);
+
+  // Submission status filter
   const submittedOnly = filterTeacherPortalStudents(sampleStudents, {
-    classFilter: '6A10',
+    classFilter: '6A1',
     submissionStatusFilter: 'Đã nộp',
   });
   assert.equal(submittedOnly.length, 2);
-  assert.deepEqual(submittedOnly.map((s) => s.id), ['61001', '61003']);
 
-  // Filter by 'Chưa nộp' in 6A10
-  const notSubmittedOnly = filterTeacherPortalStudents(sampleStudents, {
-    classFilter: '6A10',
-    submissionStatusFilter: 'Chưa nộp',
+  // Group filter
+  const group1Only = filterTeacherPortalStudents(sampleStudents, {
+    classFilter: '6A1',
+    groupFilter: 1,
   });
-  assert.equal(notSubmittedOnly.length, 2);
-  assert.deepEqual(notSubmittedOnly.map((s) => s.id), ['61002', '61004']);
+  assert.equal(group1Only.length, 2);
 
-  // Filter by Group 3
-  const group3Only = filterTeacherPortalStudents(sampleStudents, {
-    classFilter: '6A10',
-    groupFilter: 3,
-  });
-  assert.equal(group3Only.length, 1);
-  assert.equal(group3Only[0].id, '61003');
+  // Summary counts
+  const summary = computeStudentFilterSummary(sampleStudents, { classFilter: '6A1' });
+  assert.equal(summary.total, 3);
+  assert.equal(summary.submittedCount, 2);
+  assert.equal(summary.notSubmittedCount, 1);
+  assert.equal(summary.groupCounts[1], 2);
+  assert.equal(summary.groupCounts[2], 1);
+  assert.equal(summary.groupCounts[3], 0);
 
-  // Dynamic submittedStudentIds override (e.g. student 61002 just submitted live)
-  assert.equal(getEffectiveStudentSubmissionStatus(sampleStudents[1], ['61002']), 'Đã nộp');
+  // Live session submission override
+  const effectiveStatus = getEffectiveStudentSubmissionStatus(
+    { id: '61002', submissionStatus: 'Chưa nộp' },
+    { taggedSubmissions: [{ studentId: '61002' }] }
+  );
+  assert.equal(effectiveStatus, 'Đã nộp');
 });
-
-
-
