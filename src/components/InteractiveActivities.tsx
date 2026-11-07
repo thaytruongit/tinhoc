@@ -1,6 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { DragDropSentenceLine } from '../data/mockCurriculumData';
+import {
+  type DragDropSentenceLine,
+  type PracticalProductSubmission,
+} from '../data/mockCurriculumData';
 import { evaluateAnswerBySuggestedPercentage } from '../utils/essayPercentageGrader';
+import {
+  getTeacherGoogleDriveFolderUrl,
+  formatFileSize,
+  readFileAsDataUrl,
+  triggerDownloadSubmissionFile,
+  detectSubmissionFileType,
+} from '../utils/googleDriveService';
 
 // ==========================================
 // 0. HOẠT ĐỘNG 1: KHỞI ĐỘNG (TÌNH HUỐNG ĐẶT VẤN ĐỀ — TỰ LUẬN NGẮN)
@@ -1942,31 +1952,20 @@ export interface GoogleDrivePracticalProps {
   lessonTitle: string;
   studentId: string;
   studentName: string;
-  studentUsername: string;
+  studentUsername?: string;
   folderName: string;
   drivePath: string;
-  existingSubmissions: Array<{
-    id: string;
-    studentId: string;
-    studentName: string;
-    classId: string;
-    period: number;
-    fileName: string;
-    fileType: string;
-    fileSize: string;
-    studentNote: string;
-    submittedAt: string;
-    status: 'Chờ chấm' | 'Đã chấm';
-    score: number | null;
-    maxPoints: number;
-    teacherFeedback: string;
-  }>;
+  teacherDriveUrl?: string;
+  existingSubmissions: PracticalProductSubmission[];
   onSubmitProduct: (payload: {
     fileName: string;
     fileType: string;
     fileSize: string;
     studentNote: string;
+    fileDataUrl?: string;
+    driveFileUrl?: string;
   }) => void;
+  onShowToast?: (msg: string) => void;
 }
 
 export const GoogleDrivePracticalActivity: React.FC<GoogleDrivePracticalProps> = ({
@@ -1976,18 +1975,29 @@ export const GoogleDrivePracticalActivity: React.FC<GoogleDrivePracticalProps> =
   lessonTitle,
   studentId,
   studentName,
+  studentUsername,
   folderName,
   drivePath,
+  teacherDriveUrl,
   existingSubmissions,
   onSubmitProduct,
+  onShowToast,
 }) => {
   const [selectedFileName, setSelectedFileName] = useState(
     `SanPham_Tiet${period}_${studentName.replace(/\s+/g, '')}_${classId}.docx`
   );
   const [selectedFileType, setSelectedFileType] = useState('Tài liệu Word (.docx)');
   const [studentNote, setStudentNote] = useState(
-    `Em nộp bài thực hành ${lessonTitle} vào thư mục Google Drive của lớp ${classId}.`
+    `Em nộp bài thực hành ${lessonTitle} vào thư mục Google Drive của Thầy Đỗ Mạnh Trường (Lớp ${classId}).`
   );
+  const [fileDataUrl, setFileDataUrl] = useState<string | null>(null);
+  const [driveFileUrlInput, setDriveFileUrlInput] = useState<string>('');
+  const [fileSizeStr, setFileSizeStr] = useState<string>('1.2 MB');
+  const [previewThumbnail, setPreviewThumbnail] = useState<string | null>(null);
+  const [isProcessingFile, setIsProcessingFile] = useState<boolean>(false);
+  const [showStudentSelfPreviewModal, setShowStudentSelfPreviewModal] = useState<boolean>(false);
+
+  const resolvedDriveUrl = teacherDriveUrl || getTeacherGoogleDriveFolderUrl(grade, classId);
 
   const mySubmission = existingSubmissions.find(
     (s) => s.studentId === studentId && s.classId === classId && s.period === period
@@ -1996,185 +2006,286 @@ export const GoogleDrivePracticalActivity: React.FC<GoogleDrivePracticalProps> =
     (s) => s.classId === classId && s.period === period
   );
 
-  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setIsProcessingFile(true);
     setSelectedFileName(file.name);
-    const ext = file.name.split('.').pop()?.toLowerCase() || '';
-    if (ext === 'png' || ext === 'jpg' || ext === 'jpeg') {
-      setSelectedFileType('Ảnh chụp màn hình (.png/.jpg)');
-    } else if (ext === 'xlsx' || ext === 'xls') {
-      setSelectedFileType('Bảng tính Excel (.xlsx)');
-    } else if (ext === 'pptx' || ext === 'ppt') {
-      setSelectedFileType('Bài trình chiếu (.pptx)');
-    } else if (ext === 'sb3') {
-      setSelectedFileType('Dự án Scratch (.sb3)');
-    } else {
-      setSelectedFileType(`Tệp thực hành (.${ext || 'docx'})`);
+    const sizeFormatted = formatFileSize(file.size);
+    setFileSizeStr(sizeFormatted);
+    const typeMeta = detectSubmissionFileType(file.name, file.type);
+    setSelectedFileType(typeMeta.label);
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setFileDataUrl(dataUrl);
+      if (typeMeta.typeCategory === 'image') {
+        setPreviewThumbnail(dataUrl);
+      } else {
+        setPreviewThumbnail(null);
+      }
+      if (onShowToast) {
+        onShowToast(`📁 Đã nạp tệp "${file.name}" (${sizeFormatted}) sẵn sàng nộp lên Drive của Thầy!`);
+      }
+    } catch {
+      if (onShowToast) {
+        onShowToast('⚠️ Không thể đọc tệp từ thiết bị. Vui lòng thử lại!');
+      }
+    } finally {
+      setIsProcessingFile(false);
     }
   };
 
+  const handleDoSubmit = () => {
+    if (!selectedFileName.trim()) {
+      if (onShowToast) onShowToast('⚠️ Vui lòng nhập tên tệp sản phẩm!');
+      return;
+    }
+
+    onSubmitProduct({
+      fileName: selectedFileName.trim(),
+      fileType: selectedFileType,
+      fileSize: fileSizeStr,
+      studentNote: studentNote.trim(),
+      fileDataUrl: fileDataUrl || mySubmission?.fileDataUrl || undefined,
+      driveFileUrl: driveFileUrlInput.trim() || mySubmission?.driveFileUrl || undefined,
+    });
+  };
+
   return (
-    <div className="flex flex-col gap-5 p-6 rounded-2xl bg-surface-container-lowest border border-outline-variant/40 shadow-sm">
+    <div className="flex flex-col gap-5 p-5 sm:p-6 rounded-3xl bg-surface-container-lowest border border-outline-variant/40 shadow-sm">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-outline-variant/25">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
-            <span className="material-symbols-outlined text-[24px]">add_to_drive</span>
+          <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-md shrink-0">
+            <span className="material-symbols-outlined text-[28px]">add_to_drive</span>
           </div>
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 block">
-              Hoạt động 3 (Tiết Thực hành) • Cây thư mục Google Drive theo Khối / Lớp
-            </span>
-            <h3 className="text-base font-extrabold text-on-surface">
-              Nộp sản phẩm thực hành lên Google Drive Lớp {classId} (Khối {grade})
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                HOẠT ĐỘNG 3 (TIẾT THỰC HÀNH) • THƯ MỤC GOOGLE DRIVE
+              </span>
+              <span className="text-xs font-bold text-on-surface-variant">
+                Lớp {classId} • Khối {grade}
+              </span>
+            </div>
+            <h3 className="text-base sm:text-lg font-black text-on-surface mt-0.5">
+              Nộp sản phẩm máy tính vào Thư mục Google Drive của Thầy/Cô
             </h3>
           </div>
         </div>
-        <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center gap-1.5">
-          <span className="material-symbols-outlined text-[16px]">folder_shared</span>
-          Thư mục: {folderName}
-        </span>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <a
+            href={resolvedDriveUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+            title="Mở thư mục Google Drive của Thầy Đỗ Mạnh Trường trên tab mới"
+          >
+            <span className="material-symbols-outlined text-[18px]">folder_shared</span>
+            <span>Mở Drive của Thầy/Cô ↗</span>
+          </a>
+        </div>
       </div>
 
-      {/* Visual Google Drive Folder Tree */}
-      <div className="p-4 rounded-xl bg-surface-container-low border border-outline-variant/30 flex flex-col gap-2">
+      {/* Visual Google Drive Folder Hierarchy */}
+      <div className="p-4 rounded-2xl bg-surface-container-low border border-outline-variant/30 flex flex-col gap-2.5">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <span className="text-xs font-bold text-on-surface flex items-center gap-1.5">
             <span className="material-symbols-outlined text-amber-500 text-[18px]">account_tree</span>
-            Đường dẫn Cây thư mục Google Drive của Lớp {classId}:
+            Đường dẫn thư mục nhận bài:
           </span>
-          <span className="text-[11px] font-mono text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200">
-            {drivePath}
+          <span className="text-[11px] font-mono text-emerald-800 bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-200">
+            {drivePath} / {folderName}
           </span>
         </div>
 
         <div className="pl-2 pt-1 flex flex-col gap-1.5 text-xs font-medium text-on-surface-variant">
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-amber-500 text-[18px]">cloud</span>
-            <span className="font-bold text-on-surface">Google Drive Trường THCS (CloudPlay Drive)</span>
+            <span className="font-bold text-on-surface">Google Drive Thầy Đỗ Mạnh Trường</span>
           </div>
           <div className="flex items-center gap-2 pl-5">
             <span className="text-outline">├──</span>
             <span className="material-symbols-outlined text-amber-500 text-[18px]">folder</span>
-            <span className="font-bold text-on-surface">Khối {grade} (Chương trình Tin học {grade})</span>
+            <span className="font-bold text-on-surface">Khối {grade} (Tin học {grade} - GDPT 2018)</span>
           </div>
-          <div className="flex items-center gap-2 pl-11">
+          <div className="flex items-center gap-2 pl-10">
             <span className="text-outline">├──</span>
             <span className="material-symbols-outlined text-amber-500 text-[18px]">folder_open</span>
             <span className="font-bold text-primary">Lớp {classId}</span>
           </div>
-          <div className="flex items-center gap-2 pl-18">
+          <div className="flex items-center gap-2 pl-16">
             <span className="text-outline">└──</span>
             <span className="material-symbols-outlined text-emerald-600 text-[18px]">drive_folder_upload</span>
-            <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 font-bold">
-              {folderName} ({classSubmissions.length} sản phẩm đã nộp)
+            <span className="px-2.5 py-0.5 rounded-lg bg-emerald-100 text-emerald-950 font-bold">
+              {folderName} ({classSubmissions.length} sản phẩm của lớp đã nộp)
             </span>
           </div>
         </div>
       </div>
 
-      {/* Student's Own Submission Form */}
+      {/* Main Submission Form & Status */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        <div className="lg:col-span-7 p-4 rounded-xl bg-surface-container-low border border-outline-variant/30 flex flex-col gap-3">
-          <span className="text-xs font-extrabold uppercase tracking-wider text-primary flex items-center gap-1.5">
+        {/* Left Column: Upload Form */}
+        <div className="lg:col-span-7 p-4 sm:p-5 rounded-2xl bg-surface-container-low border border-outline-variant/30 flex flex-col gap-4">
+          <span className="text-xs font-black uppercase tracking-wider text-primary flex items-center gap-1.5 pb-2 border-b border-outline-variant/20">
             <span className="material-symbols-outlined text-[18px]">upload_file</span>
-            Tải sản phẩm thực hành của {studentName} lên thư mục lớp {classId}
+            Tải sản phẩm thực hành của {studentName} ({studentUsername || studentId})
           </span>
 
+          {/* Option A: Upload Direct File from PC */}
+          <div className="flex flex-col gap-2 p-3.5 rounded-xl bg-surface-container-lowest border border-outline-variant/30">
+            <span className="text-xs font-bold text-on-surface flex items-center justify-between">
+              <span className="flex items-center gap-1">
+                <span className="material-symbols-outlined text-[16px] text-emerald-600">desktop_windows</span>
+                Cách 1: Chọn tệp bài làm trực tiếp từ máy tính
+              </span>
+              <span className="text-[10px] text-on-surface-variant font-normal">
+                (Hỗ trợ ảnh chụp màn hình, Word, Excel, PowerPoint, Scratch, PDF)
+              </span>
+            </span>
+
+            <input
+              type="file"
+              onChange={handleFilePick}
+              disabled={isProcessingFile}
+              className="text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700 cursor-pointer w-full"
+            />
+
+            {previewThumbnail && (
+              <div className="mt-2 p-2 rounded-xl bg-surface-container border border-outline-variant/30 flex items-center gap-3">
+                <img
+                  src={previewThumbnail}
+                  alt="Ảnh xem trước bài làm"
+                  className="w-16 h-16 object-cover rounded-lg border border-slate-200 shadow-2xs"
+                />
+                <div className="flex flex-col text-xs">
+                  <span className="font-bold text-emerald-800 dark:text-emerald-300">
+                    ✓ Đã nhận diện ảnh chụp bài làm
+                  </span>
+                  <span className="text-on-surface-variant text-[11px] truncate max-w-xs">
+                    {selectedFileName} ({fileSizeStr})
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Option B: Direct Google Drive Link */}
+          <div className="flex flex-col gap-1.5 p-3.5 rounded-xl bg-surface-container-lowest border border-outline-variant/30">
+            <div className="flex items-center justify-between flex-wrap gap-1">
+              <label className="text-xs font-bold text-on-surface flex items-center gap-1">
+                <span className="material-symbols-outlined text-[16px] text-blue-600">link</span>
+                Cách 2: Hoặc Dán liên kết tệp trên Google Drive (tùy chọn):
+              </label>
+              <a
+                href={resolvedDriveUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] text-emerald-700 font-bold hover:underline"
+              >
+                Mở thư mục của Thầy để tải lên ↗
+              </a>
+            </div>
+            <input
+              type="url"
+              value={driveFileUrlInput}
+              onChange={(e) => setDriveFileUrlInput(e.target.value)}
+              placeholder="https://drive.google.com/file/d/.../view"
+              className="px-3.5 py-2 rounded-xl border border-outline-variant/40 bg-surface-container-low text-xs text-on-surface font-mono"
+            />
+          </div>
+
+          {/* File Name & File Type Inputs */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-[11px] font-bold text-on-surface-variant">
-                Tên tệp sản phẩm trên Google Drive:
+                Tên tệp hiển thị:
               </label>
               <input
                 type="text"
                 value={selectedFileName}
                 onChange={(e) => setSelectedFileName(e.target.value)}
-                className="px-3 py-2 rounded-lg border border-outline bg-surface-container-lowest text-xs font-semibold text-on-surface"
+                className="px-3 py-2 rounded-xl border border-outline-variant/40 bg-surface-container-lowest text-xs font-semibold text-on-surface"
               />
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-[11px] font-bold text-on-surface-variant">
-                Loại sản phẩm số:
+                Loại sản phẩm:
               </label>
               <select
                 value={selectedFileType}
                 onChange={(e) => setSelectedFileType(e.target.value)}
-                className="px-3 py-2 rounded-lg border border-outline bg-surface-container-lowest text-xs font-semibold text-on-surface"
+                className="px-3 py-2 rounded-xl border border-outline-variant/40 bg-surface-container-lowest text-xs font-semibold text-on-surface"
               >
+                <option value="Ảnh chụp màn hình (.png/.jpg)">Ảnh chụp màn hình (.png/.jpg)</option>
                 <option value="Tài liệu Word (.docx)">Tài liệu Word (.docx)</option>
                 <option value="Bảng tính Excel (.xlsx)">Bảng tính Excel (.xlsx)</option>
                 <option value="Bài trình chiếu (.pptx)">Bài trình chiếu (.pptx)</option>
-                <option value="Ảnh chụp màn hình (.png/.jpg)">Ảnh chụp màn hình (.png/.jpg)</option>
                 <option value="Dự án Scratch (.sb3)">Dự án Scratch (.sb3)</option>
+                <option value="Tài liệu PDF (.pdf)">Tài liệu PDF (.pdf)</option>
+                <option value="Mã nguồn / Text (.py/.html)">Mã nguồn / Text (.py/.html)</option>
               </select>
             </div>
           </div>
 
+          {/* Student Note */}
           <div className="flex flex-col gap-1">
             <label className="text-[11px] font-bold text-on-surface-variant">
-              Chọn tệp từ máy tính (tùy chọn):
-            </label>
-            <input
-              type="file"
-              onChange={handleFilePick}
-              className="text-xs file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-primary-fixed file:text-on-primary-fixed cursor-pointer"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-bold text-on-surface-variant">
-              Mô tả / Ghi chú sản phẩm gửi giáo viên:
+              Ghi chú kết quả thực hành gửi Thầy/Cô:
             </label>
             <textarea
               rows={2}
               value={studentNote}
               onChange={(e) => setStudentNote(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-outline bg-surface-container-lowest text-xs text-on-surface"
-              placeholder="Ghi chú kết quả thực hành của em..."
+              className="px-3.5 py-2 rounded-xl border border-outline-variant/40 bg-surface-container-lowest text-xs text-on-surface"
+              placeholder="Ghi chú kết quả thực hành của em (các bước đã làm, khó khăn...)"
             />
           </div>
 
-          <div className="flex items-center justify-between pt-1">
+          {/* Submit Action */}
+          <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
             <span className="text-[11px] text-on-surface-variant">
-              Tệp sẽ được lưu vào <strong>{folderName}</strong> để Giáo viên chấm điểm theo lớp.
+              Tệp được đồng bộ ngay vào Google Drive của Thầy để chấm điểm (Tối đa 3.0 điểm).
             </span>
             <button
               type="button"
-              onClick={() =>
-                onSubmitProduct({
-                  fileName: selectedFileName.trim() || `BaiThucHanh_Tiet${period}_${classId}.docx`,
-                  fileType: selectedFileType,
-                  fileSize: '1.2 MB',
-                  studentNote: studentNote.trim(),
-                })
-              }
-              className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+              onClick={handleDoSubmit}
+              disabled={isProcessingFile}
+              className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
             >
               <span className="material-symbols-outlined text-[18px]">cloud_upload</span>
-              <span>{mySubmission ? 'Cập nhật sản phẩm trên Drive' : 'Nộp sản phẩm lên Google Drive'}</span>
+              <span>
+                {mySubmission ? 'Cập nhật lại sản phẩm đã nộp' : 'Nộp sản phẩm lên Google Drive (+50 XP)'}
+              </span>
             </button>
           </div>
         </div>
 
-        {/* Submission Status & Teacher Grade */}
-        <div className="lg:col-span-5 p-4 rounded-xl bg-surface-container-low border border-outline-variant/30 flex flex-col justify-between gap-3">
-          <div className="flex flex-col gap-2">
-            <span className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-1.5">
+        {/* Right Column: Submission Status & Teacher Feedback */}
+        <div className="lg:col-span-5 p-4 sm:p-5 rounded-2xl bg-surface-container-low border border-outline-variant/30 flex flex-col justify-between gap-4">
+          <div className="flex flex-col gap-3">
+            <span className="text-xs font-black uppercase tracking-wider text-on-surface flex items-center gap-1.5 pb-2 border-b border-outline-variant/20">
               <span className="material-symbols-outlined text-[18px] text-emerald-600">fact_check</span>
               Trạng thái bài nộp &amp; Điểm thực hành của em
             </span>
 
             {mySubmission ? (
-              <div className="p-3.5 rounded-xl bg-surface-container-lowest border border-emerald-300 flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-emerald-800 flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[16px]">description</span>
-                    {mySubmission.fileName}
-                  </span>
+              <div className="p-4 rounded-2xl bg-surface-container-lowest border border-emerald-300 flex flex-col gap-3 shadow-xs">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="text-xs font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-1 truncate">
+                      <span className="material-symbols-outlined text-[16px]">description</span>
+                      {mySubmission.fileName}
+                    </span>
+                    <span className="text-[11px] text-on-surface-variant block mt-0.5">
+                      {mySubmission.fileType} • {mySubmission.fileSize}
+                    </span>
+                  </div>
                   <span
-                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
                       mySubmission.status === 'Đã chấm'
                         ? 'bg-emerald-100 text-emerald-800'
                         : 'bg-amber-100 text-amber-800'
@@ -2183,46 +2294,98 @@ export const GoogleDrivePracticalActivity: React.FC<GoogleDrivePracticalProps> =
                     {mySubmission.status}
                   </span>
                 </div>
-                <span className="text-[11px] text-on-surface-variant">
-                  Định dạng: {mySubmission.fileType} • Lúc: {mySubmission.submittedAt}
-                </span>
+
+                {/* Buttons to view or download submitted file */}
+                <div className="flex items-center gap-2 pt-1 border-t border-outline-variant/20 flex-wrap">
+                  {mySubmission.fileDataUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setShowStudentSelfPreviewModal(true)}
+                      className="px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">visibility</span>
+                      <span>Xem lại bài đã nộp</span>
+                    </button>
+                  )}
+                  {mySubmission.fileDataUrl && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        triggerDownloadSubmissionFile(mySubmission.fileName, mySubmission.fileDataUrl!)
+                      }
+                      className="px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">download</span>
+                      <span>Tải về</span>
+                    </button>
+                  )}
+                  {mySubmission.driveFileUrl && (
+                    <a
+                      href={mySubmission.driveFileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-[11px] font-bold flex items-center gap-1"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                      <span>Mở Drive</span>
+                    </a>
+                  )}
+                </div>
+
+                {/* Score and feedback */}
                 {mySubmission.score !== null ? (
-                  <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 flex flex-col gap-1">
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex flex-col gap-1 text-emerald-950">
                     <span className="text-sm font-black text-emerald-700">
-                      Điểm giáo viên chấm: {mySubmission.score} / {mySubmission.maxPoints} điểm
+                      Điểm Thầy/Cô chấm: {mySubmission.score.toFixed(1)} / {mySubmission.maxPoints} điểm
                     </span>
-                    <span className="text-xs text-emerald-900">
-                      Nhận xét của GV: &ldquo;{mySubmission.teacherFeedback || 'Hoàn thành tốt yêu cầu thực hành!'}&rdquo;
+                    <span className="text-xs text-emerald-900 leading-relaxed">
+                      Nhận xét: &ldquo;{mySubmission.teacherFeedback || 'Hoàn thành tốt yêu cầu thực hành!'}&rdquo;
                     </span>
                   </div>
                 ) : (
-                  <span className="text-xs text-amber-700 font-semibold">
-                    Đang chờ Giáo viên chấm điểm trong mục &ldquo;Chấm sản phẩm thực hành theo lớp&rdquo;.
-                  </span>
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-800 dark:text-amber-200 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px]">hourglass_top</span>
+                    <span>Đang chờ Thầy/Cô mở xem trực tiếp và chấm điểm trên trang giáo viên.</span>
+                  </div>
                 )}
               </div>
             ) : (
-              <div className="p-4 rounded-xl bg-surface-container-lowest border border-dashed border-outline-variant text-center text-xs text-on-surface-variant">
-                Em chưa nộp sản phẩm thực hành tiết {period} vào thư mục Google Drive của lớp {classId}. Hãy bấm nút nộp bài bên trái!
+              <div className="p-5 rounded-2xl bg-surface-container-lowest border border-dashed border-outline-variant text-center text-xs text-on-surface-variant flex flex-col items-center gap-2">
+                <span className="material-symbols-outlined text-[32px] text-slate-400">cloud_upload</span>
+                <p>
+                  Em chưa nộp sản phẩm thực hành tiết {period} vào thư mục Google Drive của lớp {classId}.
+                </p>
+                <p className="text-[11px]">
+                  Hãy chọn tệp từ máy hoặc dán link Google Drive bên trái rồi bấm <strong>Nộp sản phẩm</strong>!
+                </p>
               </div>
             )}
           </div>
 
-          <div className="pt-2 border-t border-outline-variant/25 flex flex-col gap-1.5">
-            <span className="text-[11px] font-bold text-on-surface-variant">
-              Danh sách tệp trong thư mục lớp {classId} ({classSubmissions.length} tệp):
+          {/* Class Submissions List */}
+          <div className="pt-3 border-t border-outline-variant/25 flex flex-col gap-1.5">
+            <span className="text-[11px] font-bold text-on-surface-variant flex items-center justify-between">
+              <span>Sản phẩm của các bạn trong lớp ({classSubmissions.length} tệp):</span>
+              <a
+                href={resolvedDriveUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-emerald-700 hover:underline"
+              >
+                Mở thư mục ↗
+              </a>
             </span>
-            <div className="max-h-28 overflow-y-auto flex flex-col gap-1">
+            <div className="max-h-32 overflow-y-auto flex flex-col gap-1 pr-1">
               {classSubmissions.map((sub) => (
                 <div
                   key={sub.id}
-                  className="flex items-center justify-between text-[11px] px-2.5 py-1 rounded-md bg-surface-container-lowest"
+                  className="flex items-center justify-between text-[11px] px-3 py-1.5 rounded-lg bg-surface-container-lowest border border-outline-variant/20"
                 >
                   <span className="truncate font-medium text-on-surface">
                     {sub.studentName}: {sub.fileName}
                   </span>
                   <span className="font-bold text-emerald-700 shrink-0 ml-2">
-                    {sub.score !== null ? `${sub.score}đ` : 'Đã nộp'}
+                    {sub.score !== null ? `${sub.score.toFixed(1)}đ` : 'Đã nộp'}
                   </span>
                 </div>
               ))}
@@ -2230,6 +2393,54 @@ export const GoogleDrivePracticalActivity: React.FC<GoogleDrivePracticalProps> =
           </div>
         </div>
       </div>
+
+      {/* Student Self-Preview Modal */}
+      {showStudentSelfPreviewModal && mySubmission?.fileDataUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-surface-container-lowest rounded-3xl p-5 max-w-3xl w-full max-h-[85vh] flex flex-col gap-3 shadow-2xl border border-outline-variant/30">
+            <div className="flex items-center justify-between pb-2 border-b border-outline-variant/20">
+              <h3 className="text-sm font-bold text-on-surface">
+                Xem lại bài nộp: {mySubmission.fileName}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowStudentSelfPreviewModal(false)}
+                className="w-8 h-8 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto flex items-center justify-center p-2 min-h-[250px]">
+              {mySubmission.fileDataUrl.startsWith('data:image/') ||
+              ['png', 'jpg', 'jpeg', 'webp'].some((ext) => mySubmission.fileName.toLowerCase().endsWith(ext)) ? (
+                <img
+                  src={mySubmission.fileDataUrl}
+                  alt={mySubmission.fileName}
+                  className="max-h-[500px] object-contain rounded-xl border border-outline-variant/30"
+                />
+              ) : (
+                <div className="text-center p-6 flex flex-col items-center gap-2 text-xs text-on-surface-variant">
+                  <span className="material-symbols-outlined text-[42px] text-emerald-600">
+                    description
+                  </span>
+                  <p className="font-bold text-on-surface">{mySubmission.fileName}</p>
+                  <p>Tệp dạng nhị phân ({mySubmission.fileType}). Em có thể tải tệp về để mở lại.</p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      triggerDownloadSubmissionFile(mySubmission.fileName, mySubmission.fileDataUrl!)
+                    }
+                    className="mt-2 px-4 py-2 rounded-xl bg-primary text-on-primary font-bold text-xs flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">download</span>
+                    <span>Tải tệp về máy</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

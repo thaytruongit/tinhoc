@@ -38,6 +38,7 @@ import {
 import { UnifiedDiscoveryWorksheet } from './UnifiedDiscoveryWorksheet';
 import { evaluateAnswerBySuggestedPercentage } from '../utils/essayPercentageGrader';
 import { isActivityFinalized } from '../utils/slideAndArenaController';
+import { getTeacherGoogleDriveFolderUrl } from '../utils/googleDriveService';
 import { StudentNotificationBannerModal } from './StudentNotificationBannerModal';
 import { StudentWorksheetScanner, type ExtractedWorksheetData } from './StudentWorksheetScanner';
 import { DataBoundary } from './DataBoundary';
@@ -1053,6 +1054,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     fileType: string;
     fileSize: string;
     studentNote: string;
+    fileDataUrl?: string;
+    driveFileUrl?: string;
   }) => {
     if (isStage3PracticeFinalized || isStage3ArenaFinalized) {
       onShowToast('🔒 Hoạt động thực hành này đã được Giáo viên chốt kết quả và đóng nộp bài!');
@@ -1063,6 +1066,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       driveFolders.find(
         (f) => f.grade === selectedGrade && f.classId === currentStudent.classId
       ) || driveFolders[0];
+    const teacherDriveUrl =
+      liveSession?.teacherDriveGlobalUrl ||
+      getTeacherGoogleDriveFolderUrl(selectedGrade, currentStudent.classId);
+
     const newSub: PracticalProductSubmission = {
       id: `sub-drive-${Date.now()}`,
       folderId: targetFolder?.id || `drive-k${selectedGrade}-${currentStudent.classId}`,
@@ -1076,6 +1083,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       fileName: payload.fileName,
       fileType: payload.fileType,
       fileSize: payload.fileSize,
+      fileDataUrl: payload.fileDataUrl,
+      driveFileUrl: payload.driveFileUrl,
+      teacherDriveFolderUrl: teacherDriveUrl,
       drivePath: `Google Drive / Khối ${selectedGrade} / Lớp ${currentStudent.classId} / Tiết ${currentPeriodSpec.period} / ${payload.fileName}`,
       studentNote: payload.studentNote,
       submittedAt: new Date().toLocaleTimeString('vi-VN', {
@@ -1089,13 +1099,21 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     };
 
     if (onUpdateLiveSession) {
-      onUpdateLiveSession((prev) => ({
-        ...prev,
-        practicalSubmissions: [
-          newSub,
-          ...(prev.practicalSubmissions || INITIAL_PRACTICAL_SUBMISSIONS),
-        ],
-      }));
+      onUpdateLiveSession((prev) => {
+        const existing = prev.practicalSubmissions || INITIAL_PRACTICAL_SUBMISSIONS;
+        const filtered = existing.filter(
+          (s) =>
+            !(
+              s.studentId === currentStudent.id &&
+              s.period === currentPeriodSpec.period &&
+              s.classId === currentStudent.classId
+            )
+        );
+        return {
+          ...prev,
+          practicalSubmissions: [newSub, ...filtered],
+        };
+      });
     }
     try {
       await fetch('/api/drive/submissions', {
@@ -3175,10 +3193,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             studentUsername={currentStudent.username || currentStudent.id}
                             folderName={`TH_Tiet${currentPeriodSpec.period}_${currentStudent.classId}`}
                             drivePath={`Google Drive / Khối ${selectedGrade} / Lớp ${currentStudent.classId} / ${currentPeriodSpec.lessonTitle}`}
+                            teacherDriveUrl={
+                              liveSession?.teacherDriveGlobalUrl ||
+                              getTeacherGoogleDriveFolderUrl(selectedGrade, currentStudent.classId)
+                            }
                             existingSubmissions={
                               liveSession?.practicalSubmissions || INITIAL_PRACTICAL_SUBMISSIONS
                             }
                             onSubmitProduct={handleSubmitPracticalDriveFile}
+                            onShowToast={onShowToast}
                           />
 
                           <div className="flex justify-end p-3 bg-surface-container-lowest rounded-2xl shadow-xs">

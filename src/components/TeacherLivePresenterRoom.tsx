@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   type CurriculumPeriodSpec,
   type LiveClassroomSession,
   type StudentRosterItem,
+  type PracticalProductSubmission,
+  INITIAL_PRACTICAL_SUBMISSIONS,
 } from '../data/mockCurriculumData';
 import {
   playStageBroadcastSound,
@@ -20,6 +22,13 @@ import {
 import { LiveStudentProgressTracker } from './LiveStudentProgressTracker';
 import { ActivityCompletionVisualizer } from './ActivityCompletionVisualizer';
 import { LiveClassroomWaitingRoom } from './LiveClassroomWaitingRoom';
+import {
+  getTeacherGoogleDriveFolderUrl,
+  saveTeacherGoogleDriveFolderUrl,
+  detectSubmissionFileType,
+  triggerDownloadSubmissionFile,
+} from '../utils/googleDriveService';
+import { StudentSubmissionViewerModal } from './StudentSubmissionViewerModal';
 
 interface TeacherLivePresenterRoomProps {
   grade: 6 | 7 | 8 | 9;
@@ -121,6 +130,58 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     return 'waiting';
   });
   const [rankingScope, setRankingScope] = useState<'class' | 'grade'>('class');
+
+  const [selectedSubmissionForViewer, setSelectedSubmissionForViewer] = useState<PracticalProductSubmission | null>(null);
+  const [showDriveConfigModal, setShowDriveConfigModal] = useState<boolean>(false);
+  const [teacherDriveUrlInput, setTeacherDriveUrlInput] = useState<string>(() =>
+    liveSession?.teacherDriveGlobalUrl || getTeacherGoogleDriveFolderUrl(grade, classId)
+  );
+
+  const currentTeacherDriveUrl = useMemo(() => {
+    return liveSession?.teacherDriveGlobalUrl || getTeacherGoogleDriveFolderUrl(grade, classId);
+  }, [liveSession?.teacherDriveGlobalUrl, grade, classId]);
+
+  const currentClassSubmissions = useMemo(() => {
+    const list = liveSession?.practicalSubmissions || INITIAL_PRACTICAL_SUBMISSIONS;
+    return list.filter((s) => s.classId === classId && s.period === period);
+  }, [liveSession?.practicalSubmissions, classId, period]);
+
+  const handleSaveGradeForSubmission = (submissionId: string, score: number, feedback: string) => {
+    onUpdateLiveSession((prev) => {
+      const existing = prev.practicalSubmissions || INITIAL_PRACTICAL_SUBMISSIONS;
+      const updated = existing.map((sub) => {
+        if (sub.id === submissionId) {
+          return {
+            ...sub,
+            score,
+            teacherFeedback: feedback,
+            status: 'Đã chấm' as const,
+          };
+        }
+        return sub;
+      });
+      return {
+        ...prev,
+        practicalSubmissions: updated,
+      };
+    });
+    triggerSynchronizedCelebration();
+  };
+
+  const handleSaveTeacherDriveUrl = () => {
+    const cleanUrl = teacherDriveUrlInput.trim();
+    if (cleanUrl.startsWith('http')) {
+      saveTeacherGoogleDriveFolderUrl(cleanUrl);
+      onUpdateLiveSession((prev) => ({
+        ...prev,
+        teacherDriveGlobalUrl: cleanUrl,
+      }));
+      onShowToast('📁 Đã lưu & cập nhật Thư mục Google Drive của Thầy Đỗ Mạnh Trường thành công!');
+    } else {
+      onShowToast('⚠️ Vui lòng nhập đúng đường link bắt đầu bằng https://');
+    }
+    setShowDriveConfigModal(false);
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -2345,6 +2406,147 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                   onShowToast={onShowToast}
                   onUpdateLiveSession={onUpdateLiveSession}
                 />
+
+                {/* BẢNG QUẢN LÝ SẢN PHẨM THỰC HÀNH GOOGLE DRIVE & MỞ TRỰC TIẾP BÀI NỘP */}
+                <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 shadow-xs flex flex-col gap-4">
+                  {/* Header with Google Drive link and settings */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black shadow-xs">
+                        <span className="material-symbols-outlined text-[24px]">folder_shared</span>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-black text-slate-900">
+                            Sản phẩm Thực hành Nộp trên Google Drive Lớp {classId}
+                          </h3>
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-black">
+                            {currentClassSubmissions.length} bài nộp
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Tiết {period}: {periodSpec.lessonTitle} • Thầy có thể mở trực tiếp bài làm của học sinh để chấm điểm và tải về máy
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <a
+                        href={currentTeacherDriveUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all"
+                        title="Mở thư mục Google Drive của Thầy Đỗ Mạnh Trường trên tab mới"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                        <span>Mở Drive của Thầy ↗</span>
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTeacherDriveUrlInput(currentTeacherDriveUrl);
+                          setShowDriveConfigModal(true);
+                        }}
+                        className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                        title="Thay đổi đường link Thư mục Google Drive của Thầy"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">settings</span>
+                        <span>Cài đặt Drive</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Submissions List */}
+                  {currentClassSubmissions.length === 0 ? (
+                    <div className="p-8 rounded-xl bg-white border border-dashed border-slate-200 text-center flex flex-col items-center gap-2 text-slate-500">
+                      <span className="material-symbols-outlined text-[36px] text-slate-400">cloud_upload</span>
+                      <p className="text-sm font-bold text-slate-800">Chưa có học sinh nào nộp sản phẩm thực hành</p>
+                      <p className="text-xs max-w-md">Khi học sinh nộp tệp từ máy tính hoặc qua Google Drive, bài nộp sẽ hiển thị tức thì tại đây để Thầy mở xem trực tiếp.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                      {currentClassSubmissions.map((sub) => {
+                        const fileMeta = detectSubmissionFileType(sub.fileName, sub.fileType);
+                        return (
+                          <div
+                            key={sub.id}
+                            className="p-4 rounded-2xl bg-white border border-slate-200 flex flex-col justify-between gap-3 shadow-2xs hover:shadow-xs transition-all"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className={`w-9 h-9 rounded-xl flex items-center justify-center border font-bold ${fileMeta.colorClass}`}>
+                                  <span className="material-symbols-outlined text-[20px]">{fileMeta.icon}</span>
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="text-xs font-black text-slate-900 block truncate">
+                                    {sub.studentName}
+                                  </span>
+                                  <span className="text-[11px] text-slate-500 block font-mono truncate">
+                                    TK: {sub.studentUsername}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black shrink-0 ${
+                                sub.status === 'Đã chấm'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                {sub.status === 'Đã chấm' ? `${sub.score?.toFixed(1)}/3.0đ` : 'Chờ chấm'}
+                              </span>
+                            </div>
+
+                            <div className="text-xs text-slate-600 flex flex-col gap-0.5">
+                              <span className="font-semibold text-slate-900 truncate">
+                                📄 {sub.fileName}
+                              </span>
+                              <span className="text-[11px] text-slate-500">
+                                {sub.fileSize || '1.0 MB'} • Nộp lúc: {sub.submittedAt}
+                              </span>
+                              {sub.studentNote && (
+                                <span className="text-[11px] italic text-slate-600 truncate mt-0.5">
+                                  &ldquo;{sub.studentNote}&rdquo;
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSubmissionForViewer(sub)}
+                                className="flex-1 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-all"
+                              >
+                                <span className="material-symbols-outlined text-[16px]">visibility</span>
+                                <span>Mở trực tiếp bài nộp</span>
+                              </button>
+                              {sub.fileDataUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => triggerDownloadSubmissionFile(sub.fileName, sub.fileDataUrl!)}
+                                  className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs cursor-pointer"
+                                  title="Tải tệp về máy"
+                                >
+                                  <span className="material-symbols-outlined text-[18px]">download</span>
+                                </button>
+                              )}
+                              {sub.driveFileUrl && (
+                                <a
+                                  href={sub.driveFileUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="p-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs"
+                                  title="Mở trên Google Drive"
+                                >
+                                  <span className="material-symbols-outlined text-[18px]">open_in_new</span>
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {renderEmbeddedClassLeaderboardChart(3, 'Thực hành Phòng máy')}
@@ -2545,6 +2747,91 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
           )}
         </div>
       </main>
+
+      {/* MODAL MỞ XEM TRỰC TIẾP BÀI NỘP THỰC HÀNH CỦA HỌC SINH */}
+      {selectedSubmissionForViewer && (
+        <StudentSubmissionViewerModal
+          submission={selectedSubmissionForViewer}
+          onClose={() => setSelectedSubmissionForViewer(null)}
+          onSaveGrade={handleSaveGradeForSubmission}
+          teacherDriveUrl={currentTeacherDriveUrl}
+          onShowToast={onShowToast}
+        />
+      )}
+
+      {/* MODAL CÀI ĐẶT THƯ MỤC GOOGLE DRIVE CỦA THẦY */}
+      {showDriveConfigModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 flex flex-col gap-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-black">
+                  <span className="material-symbols-outlined text-[24px]">folder_shared</span>
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">
+                    Cài đặt Thư mục Google Drive của Thầy
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Đồng bộ cho toàn bộ học sinh các khối lớp nộp bài
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDriveConfigModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-bold text-slate-700">
+                Đường dẫn liên kết Thư mục Google Drive của Thầy (URL):
+              </label>
+              <input
+                type="url"
+                value={teacherDriveUrlInput}
+                onChange={(e) => setTeacherDriveUrlInput(e.target.value)}
+                placeholder="https://drive.google.com/drive/folders/..."
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-xs font-mono text-slate-900 focus:outline-emerald-600"
+              />
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Mẹo: Thầy mở Google Drive &rarr; Chuột phải vào Thư mục cần nhận bài &rarr; Chọn &ldquo;Chia sẻ&rdquo; &rarr; Đặt quyền &ldquo;Bất kỳ ai có đường liên kết đều có thể xem/chỉnh sửa&rdquo; &rarr; Sao chép liên kết dán vào đây!
+              </p>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+              <a
+                href={teacherDriveUrlInput}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-bold text-emerald-700 hover:underline flex items-center gap-1"
+              >
+                <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                <span>Kiểm tra liên kết</span>
+              </a>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDriveConfigModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveTeacherDriveUrl}
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-xs cursor-pointer"
+                >
+                  Lưu Thư mục Drive
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

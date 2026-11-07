@@ -897,6 +897,9 @@ export interface PracticalProductSubmission {
   score: number | null;
   maxPoints: number;
   teacherFeedback: string;
+  fileDataUrl?: string; // Base64 data URL for direct opening/previewing/downloading on teacher screen
+  driveFileUrl?: string; // Direct link to file in Google Drive if shared
+  teacherDriveFolderUrl?: string; // The teacher's Google Drive destination folder
 }
 
 export interface StudentWorkDraft {
@@ -1012,6 +1015,8 @@ export interface LiveClassroomSession {
   customWorksheetsByLesson?: Record<string, CustomLessonWorksheet>;
   verifiedLessonsMap?: Record<string, boolean>;
   driveFolders?: DriveClassFolder[];
+  teacherDriveGlobalUrl?: string;
+  teacherDriveFolderUrlByClass?: Record<string, string>;
   practicalSubmissions?: PracticalProductSubmission[];
   studentDraftsByKey?: Record<string, StudentWorkDraft>;
   taggedSubmissions?: TaggedLessonSubmission[];

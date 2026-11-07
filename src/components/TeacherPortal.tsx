@@ -48,6 +48,8 @@ import {
 } from '../utils/slideAndArenaController';
 import { LiveStudentProgressTracker } from './LiveStudentProgressTracker';
 import { PreLiveSlideConfigModal } from './PreLiveSlideConfigModal';
+import { StudentSubmissionViewerModal } from './StudentSubmissionViewerModal';
+import { triggerDownloadSubmissionFile } from '../utils/googleDriveService';
 import {
   getAllConfiguredSlideSummaries,
   type HybridSlideDeckSummary,
@@ -642,6 +644,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const [singleStudentName, setSingleStudentName] = useState('');
   const [singleStudentDob, setSingleStudentDob] = useState('15/05/2013');
   const [singleStudentClass, setSingleStudentClass] = useState(selectedClass);
+  const [selectedSubmissionForViewer, setSelectedSubmissionForViewer] = useState<PracticalProductSubmission | null>(null);
 
   const activeQuestion: MinigameQuestionItem = questions[editingQuestionIdx] ||
     questions[0] || {
@@ -5837,6 +5840,39 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                                   <p className="text-[11px] font-mono text-primary mt-0.5">
                                     ☁️ {sub.drivePath}
                                   </p>
+
+                                  <div className="flex items-center gap-2 pt-1 flex-wrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedSubmissionForViewer(sub)}
+                                      className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 shadow-2xs cursor-pointer"
+                                    >
+                                      <span className="material-symbols-outlined text-[15px]">visibility</span>
+                                      <span>Mở trực tiếp bài nộp</span>
+                                    </button>
+                                    {sub.fileDataUrl && (
+                                      <button
+                                        type="button"
+                                        onClick={() => triggerDownloadSubmissionFile(sub.fileName, sub.fileDataUrl!)}
+                                        className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-bold text-xs flex items-center gap-1 cursor-pointer"
+                                        title="Tải tệp về máy"
+                                      >
+                                        <span className="material-symbols-outlined text-[15px]">download</span>
+                                        <span>Tải về</span>
+                                      </button>
+                                    )}
+                                    {sub.driveFileUrl && (
+                                      <a
+                                        href={sub.driveFileUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center gap-1"
+                                      >
+                                        <span className="material-symbols-outlined text-[15px]">open_in_new</span>
+                                        <span>Mở Drive</span>
+                                      </a>
+                                    )}
+                                  </div>
                                 </div>
                                 <span
                                   className={`px-3 py-1 rounded-full text-xs font-bold ${
@@ -6010,6 +6046,37 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           handleBroadcastLivePeriod(g, p, true, selectedClass);
         }}
       />
+
+      {/* Modal Mở Xem Trực Tiếp Bài Nộp Của Học Sinh */}
+      {selectedSubmissionForViewer && (
+        <StudentSubmissionViewerModal
+          submission={selectedSubmissionForViewer}
+          onClose={() => setSelectedSubmissionForViewer(null)}
+          onSaveGrade={(subId, score, feedback) => {
+            if (onUpdateLiveSession) {
+              onUpdateLiveSession((prev) => {
+                const existing = prev.practicalSubmissions || INITIAL_PRACTICAL_SUBMISSIONS;
+                const updated = existing.map((sub) => {
+                  if (sub.id === subId) {
+                    return {
+                      ...sub,
+                      score,
+                      teacherFeedback: feedback,
+                      status: 'Đã chấm' as const,
+                    };
+                  }
+                  return sub;
+                });
+                return {
+                  ...prev,
+                  practicalSubmissions: updated,
+                };
+              });
+            }
+          }}
+          onShowToast={onShowToast}
+        />
+      )}
     </div>
   );
 };

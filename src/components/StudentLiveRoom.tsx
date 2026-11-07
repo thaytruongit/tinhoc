@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   type CurriculumPeriodSpec,
   type LiveClassroomSession,
   type StudentRosterItem,
   type StudentWorkDraft,
   type TaggedLessonSubmission,
+  type PracticalProductSubmission,
   INITIAL_MINIGAME_QUESTIONS,
+  INITIAL_PRACTICAL_SUBMISSIONS,
   getPeriodsForGrade,
   getDefaultWorksheetForLesson,
 } from '../data/mockCurriculumData';
@@ -26,12 +28,6 @@ import {
   triggerSynchronizedCelebration,
 } from '../utils/soundEffects';
 import {
-  playPushNotificationChime,
-  requestPushNotificationPermission,
-  sendNativePushNotification,
-  isPushNotificationGranted,
-} from '../utils/pushNotifications';
-import {
   isStudentLiveViewUnlocked,
   computeArenaRemainingSeconds,
   formatCountdownMmSs,
@@ -39,6 +35,7 @@ import {
   isActivityFinalized,
 } from '../utils/slideAndArenaController';
 import { LiveClassroomWaitingRoom } from './LiveClassroomWaitingRoom';
+import { getTeacherGoogleDriveFolderUrl } from '../utils/googleDriveService';
 
 interface StudentLiveRoomProps {
   currentStudent: StudentRosterItem;
@@ -288,57 +285,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     }
   }, [rankedLiveStudents, onShowToast]);
 
-  // Real-time Push Notification alert state for Student Live Room
-  const [activePushAlert, setActivePushAlert] = useState<{
-    id: string;
-    title: string;
-    body: string;
-    stage?: 'whiteboard' | 'slide' | 'hd3-practice' | 1 | 2 | 3 | 4;
-    stageLabel?: string;
-    timestampIso: string;
-  } | null>(null);
-  const [pushPermissionGranted, setPushPermissionGranted] = useState<boolean>(isPushNotificationGranted());
-  const lastPushNotificationIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const pushData = liveSession?.lastPushNotification;
-    if (pushData && pushData.id !== lastPushNotificationIdRef.current) {
-      if (pushData.classId && pushData.classId !== currentStudent.classId) {
-        return;
-      }
-      lastPushNotificationIdRef.current = pushData.id;
-      setActivePushAlert(pushData);
-
-      // Play 3-note chime sound
-      playPushNotificationChime();
-
-      // Trigger native browser Push Notification
-      sendNativePushNotification(pushData.title, {
-        body: pushData.body,
-        tag: pushData.id,
-        icon: '/favicon.ico',
-      });
-
-      // Auto dismiss banner after 14 seconds
-      const timer = setTimeout(() => {
-        setActivePushAlert(null);
-      }, 14000);
-      return () => clearTimeout(timer);
-    }
-  }, [liveSession?.lastPushNotification, currentStudent.classId]);
-
-  const handleRequestPushPermission = async () => {
-    const perm = await requestPushNotificationPermission();
-    const ok = perm === 'granted';
-    setPushPermissionGranted(ok);
-    if (ok) {
-      onShowToast('🔔 Đã bật Push Notification thành công! Mọi thông báo từ Giáo viên sẽ hiển thị tức thì.');
-      playPushNotificationChime();
-    } else {
-      onShowToast('⚠️ Chưa cấp quyền Push Notification trên trình duyệt. Hãy cho phép trên thanh địa chỉ!');
-    }
-  };
-
   // Track last teacher broadcast view and waitingRoom board mode so whenever Teacher switches to an activity, Student follows cleanly in real time
   const waitingRoomBoardMode = liveSession?.waitingRoomByLesson?.[lessonKey]?.activeBoardMode;
   const effectiveTeacherBroadcastMode =
@@ -420,6 +366,79 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     practicalTask: '',
     extendedTask: '',
   });
+
+  const livePracticalSubmissions: PracticalProductSubmission[] = useMemo(() => {
+    return liveSession?.practicalSubmissions || INITIAL_PRACTICAL_SUBMISSIONS;
+  }, [liveSession?.practicalSubmissions]);
+
+  const teacherDriveUrl = useMemo(() => {
+    return (
+      liveSession?.teacherDriveGlobalUrl ||
+      getTeacherGoogleDriveFolderUrl(periodSpec.grade, currentStudent.classId)
+    );
+  }, [liveSession?.teacherDriveGlobalUrl, periodSpec.grade, currentStudent.classId]);
+
+  const handleSubmitPracticalProduct = (payload: {
+    fileName: string;
+    fileType: string;
+    fileSize: string;
+    studentNote: string;
+    fileDataUrl?: string;
+    driveFileUrl?: string;
+  }) => {
+    if (isStage3PracticeFinalized) {
+      onShowToast('⚠️ Hoạt động thực hành đã được Giáo viên chốt kết quả và đóng nộp bài!');
+      return;
+    }
+    const newSub: PracticalProductSubmission = {
+      id: `sub-${currentStudent.id}-p${periodSpec.period}-${Date.now()}`,
+      folderId: `drv-${currentStudent.classId}-p${periodSpec.period}`,
+      grade: periodSpec.grade,
+      classId: currentStudent.classId,
+      period: periodSpec.period,
+      lessonTitle: periodSpec.lessonTitle,
+      studentId: currentStudent.id,
+      studentName: currentStudent.name,
+      studentUsername: currentStudent.username || currentStudent.id,
+      fileName: payload.fileName,
+      fileType: payload.fileType,
+      fileSize: payload.fileSize,
+      fileDataUrl: payload.fileDataUrl,
+      driveFileUrl: payload.driveFileUrl,
+      teacherDriveFolderUrl: teacherDriveUrl,
+      drivePath: `Google Drive / Khối ${periodSpec.grade} / Lớp ${currentStudent.classId} / Tiết ${periodSpec.period} / ${payload.fileName}`,
+      studentNote: payload.studentNote,
+      submittedAt: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+      status: 'Chờ chấm',
+      score: null,
+      maxPoints: 3,
+      teacherFeedback: '',
+    };
+
+    if (onUpdateLiveSession) {
+      onUpdateLiveSession((prev) => {
+        const existing = prev.practicalSubmissions || INITIAL_PRACTICAL_SUBMISSIONS;
+        const filtered = existing.filter(
+          (s) =>
+            !(
+              s.studentId === currentStudent.id &&
+              s.period === periodSpec.period &&
+              s.classId === currentStudent.classId
+            )
+        );
+        return {
+          ...prev,
+          practicalSubmissions: [newSub, ...filtered],
+        };
+      });
+    }
+
+    markStageCompleted(
+      'hd3-practice',
+      50,
+      `🎵☁️ Đã nộp sản phẩm "${payload.fileName}" lên Google Drive của Thầy Đỗ Mạnh Trường (+50 XP)!`
+    );
+  };
 
   const isSolo =
     companionMode === 'solo' ||
@@ -787,22 +806,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
 
             <button
               type="button"
-              onClick={handleRequestPushPermission}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-all ${
-                pushPermissionGranted
-                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
-                  : 'bg-indigo-600 hover:bg-indigo-700 text-white animate-pulse'
-              }`}
-              title={pushPermissionGranted ? 'Push Notification đang hoạt động' : 'Bật Push Notification để nhận thông báo tức thì từ GV'}
-            >
-              <span>🔔</span>
-              <span className="hidden sm:inline">
-                {pushPermissionGranted ? 'Push: Đã bật' : 'Bật Push Thầy Cô'}
-              </span>
-            </button>
-
-            <button
-              type="button"
               onClick={handleToggleFocusMode}
               className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-all ${
                 isFocusMode
@@ -983,57 +986,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                   className={`h-full transition-all duration-500 ${arenaVisual.progressBarClass}`}
                   style={{ width: `${Math.max(3, arenaVisual.percent)}%` }}
                 />
-              </div>
-            </div>
-          )}
-          {/* Real-time Push Notification Card from Teacher */}
-          {activePushAlert && (
-            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white font-bold text-sm shadow-xl animate-pulse border-2 border-yellow-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-start gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-xs flex items-center justify-center text-2xl shrink-0">
-                  🔔
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="px-2.5 py-0.5 rounded-full bg-white/25 text-white text-[11px] font-black uppercase tracking-wider">
-                      PUSH NOTIFICATION MỚI TỪ THẦY CÔ
-                    </span>
-                    <span className="text-xs text-amber-100 font-normal">
-                      {activePushAlert.stageLabel}
-                    </span>
-                  </div>
-                  <h3 className="text-base sm:text-lg font-black text-white mt-0.5">
-                    {activePushAlert.title}
-                  </h3>
-                  <p className="text-xs sm:text-sm text-amber-50 font-normal mt-0.5">
-                    {activePushAlert.body}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (activePushAlert.stage) {
-                      setActiveView(activePushAlert.stage as any);
-                      onShowToast(`🚀 Đã chuyển sang ${activePushAlert.stageLabel}!`);
-                    }
-                    setActivePushAlert(null);
-                  }}
-                  className="px-4 py-2 rounded-xl bg-white text-orange-800 hover:bg-orange-50 font-black text-xs sm:text-sm shadow-md transition-all cursor-pointer flex items-center gap-1.5"
-                >
-                  <span>Tham gia ngay</span>
-                  <span className="text-sm">🚀</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActivePushAlert(null)}
-                  className="p-2 rounded-xl hover:bg-white/20 text-white text-xs cursor-pointer"
-                  title="Đóng thông báo"
-                >
-                  ✕
-                </button>
               </div>
             </div>
           )}
@@ -1282,18 +1234,10 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                         lessonTitle={periodSpec.lessonTitle}
                         folderName={`Thư mục Tiết ${periodSpec.period}`}
                         drivePath={`Google Drive / Lớp ${currentStudent.classId}`}
-                        existingSubmissions={[]}
-                        onSubmitProduct={() => {
-                          if (isStage3PracticeFinalized) {
-                            onShowToast('⚠️ Hoạt động thực hành đã được Giáo viên chốt kết quả!');
-                            return;
-                          }
-                          markStageCompleted(
-                            'hd3-practice',
-                            50,
-                            '🎵☁️ Đã nộp sản phẩm thực hành lên Google Drive thành công (+50 XP)!'
-                          );
-                        }}
+                        teacherDriveUrl={teacherDriveUrl}
+                        existingSubmissions={livePracticalSubmissions}
+                        onSubmitProduct={handleSubmitPracticalProduct}
+                        onShowToast={onShowToast}
                       />
                     ) : (
                       <div className="p-6 rounded-2xl bg-slate-50 border border-dashed border-slate-200 flex items-center justify-between gap-4 flex-wrap">
@@ -1366,18 +1310,10 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                     lessonTitle={periodSpec.lessonTitle}
                     folderName={`Thư mục Tiết ${periodSpec.period}`}
                     drivePath={`Google Drive / Lớp ${currentStudent.classId}`}
-                    existingSubmissions={[]}
-                    onSubmitProduct={() => {
-                      if (isStage3PracticeFinalized) {
-                        onShowToast('⚠️ Hoạt động thực hành đã được Giáo viên chốt kết quả!');
-                        return;
-                      }
-                      markStageCompleted(
-                        'hd3-practice',
-                        50,
-                        '🎵☁️ Đã nộp sản phẩm thực hành lên Google Drive thành công (+50 XP)!'
-                      );
-                    }}
+                    teacherDriveUrl={teacherDriveUrl}
+                    existingSubmissions={livePracticalSubmissions}
+                    onSubmitProduct={handleSubmitPracticalProduct}
+                    onShowToast={onShowToast}
                   />
                 </div>
               )}
