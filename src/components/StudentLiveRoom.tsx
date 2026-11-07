@@ -428,7 +428,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
       broadcastTriggerKey !== lastTeacherViewRef.current
     ) {
       lastTeacherViewRef.current = broadcastTriggerKey;
-      if (effectiveTeacherBroadcastMode === 'waiting' || effectiveTeacherBroadcastMode === 'slide') {
+      if (effectiveTeacherBroadcastMode === 'slide') {
         setActiveView('waiting');
         playStageBroadcastSound();
         onShowToast(
