@@ -24,6 +24,7 @@ import aiRoutes from './src/server/routes/aiRoutes.ts';
 import cronRoutes from './src/server/routes/cronRoutes.ts';
 import databaseAdminRoutes from './src/server/routes/databaseAdminRoutes.ts';
 import syncRoutes from './src/server/routes/syncRoutes.ts';
+import slideRoutes from './src/server/routes/slideRoutes.ts';
 
 dotenv.config();
 
@@ -35,7 +36,7 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
 
   // 1. Core Middlewares & Security Headers
-  app.use(express.json({ limit: '25mb' }));
+  app.use(express.json({ limit: '80mb' }));
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -66,6 +67,7 @@ async function startServer() {
   app.use(cronRoutes);
   app.use(databaseAdminRoutes);
   app.use(syncRoutes);
+  app.use(slideRoutes);
 
   // 5. Static Dist / Vite SPA Middleware
   const distPath = path.join(__dirname, 'dist');

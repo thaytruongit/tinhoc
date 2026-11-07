@@ -702,6 +702,8 @@ export interface CurriculumPeriodSpec {
   yccd: string; // Mục tiêu bài học / Yêu cầu cần đạt
   digitalCompetency: string; // Năng lực số (CV 3456)
   aiCompetency: string; // Năng lực AI (Khung 3439)
+  nlsCode?: string;
+  nlsAction?: string;
 }
 
 export interface LiveWheelCallState {
@@ -968,6 +970,7 @@ export interface LiveClassroomSession {
   activeStage: 1 | 2 | 3 | 4;
   activeLiveView?:
     | 'waiting'
+    | 'slide'
     | 'whiteboard'
     | 'hd1'
     | 'hd2'
@@ -975,6 +978,8 @@ export interface LiveClassroomSession {
     | 'hd3-practice'
     | 'hd4';
   activeClassId: string;
+  activeSlideIndexByLesson?: Record<string, number>;
+  unlockedSlideDeckByLesson?: Record<string, boolean>;
   unlockedStagesByLesson: Record<string, Record<1 | 2 | 3 | 4, boolean>>;
   finalizedActivitiesByLesson?: Record<string, Record<string, boolean>>;
   unlockedPracticeStage3ByLesson?: Record<string, boolean>;
@@ -1001,7 +1006,7 @@ export interface LiveClassroomSession {
     id: string;
     title: string;
     body: string;
-    stage?: 1 | 2 | 3 | 4 | 'hd3-practice' | 'whiteboard';
+    stage?: 1 | 2 | 3 | 4 | 'slide' | 'hd3-practice' | 'whiteboard';
     stageLabel?: string;
     lessonTitle?: string;
     classId?: string;
@@ -1074,6 +1079,9 @@ export interface WaitingRoomState {
   classId: string;
   grade: 6 | 7 | 8 | 9;
   period: number;
+  activeBoardMode?: 'slide' | 'hd1' | 'hd2' | 'hd3' | 'hd3-practice' | 'hd4';
+  activeSlideIndex?: number;
+  activeWarmupTab?: 'html-sim' | 'video' | 'image';
   joinedStudentIds: string[];
   studentRoles: Record<string, ClassroomHonorRole>;
   studentQuickAnswers: Record<string, 'A' | 'B' | 'C'>;

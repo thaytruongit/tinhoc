@@ -47,6 +47,11 @@ import {
   type StudentGroupFilterMode,
 } from '../utils/slideAndArenaController';
 import { LiveStudentProgressTracker } from './LiveStudentProgressTracker';
+import { PreLiveSlideConfigModal } from './PreLiveSlideConfigModal';
+import {
+  getAllConfiguredSlideSummaries,
+  type HybridSlideDeckSummary,
+} from '../utils/hybridSlideStorage';
 
 export type TeacherTab =
   | 'trang-chu'
@@ -132,6 +137,27 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const [showResetAcademicYearModal, setShowResetAcademicYearModal] = useState(false);
   const [isResettingAcademicYear, setIsResettingAcademicYear] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [preLiveSlideModalTarget, setPreLiveSlideModalTarget] = useState<{
+    open: boolean;
+    grade: 6 | 7 | 8 | 9;
+    period: number;
+  }>({ open: false, grade: 6, period: 1 });
+  const [configuredSlideSummaries, setConfiguredSlideSummaries] = useState<
+    Record<string, HybridSlideDeckSummary>
+  >({});
+
+  const refreshConfiguredSlideSummaries = useCallback(async () => {
+    try {
+      const summaries = await getAllConfiguredSlideSummaries();
+      setConfiguredSlideSummaries(summaries);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshConfiguredSlideSummaries();
+  }, [refreshConfiguredSlideSummaries]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -1941,6 +1967,56 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     </div>
                   </div>
 
+                  {/* SECTION 4.5: CẤU HÌNH TRƯỚC SLIDE BÀI GIẢNG & KHỞI ĐỘNG (KIẾN TRÚC HYBRID 3 TẦNG) */}
+                  <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-[#0f2f24] via-[#134e3a] to-[#0f382a] text-white border border-emerald-400/30 shadow-md flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="flex items-start sm:items-center gap-3.5">
+                      <div className="w-12 h-12 rounded-2xl bg-amber-400 text-slate-950 font-black flex items-center justify-center shrink-0 shadow-md">
+                        <span className="material-symbols-outlined text-[26px]">slideshow</span>
+                      </div>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2.5 py-0.5 rounded-full bg-amber-400/20 border border-amber-300/40 text-amber-200 text-[10px] font-black uppercase tracking-wider">
+                            Kiến Trúc Hybrid 3 Tầng • Phòng Live Chính
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-400/20 text-emerald-200 text-[10px] font-bold">
+                            Đã cấu hình riêng:{' '}
+                            {
+                              Object.values(configuredSlideSummaries).filter(
+                                (s) => s.grade === selectedNotebookGrade && s.hasCustomSlides
+                              ).length
+                            }
+                            /29 tiết Khối {selectedNotebookGrade}
+                          </span>
+                        </div>
+                        <h3 className="text-sm sm:text-base font-black text-white mt-1">
+                          Nạp Trước Slide Bài Giảng PDF/Ảnh Gốc &amp; Khởi Động (Video • Ảnh • Mã HTML Chuyển Động)
+                        </h3>
+                        <p className="text-xs text-emerald-100/85 mt-0.5">
+                          Slide được lưu cố định trên Server + bộ nhớ đệm IndexedDB siêu tốc. Khi chọn tiết để dạy, bảng phấn xanh của Phòng Live Chính sẽ hiển thị ngay bộ Slide ảnh gốc và đồng bộ toàn bộ hoạt động với Học sinh!
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPreLiveSlideModalTarget({
+                            open: true,
+                            grade: selectedNotebookGrade,
+                            period: selectedNotebookPeriod,
+                          })
+                        }
+                        className="px-4 py-2.5 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs sm:text-sm flex items-center gap-1.5 cursor-pointer shadow-md transition-all"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">upload_file</span>
+                        <span>
+                          Cấu hình Slide &amp; Khởi động (Khối {selectedNotebookGrade} - Tiết {selectedNotebookPeriod})
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* SECTION 5: GRID OF 29-PERIOD CARDS — CLICKING ANY PERIOD IMMEDIATELY ENTERS LIVE ROOM */}
                   {(() => {
                     const filteredGradePeriods = gradePeriods.filter((spec) => {
@@ -1987,6 +2063,8 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                                 : `${spec.period * 3 - 2}–${spec.period * 3}`;
                               const bookName = spec.sgkFile || `SGK Tin${selectedNotebookGrade}.pdf`;
                               const typeText = spec.lessonType === 'practice' ? 'Thực hành' : 'Lý thuyết';
+                              const periodLessonKey = `k${spec.grade}-tiet-${spec.period}`;
+                              const slideSummary = configuredSlideSummaries[periodLessonKey];
 
                               const enterLiveRoomForPeriod = () => {
                                 handleSelectGradeAndPeriod(spec.grade, spec.period);
@@ -2030,6 +2108,17 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                                         <p className="text-xs text-slate-500 mt-1">
                                           Trang {pageRange} ({bookName}) • {typeText}
                                         </p>
+                                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                          {slideSummary?.hasCustomSlides ? (
+                                            <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black inline-flex items-center gap-1">
+                                              📑 Slide gốc ({slideSummary.totalPages} trang)
+                                            </span>
+                                          ) : (
+                                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-semibold inline-flex items-center gap-1">
+                                              📑 Có sẵn 4 Slide chuẩn + Mô phỏng HTML
+                                            </span>
+                                          )}
+                                        </div>
                                       </div>
                                     </div>
 
@@ -2077,6 +2166,25 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                                         {isTaught ? 'task_alt' : 'radio_button_unchecked'}
                                       </span>
                                       <span>{isTaught ? '✓ Đã dạy' : 'Đã Dạy'}</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedNotebookGrade(spec.grade);
+                                        setSelectedNotebookPeriod(spec.period);
+                                        setPreLiveSlideModalTarget({
+                                          open: true,
+                                          grade: spec.grade,
+                                          period: spec.period,
+                                        });
+                                      }}
+                                      title={`Nạp trước Slide PDF/Ảnh gốc & Khởi động (Video, Ảnh, Mã HTML) cho Tiết ${spec.period}`}
+                                      className="py-2.5 px-3 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300/80 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                                    >
+                                      <span className="material-symbols-outlined text-[15px]">slideshow</span>
+                                      <span>Slide</span>
                                     </button>
 
                                     <button
@@ -2158,7 +2266,42 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                 </div>
               </div>
 
-              {/* 3 Format Tabs */}
+              {/* BẢNG CẤU HÌNH HOẠT ĐỘNG 1 TRỰC QUAN (CHỈ CÓ VIDEO, ẢNH, MÃ HTML MÔ PHỎNG CHUYỂN ĐỘNG) & SLIDE BÀI GIẢNG */}
+              <div className="p-5 rounded-2xl bg-gradient-to-r from-[#0e2e23] via-[#123d2f] to-[#0f3428] text-white border border-emerald-400/35 shadow-md flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-400/20 border border-amber-300/40 text-amber-200 text-[10px] font-black uppercase">
+                      Hoạt Động 1 Trên Bảng Phấn Phòng Live Chính
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-400/20 text-emerald-200 text-[10px] font-bold">
+                      ⚡ Mã HTML Mô Phỏng Chuyển Động • 🎬 Video • 🖼️ Ảnh Trực Quan
+                    </span>
+                  </div>
+                  <h2 className="text-base sm:text-lg font-black text-white">
+                    Cấu Hình Hoạt Động Khởi Động (Video • Ảnh • Mã HTML Mô Phỏng Chuyển Động) &amp; Slide Bài Giảng Gốc
+                  </h2>
+                  <p className="text-xs text-emerald-100/85">
+                    Hoạt động khởi động trên bảng phấn xanh trong Phòng Live Chính chỉ trình chiếu trực quan Video, Ảnh minh họa và Nhúng mã HTML5 mô phỏng chuyển động (không dùng câu hỏi chữ). Bấm nút bên phải để nạp Slide PDF/Ảnh gốc và cấu hình 3 phương tiện khởi động cho Khối {selectedNotebookGrade} - Tiết {selectedNotebookPeriod}.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPreLiveSlideModalTarget({
+                      open: true,
+                      grade: selectedNotebookGrade,
+                      period: selectedNotebookPeriod,
+                    })
+                  }
+                  className="px-5 py-3 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs sm:text-sm flex items-center gap-2 cursor-pointer shrink-0 shadow-md"
+                >
+                  <span className="material-symbols-outlined text-[20px]">slideshow</span>
+                  <span>
+                    Mở Cấu Hình Slide &amp; Khởi Động (Video / Ảnh / HTML)
+                  </span>
+                </button>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-space-sm p-1.5 bg-surface-container-lowest rounded-xl shadow-sm">
                 <button
                   type="button"
@@ -5848,6 +5991,25 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           </div>
         </div>
       )}
+
+      {/* Pre-Live 3-Tier Hybrid Slide & Visual Warmup Configuration Modal */}
+      <PreLiveSlideConfigModal
+        isOpen={preLiveSlideModalTarget.open}
+        onClose={() =>
+          setPreLiveSlideModalTarget((prev) => ({ ...prev, open: false }))
+        }
+        initialGrade={preLiveSlideModalTarget.grade}
+        initialPeriod={preLiveSlideModalTarget.period}
+        onShowToast={onShowToast}
+        onDeckSaved={() => {
+          refreshConfiguredSlideSummaries();
+        }}
+        onLaunchLiveRoom={(g, p) => {
+          refreshConfiguredSlideSummaries();
+          handleSelectGradeAndPeriod(g, p);
+          handleBroadcastLivePeriod(g, p, true, selectedClass);
+        }}
+      />
     </div>
   );
 };

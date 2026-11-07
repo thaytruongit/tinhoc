@@ -343,7 +343,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     id: string;
     title: string;
     body: string;
-    stage?: 'whiteboard' | 'hd3-practice' | 1 | 2 | 3 | 4;
+    stage?: 'whiteboard' | 'slide' | 'hd3-practice' | 1 | 2 | 3 | 4;
     stageLabel?: string;
     timestampIso: string;
   } | null>(null);
@@ -484,9 +484,9 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
   }[] = [
     {
       id: 'waiting',
-      label: 'Phòng Chờ Lớp',
+      label: 'Phòng Live Chính (Slide)',
       icon: 'meeting_room',
-      points: 'Sảnh Live',
+      points: 'Bảng Chính',
     },
     {
       id: 1,
@@ -1026,21 +1026,50 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
               </span>
             </div>
           )}
-          {activeView === 'waiting' ? (
-            <LiveClassroomWaitingRoom
-              role="student"
-              grade={([6, 7, 8, 9].includes(Number(periodSpec.grade)) ? Number(periodSpec.grade) : 6) as 6 | 7 | 8 | 9}
-              period={periodSpec.period}
-              classId={liveSession?.activeClassId || currentStudent.classId}
-              periodSpec={periodSpec}
-              students={students}
-              currentStudent={currentStudent}
-              liveSession={liveSession}
-              onUpdateLiveSession={onUpdateLiveSession}
-              onAwardXp={onAwardXp}
-              onShowToast={onShowToast}
-            />
-          ) : !isViewUnlocked(activeView) ? (
+          {/* PHÒNG LIVE CHÍNH LỚP HỌC (KHÔNG GIAN ẢO ĐỒNG BỘ SLIDE & TOÀN BỘ HOẠT ĐỘNG VỚI GIÁO VIÊN) */}
+          <LiveClassroomWaitingRoom
+            role="student"
+            grade={([6, 7, 8, 9].includes(Number(periodSpec.grade)) ? Number(periodSpec.grade) : 6) as 6 | 7 | 8 | 9}
+            period={periodSpec.period}
+            classId={liveSession?.activeClassId || currentStudent.classId}
+            periodSpec={periodSpec}
+            students={students}
+            currentStudent={currentStudent}
+            liveSession={liveSession}
+            externalBoardMode={
+              activeView === 'waiting'
+                ? 'slide'
+                : activeView === 1
+                ? 'hd1'
+                : activeView === 2
+                ? 'hd2'
+                : activeView === 3
+                ? 'hd3'
+                : activeView === 'hd3-practice'
+                ? 'hd3-practice'
+                : 'hd4'
+            }
+            onBoardModeChange={(mode) => {
+              setActiveView(
+                mode === 'slide'
+                  ? 'waiting'
+                  : mode === 'hd1'
+                  ? 1
+                  : mode === 'hd2'
+                  ? 2
+                  : mode === 'hd3'
+                  ? 3
+                  : mode === 'hd3-practice'
+                  ? 'hd3-practice'
+                  : 4
+              );
+            }}
+            onUpdateLiveSession={onUpdateLiveSession}
+            onAwardXp={onAwardXp}
+            onShowToast={onShowToast}
+          />
+
+          {activeView !== 'waiting' && activeView !== 1 && !isViewUnlocked(activeView) ? (
             /* LOCKED ITEM NOTICE — STRICT TEACHER LOCK ENFORCEMENT */
             <div className="p-12 rounded-3xl bg-white border-2 border-dashed border-slate-200 text-center flex flex-col items-center gap-4 shadow-xs">
               <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">
@@ -1051,7 +1080,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                   {`${navItems.find((n) => n.id === activeView)?.label} đang chờ Giáo viên mở khóa`}
                 </h2>
                 <p className="text-sm text-slate-500 max-w-md mt-1">
-                  Thầy/Cô đang điều khiển tiến trình lớp học trực tiếp. Khi thầy/cô bấm mở khóa mục này, màn hình của em sẽ tự động mở khóa và hiển thị ngay!
+                  Thầy/Cô đang điều khiển tiến trình lớp học trực tiếp trên Bảng Phòng Live Chính phía trên.
                 </p>
               </div>
               <button
@@ -1059,73 +1088,11 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                 onClick={() => setActiveView('waiting')}
                 className="px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm cursor-pointer"
               >
-                🏫 Vào Phòng Chờ Lớp Học Trực Tuyến
+                🏫 Xem Slide trên Bảng Phòng Live Chính
               </button>
             </div>
           ) : (
             <div className="flex flex-col gap-6">
-              {/* STAGE 1: KHỞI ĐỘNG */}
-              {activeView === 1 && (
-                <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-5">
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center font-black">
-                        1
-                      </div>
-                      <div>
-                        <h2 className="text-lg font-bold text-slate-900">Hoạt động 1: Khởi động</h2>
-                        <p className="text-xs text-slate-500">
-                          Tình huống dẫn nhập &amp; khám phá bài học mới
-                        </p>
-                      </div>
-                    </div>
-                    <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold">
-                      1.0 điểm
-                    </span>
-                  </div>
-
-                  {isStage1Finalized && (
-                    <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-3 shadow-2xs">
-                      <div className="flex items-center gap-2.5">
-                        <span className="material-symbols-outlined text-rose-600 text-[22px]">lock</span>
-                        <span>
-                          <strong>HOẠT ĐỘNG 1 ĐÃ ĐƯỢC GIÁO VIÊN CHỐT KẾT QUẢ:</strong> Đã khóa nhận câu trả lời Khởi động. Em chỉ xem lại nội dung, không thể nộp thêm hoặc sửa bài.
-                        </span>
-                      </div>
-                      <span className="px-3 py-1 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
-                        ĐÃ ĐÓNG NỘP BÀI
-                      </span>
-                    </div>
-                  )}
-
-                  <WarmupEssayActivity
-                    title="Tình huống mở đầu bài học"
-                    scenario={`Trong bài học "${periodSpec.lessonTitle}", em hãy quan sát tình huống thực tế và thảo luận câu trả lời.`}
-                    question={
-                      periodSpec.yccd || 'Nêu những hiểu biết ban đầu của em về chủ đề này.'
-                    }
-                    sampleAnswer="Gợi ý: Dữ liệu là các con số, hình ảnh, văn bản; thông tin là ý nghĩa rút ra từ dữ liệu."
-                    points={1.0}
-                    isReadOnly={isStage1Finalized}
-                    studentAnswer={warmupAnswer}
-                    onAnswerChange={(val) => {
-                      if (isStage1Finalized) return;
-                      setWarmupAnswer(val);
-                    }}
-                    onSubmitAnswer={() => {
-                      if (isStage1Finalized) {
-                        onShowToast('⚠️ Hoạt động 1 đã được Giáo viên chốt kết quả và đóng nộp bài!');
-                        return;
-                      }
-                      markStageCompleted(
-                        1,
-                        30,
-                        '🎵✓ Đã hoàn thành Hoạt động 1: Khởi động (+30 XP)!'
-                      );
-                    }}
-                  />
-                </div>
-              )}
 
               {/* STAGE 2: KHÁM PHÁ (WORKSHEET) */}
               {activeView === 2 && (

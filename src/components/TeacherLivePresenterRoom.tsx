@@ -1055,10 +1055,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     </span>
                     <div className="flex flex-col min-w-0">
                       <span className="text-xs font-bold text-slate-900 truncate">
-                        🏫 Phòng Chờ Live (Lớp {classId})
+                        🏫 Phòng Live Chính (Lớp {classId})
                       </span>
                       <span className="text-[10px] text-slate-500 truncate">
-                        Sơ đồ 2 dãy bàn Tổ 1 &amp; Tổ 2 • Bảng phấn
+                        Bảng Slide &amp; 4 Hoạt động • Tổ 1 &amp; Tổ 2
                       </span>
                     </div>
                   </div>
@@ -1537,12 +1537,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 type="button"
                 onClick={handleOpenWaitingRoomLobby}
                 className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                  activeTab === 'waiting' || liveSession?.activeLiveView === 'waiting'
+                  activeTab === 'waiting' || liveSession?.activeLiveView === 'waiting' || liveSession?.activeLiveView === 'slide'
                     ? 'bg-amber-500 text-slate-950 shadow-2xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                🏫 Phòng Chờ ({classId})
+                🏫 Phòng Live Chính (Slide)
               </button>
               {([1, 2, 3] as const).map((st) => (
                 <button
@@ -1681,8 +1681,8 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
 
         {/* Content Panel */}
         <div className="p-6 sm:p-8 max-w-6xl mx-auto w-full flex flex-col gap-6">
-          {/* HỆ THỐNG PHÒNG CHỜ PHIÊN LIVE */}
-          {activeTab === 'waiting' && (
+          {/* PHÒNG LIVE CHÍNH LỚP HỌC (KHÔNG GIAN ẢO ĐỒNG BỘ SLIDE & 4 HOẠT ĐỘNG GIỮA GV - HS) */}
+          {activeTab !== 'theo-doi-tien-do' && activeTab !== 'ket-qua' && (
             <LiveClassroomWaitingRoom
               role="teacher"
               grade={grade}
@@ -1692,6 +1692,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
               students={students}
               liveSession={liveSession}
               onUpdateLiveSession={onUpdateLiveSession}
+              externalBoardMode={activeTab === 'waiting' ? 'slide' : activeTab}
+              onBoardModeChange={(mode) => {
+                setActiveTab(mode === 'slide' ? 'waiting' : mode);
+              }}
               defaultCollapsedAfterReady={false}
               onReadyForLearning={() => {
                 setActiveTab('hd1');
