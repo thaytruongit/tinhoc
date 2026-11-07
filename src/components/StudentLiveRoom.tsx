@@ -43,6 +43,10 @@ import {
   isRealRenderedPdfSlideDeck,
   BLANK_WHITE_SLIDE_DATA_URL,
 } from '../utils/slideDeckManager';
+import {
+  getSavedGoogleSheetsConfig,
+  loadLessonSlideDeckFromGoogleSheet,
+} from '../utils/googleSheetsConnector';
 import { LiveClassroomWaitingRoom } from './LiveClassroomWaitingRoom';
 
 interface StudentLiveRoomProps {
@@ -229,8 +233,55 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     setIsStudentArenaReady(false);
   }, [lessonKey]);
 
-  // Slide state synchronized with Teacher (monotonic version-guarded to prevent erratic jumping)
-  const uploadedDeck = liveSession?.lectureSlidesByLesson?.[lessonKey];
+  // Slide state synchronized with Teacher & Google Sheet CSDL (monotonic version-guarded to prevent erratic jumping)
+  const [studentSheetDeck, setStudentSheetDeck] = useState<any>(null);
+  const uploadedDeck =
+    isRealRenderedPdfSlideDeck(liveSession?.lectureSlidesByLesson?.[lessonKey])
+      ? liveSession?.lectureSlidesByLesson?.[lessonKey]
+      : isRealRenderedPdfSlideDeck(studentSheetDeck)
+      ? studentSheetDeck
+      : liveSession?.lectureSlidesByLesson?.[lessonKey];
+
+  // Tự động tải Slide bài giảng từ Google Sheet "CSDL" phía Học sinh nếu Giáo viên đã gắn Sheet CSDL
+  useEffect(() => {
+    if (isRealRenderedPdfSlideDeck(liveSession?.lectureSlidesByLesson?.[lessonKey])) {
+      return;
+    }
+    const activeSheetId =
+      liveSession?.googleSheetsCsdlConfig?.spreadsheetId ||
+      getSavedGoogleSheetsConfig()?.spreadsheetId;
+    if (!activeSheetId) return;
+
+    let cancelled = false;
+    const validGrade = ([6, 7, 8, 9].includes(Number(periodSpec.grade))
+      ? Number(periodSpec.grade)
+      : 6) as 6 | 7 | 8 | 9;
+
+    loadLessonSlideDeckFromGoogleSheet({
+      spreadsheetId: activeSheetId,
+      grade: validGrade,
+      period: periodSpec.period,
+      lessonTitle: periodSpec.lessonTitle,
+    })
+      .then((res) => {
+        if (!cancelled && res.foundInSheet && !res.isBlankSlide && res.deck) {
+          setStudentSheetDeck(res.deck);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    lessonKey,
+    periodSpec.grade,
+    periodSpec.period,
+    periodSpec.lessonTitle,
+    liveSession?.googleSheetsCsdlConfig?.spreadsheetId,
+    liveSession?.lectureSlidesByLesson,
+  ]);
+
   const blankFallbackSlides = buildFixedFolderPdfSlideCacheDeck({
     grade: ([6, 7, 8, 9].includes(Number(periodSpec.grade)) ? Number(periodSpec.grade) : 6) as
       | 6

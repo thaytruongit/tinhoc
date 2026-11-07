@@ -1108,6 +1108,24 @@ export interface LiveClassroomSession {
   webEmbedSlideUrl?: string;
   slideDisplayMode?: 'pdf-canvas' | 'web-embed';
   waitingRoomByLesson?: Record<string, WaitingRoomState>;
+  googleSheetsCsdlConfig?: {
+    spreadsheetId: string;
+    spreadsheetUrl: string;
+    spreadsheetTitle?: string;
+    connectedAtIso: string;
+    lastSyncedAtIso?: string;
+  } | null;
+  googleSheetsSlideIndex?: Array<{
+    lessonKey: string;
+    grade: 6 | 7 | 8 | 9;
+    period: number;
+    lessonTitle: string;
+    fileName: string;
+    slideCount: number;
+    totalSizeKb: number;
+    updatedAtIso: string;
+    teacherEmail: string;
+  }>;
   updatedAt: string;
 }
 

@@ -23,11 +23,17 @@ import {
   batchConvertAndUploadPdfPagesToGoogleSheet,
   calculateBase64ChunkStats,
   resolveSlidePreviewKeyNavigation,
+  subscribeGoogleSheetsConfigChanges,
   type GoogleSheetsConnectionConfig,
   type GoogleSheetSlideIndexRecord,
   type ConvertedPdfWebpSlide,
   type PdfBatchAutoUploadProgress,
 } from '../utils/googleSheetsConnector';
+import {
+  syncAllDataForGitHubPublic,
+  downloadGitHubPublicSnapshotJson,
+  buildGitHubPublicDataSnapshot,
+} from '../utils/githubPublicSync';
 import { renderSlideToCanvasDataUrl } from './LectureSlideManagerModal';
 import {
   BLANK_WHITE_SLIDE_DATA_URL,
@@ -42,10 +48,15 @@ interface GoogleSheetsSlideDbPanelProps {
   classId?: string;
   lessonTitle: string;
   currentDeck?: any;
+  liveSession?: any;
   periodList?: Array<{ period: number; lessonTitle: string }>;
   onChangeGradeAndPeriod?: (grade: 6 | 7 | 8 | 9, period: number) => void;
   onOpenLiveRoomForLesson?: (grade: 6 | 7 | 8 | 9, period: number) => void;
   onSheetIndexChange?: (records: GoogleSheetSlideIndexRecord[]) => void;
+  onSyncSheetConfigToLiveSession?: (
+    cfg: GoogleSheetsConnectionConfig | null,
+    records?: GoogleSheetSlideIndexRecord[]
+  ) => void;
   onApplyLoadedDeck: (
     deck: any,
     toastMsg?: string,
@@ -119,10 +130,12 @@ export const GoogleSheetsSlideDbPanel: React.FC<GoogleSheetsSlideDbPanelProps> =
   classId = '6A10',
   lessonTitle,
   currentDeck,
+  liveSession,
   periodList,
   onChangeGradeAndPeriod,
   onOpenLiveRoomForLesson,
   onSheetIndexChange,
+  onSyncSheetConfigToLiveSession,
   onApplyLoadedDeck,
   onShowToast,
 }) => {
@@ -132,13 +145,16 @@ export const GoogleSheetsSlideDbPanel: React.FC<GoogleSheetsSlideDbPanelProps> =
     Boolean(getGoogleSheetsAccessToken())
   );
 
-  const [sheetConfig, setSheetConfig] = useState<GoogleSheetsConnectionConfig | null>(() =>
-    getSavedGoogleSheetsConfig()
+  const [sheetConfig, setSheetConfig] = useState<GoogleSheetsConnectionConfig | null>(
+    () => getSavedGoogleSheetsConfig() || liveSession?.googleSheetsCsdlConfig || null
   );
   const [sheetInput, setSheetInput] = useState<string>(() => {
-    const saved = getSavedGoogleSheetsConfig();
+    const saved = getSavedGoogleSheetsConfig() || liveSession?.googleSheetsCsdlConfig;
     return saved?.spreadsheetUrl || saved?.spreadsheetId || '';
   });
+  const [githubSyncBannerText, setGithubSyncBannerText] = useState<string>(
+    'Sẵn sàng đồng bộ CSDL Sheet "CSDL" ↔ Slide Phòng Live & đóng gói dữ liệu chuẩn GitHub Pages.'
+  );
 
   const [isBusy, setIsBusy] = useState<boolean>(false);
   const [pdfBatchProgress, setPdfBatchProgress] = useState<PdfBatchAutoUploadProgress | null>(null);
@@ -256,9 +272,66 @@ export const GoogleSheetsSlideDbPanel: React.FC<GoogleSheetsSlideDbPanelProps> =
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [safePreviewIndex, activePreviewSlides.length, isPreviewZoomed]);
 
-  const updateIndexList = (records: GoogleSheetSlideIndexRecord[]) => {
+  const updateIndexList = (
+    records: GoogleSheetSlideIndexRecord[],
+    explicitCfg?: GoogleSheetsConnectionConfig | null
+  ) => {
     setSheetLessonsIndex(records);
     onSheetIndexChange?.(records);
+    const activeCfg = explicitCfg ?? sheetConfig ?? getSavedGoogleSheetsConfig();
+    onSyncSheetConfigToLiveSession?.(activeCfg, records);
+  };
+
+  // Lắng nghe thay đổi kết nối Google Sheet "CSDL" từ Phòng Live hoặc tab khác theo thời gian thực
+  useEffect(() => {
+    const unsubscribe = subscribeGoogleSheetsConfigChanges((nextCfg) => {
+      setSheetConfig(nextCfg);
+      if (nextCfg?.spreadsheetUrl || nextCfg?.spreadsheetId) {
+        setSheetInput(nextCfg.spreadsheetUrl || nextCfg.spreadsheetId);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  // Nếu liveSession có cấu hình Google Sheet CSDL mà local chưa có -> tự động đồng bộ
+  useEffect(() => {
+    if (
+      liveSession?.googleSheetsCsdlConfig?.spreadsheetId &&
+      liveSession.googleSheetsCsdlConfig.spreadsheetId !== sheetConfig?.spreadsheetId
+    ) {
+      setSheetConfig(liveSession.googleSheetsCsdlConfig);
+      setSheetInput(
+        liveSession.googleSheetsCsdlConfig.spreadsheetUrl ||
+          liveSession.googleSheetsCsdlConfig.spreadsheetId
+      );
+      saveGoogleSheetsConfig(liveSession.googleSheetsCsdlConfig);
+    }
+    if (
+      Array.isArray(liveSession?.googleSheetsSlideIndex) &&
+      liveSession.googleSheetsSlideIndex.length > 0 &&
+      sheetLessonsIndex.length === 0
+    ) {
+      setSheetLessonsIndex(liveSession.googleSheetsSlideIndex);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveSession?.googleSheetsCsdlConfig?.spreadsheetId]);
+
+  const handleSyncAllToGitHubPublic = async (silentToast = false) => {
+    const activeCfg = sheetConfig || getSavedGoogleSheetsConfig();
+    const res = await syncAllDataForGitHubPublic({
+      googleSheetsConfig: activeCfg,
+      sheetLessonsIndex,
+      liveSession,
+    });
+    setGithubSyncBannerText(res.statusMessage);
+    onSyncSheetConfigToLiveSession?.(activeCfg, sheetLessonsIndex);
+    if (!silentToast) {
+      setStatusBanner({
+        tone: 'success',
+        text: res.statusMessage,
+      });
+      onShowToast(res.statusMessage);
+    }
   };
 
   useEffect(() => {
@@ -380,9 +453,15 @@ export const GoogleSheetsSlideDbPanel: React.FC<GoogleSheetsSlideDbPanelProps> =
       };
       setSheetConfig(nextCfg);
       saveGoogleSheetsConfig(nextCfg);
+      onSyncSheetConfigToLiveSession?.(nextCfg, sheetLessonsIndex);
       lastAutoLoadedKeyRef.current = `${parsedId}__${lessonKey}`;
 
       await handleLoadLessonFromSheet(parsedId, false);
+      await syncAllDataForGitHubPublic({
+        googleSheetsConfig: nextCfg,
+        sheetLessonsIndex,
+        liveSession,
+      });
     } finally {
       setIsBusy(false);
     }
@@ -1111,6 +1190,24 @@ export const GoogleSheetsSlideDbPanel: React.FC<GoogleSheetsSlideDbPanelProps> =
         });
 
         await onApplyLoadedDeck(directDeck, finalMsg, false, lessonKey);
+        const latestCfg = getSavedGoogleSheetsConfig() || sheetConfig;
+        onSyncSheetConfigToLiveSession?.(
+          latestCfg,
+          batchRes.allLessonsIndex || sheetLessonsIndex
+        );
+        await syncAllDataForGitHubPublic({
+          googleSheetsConfig: latestCfg,
+          sheetLessonsIndex: batchRes.allLessonsIndex || sheetLessonsIndex,
+          liveSession: {
+            ...(liveSession || {}),
+            grade,
+            period,
+            lectureSlidesByLesson: {
+              ...(liveSession?.lectureSlidesByLesson || {}),
+              [lessonKey]: directDeck,
+            },
+          },
+        });
         return;
       }
 
@@ -1564,6 +1661,54 @@ export const GoogleSheetsSlideDbPanel: React.FC<GoogleSheetsSlideDbPanelProps> =
             title="Truy vấn và đồng bộ tự động Google Sheet CSDL cho tiết học này"
           >
             <span>🔄 Tải Từ Sheet</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Row 2B: Đồng bộ kết nối CSDL Sheet ↔ Slide Phòng Live & Ưu tiên Public lên GitHub */}
+      <div
+        data-testid="github-public-sync-bar"
+        className="p-3.5 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-emerald-950 text-white border border-emerald-400/50 shadow-sm flex flex-wrap items-center justify-between gap-3"
+      >
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <span className="px-2.5 py-1 rounded-xl bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[11px] font-black flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+            <span>ĐỒNG BỘ PHÒNG LIVE &amp; GITHUB PUBLIC</span>
+          </span>
+          <span className="text-xs font-bold text-slate-200">
+            {githubSyncBannerText}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            data-testid="sync-all-github-public-btn"
+            onClick={() => handleSyncAllToGitHubPublic(false)}
+            disabled={isBusy}
+            className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 text-xs font-black cursor-pointer flex items-center gap-1.5 shadow-xs transition-all"
+            title="Đồng bộ toàn bộ kết nối CSDL Google Sheets, Slide Phòng Live và dữ liệu lớp học vào public/data, docs/data & gh-pages-dist/data để ưu tiên public lên GitHub"
+          >
+            <span>🚀 Đồng Bộ Toàn Bộ Dữ Liệu Để Public Lên GitHub</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="download-github-snapshot-btn"
+            onClick={() => {
+              const snap = buildGitHubPublicDataSnapshot({
+                googleSheetsConfig: sheetConfig || getSavedGoogleSheetsConfig(),
+                sheetLessonsIndex,
+                liveSession,
+                includeSlideImages: true,
+              });
+              downloadGitHubPublicSnapshotJson(snap);
+              onShowToast('⬇️ Đã tải tệp github-public-db-snapshot.json chuẩn GitHub Pages!');
+            }}
+            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-600 text-xs font-black cursor-pointer flex items-center gap-1.5 transition-all"
+            title="Tải tệp JSON dữ liệu đã chuẩn hóa về máy để commit trực tiếp lên GitHub nếu cần"
+          >
+            <span>⬇️ Tải JSON GitHub</span>
           </button>
         </div>
       </div>

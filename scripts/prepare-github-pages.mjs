@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 const rootDir = process.cwd();
+const publicDir = path.join(rootDir, 'public');
 const distDir = path.join(rootDir, 'dist');
 const assetsDir = path.join(distDir, 'assets');
 const ghPagesDistDir = path.join(rootDir, 'gh-pages-dist');
@@ -10,6 +11,21 @@ const docsDir = path.join(rootDir, 'docs');
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function copyDirRecursive(srcDir, destDir) {
+  if (!fs.existsSync(srcDir)) return;
+  ensureDir(destDir);
+  const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(srcDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+    if (entry.isDirectory()) {
+      copyDirRecursive(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
   }
 }
 
@@ -42,14 +58,28 @@ function run() {
     }
   }
 
-  // 3. Create root .nojekyll and root 404.html for 'main / (root)' GitHub Pages mode
+  // 3. Copy pdfjs worker scripts (public/pdfjs) and GitHub Public DB snapshot (public/data)
+  // into dist/, gh-pages-dist/, and docs/ so PDF conversion & CSDL Sheet sync work 100% on GitHub Pages
+  const publicPdfJsDir = path.join(publicDir, 'pdfjs');
+  const publicDataDir = path.join(publicDir, 'data');
+
+  for (const targetBase of [distDir, ghPagesDistDir, docsDir]) {
+    if (fs.existsSync(publicPdfJsDir)) {
+      copyDirRecursive(publicPdfJsDir, path.join(targetBase, 'pdfjs'));
+    }
+    if (fs.existsSync(publicDataDir)) {
+      copyDirRecursive(publicDataDir, path.join(targetBase, 'data'));
+    }
+  }
+
+  // 4. Create root .nojekyll and root 404.html for 'main / (root)' GitHub Pages mode
   fs.writeFileSync(path.join(rootDir, '.nojekyll'), '');
   const rootIndex = path.join(rootDir, 'index.html');
   if (fs.existsSync(rootIndex)) {
     fs.copyFileSync(rootIndex, path.join(rootDir, '404.html'));
   }
 
-  // 4. Populate docs/ folder for 'main /docs' GitHub Pages mode
+  // 5. Populate docs/ folder for 'main /docs' GitHub Pages mode
   ensureDir(docsDir);
   fs.writeFileSync(path.join(docsDir, '.nojekyll'), '');
   if (fs.existsSync(path.join(ghPagesDistDir, 'app.js'))) {
@@ -70,6 +100,29 @@ function run() {
     <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@500;600;700;800&family=Nunito:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
     <link rel="stylesheet" href="./app.css" />
+    <script>
+      (function () {
+        if (typeof window !== 'undefined') {
+          window.global = window.global || window;
+          window.process = window.process || { env: {} };
+          if (typeof window.process.getBuiltinModule !== 'function') {
+            window.process.getBuiltinModule = function () { return undefined; };
+          }
+          if (typeof URL !== 'undefined' && typeof URL.parse !== 'function') {
+            URL.parse = function (url, base) {
+              try { return base ? new URL(url, base) : new URL(url); } catch (_e) { return null; }
+            };
+          }
+          if (typeof Promise !== 'undefined' && typeof Promise.withResolvers !== 'function') {
+            Promise.withResolvers = function () {
+              var resolve, reject;
+              var promise = new Promise(function (res, rej) { resolve = res; reject = rej; });
+              return { promise: promise, resolve: resolve, reject: reject };
+            };
+          }
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
@@ -80,7 +133,7 @@ function run() {
   fs.writeFileSync(path.join(docsDir, 'index.html'), docsHtml);
   fs.writeFileSync(path.join(docsDir, '404.html'), docsHtml);
 
-  console.log('[prepare-github-pages] Successfully prepared dist/, gh-pages-dist/, and docs/ for GitHub Pages.');
+  console.log('[prepare-github-pages] Successfully prepared dist/, gh-pages-dist/, and docs/ (including pdfjs/ and data/) for GitHub Pages.');
 }
 
 run();

@@ -1,0 +1,419 @@
+{
+  "schemaVersion": "2.0.0",
+  "appTitle": "CloudPlay Interactive Learning — Tin Học GDPT 2018 (Khối 6-9)",
+  "syncedAtIso": "2026-11-07T05:51:15.219Z",
+  "prioritizeGitHubPublic": true,
+  "googleSheetsCsdlConfig": null,
+  "sheetLessonsIndex": [
+    {
+      "lessonKey": "k6-tiet-1",
+      "grade": 6,
+      "period": 1,
+      "lessonTitle": "Khối 6 • Tiết 1 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 1/3)",
+      "fileName": "Lợi_ích_Internet_và_AI.pdf (3 trang Base64 đã phân mảnh)",
+      "slideCount": 3,
+      "totalSizeKb": 15,
+      "updatedAtIso": "2026-11-07T05:51:15.218Z",
+      "teacherEmail": ""
+    },
+    {
+      "lessonKey": "k6-tiet-9",
+      "grade": 6,
+      "period": 9,
+      "lessonTitle": "Khối 6 • Tiết 9 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 1/8)",
+      "fileName": "Lợi_ích_Internet_và_AI.pdf (8 trang Base64 đã phân mảnh)",
+      "slideCount": 8,
+      "totalSizeKb": 685,
+      "updatedAtIso": "2026-11-07T05:51:15.218Z",
+      "teacherEmail": ""
+    },
+    {
+      "lessonKey": "k6-tiet-17",
+      "grade": 6,
+      "period": 17,
+      "lessonTitle": "Khối 6 • Tiết 17 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 1/8)",
+      "fileName": "Lợi_ích_Internet_và_AI.pdf (8 trang Base64 đã phân mảnh)",
+      "slideCount": 8,
+      "totalSizeKb": 685,
+      "updatedAtIso": "2026-11-07T05:51:15.218Z",
+      "teacherEmail": ""
+    }
+  ],
+  "activeLiveLesson": {
+    "classId": "6A10",
+    "grade": 6,
+    "period": 1,
+    "lessonKey": "k6-tiet-1",
+    "currentSlideNumber": 1,
+    "totalSlides": 15,
+    "slideViewMode": "LARGE_16_9",
+    "isBroadcasting": true
+  },
+  "slideDecksSummaryByLesson": {
+    "k6-tiet-1": {
+      "lessonKey": "k6-tiet-1",
+      "grade": 6,
+      "period": 1,
+      "fileName": "Lợi_ích_Internet_và_AI.pdf (3 trang Base64 đã phân mảnh)",
+      "slideCount": 3,
+      "totalCompressedKb": 15,
+      "sourceSpreadsheetId": "1o0QYDVE_testSheetCsdl999",
+      "updatedAt": "05:51",
+      "hasRealPdfPages": true,
+      "slidesPreview": [
+        {
+          "slideNumber": 1,
+          "totalSlides": 3,
+          "title": "Slide 1/3: Tiết 1 — Tiết 1: Bài 1: Thông tin và dữ liệu",
+          "subtitle": "Khối 6 • Tiết 1 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 1/3)",
+          "bulletPoints": [
+            "Trang Slide #1 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #1/3 (1346×1742px • 5 KB • 1/6 chunk) trên Google Sheet CSDL (k6-tiet-1)",
+          "imageUrl": "/api/file-storage/slides/file/slide-1-k6-tiet-1-1794030672461-x8wrb.webp",
+          "sizeKb": 5,
+          "chunkCount": 1
+        },
+        {
+          "slideNumber": 2,
+          "totalSlides": 3,
+          "title": "Slide 2/3: Tiết 1 — Tiết 1: Bài 1: Thông tin và dữ liệu",
+          "subtitle": "Khối 6 • Tiết 1 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 2/3)",
+          "bulletPoints": [
+            "Trang Slide #2 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #2/3 (1346×1742px • 5 KB • 1/6 chunk) trên Google Sheet CSDL (k6-tiet-1)",
+          "imageUrl": "/api/file-storage/slides/file/slide-2-k6-tiet-1-1794030672462-9dfyt.webp",
+          "sizeKb": 5,
+          "chunkCount": 1
+        },
+        {
+          "slideNumber": 3,
+          "totalSlides": 3,
+          "title": "Slide 3/3: Tiết 1 — Tiết 1: Bài 1: Thông tin và dữ liệu",
+          "subtitle": "Khối 6 • Tiết 1 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 3/3)",
+          "bulletPoints": [
+            "Trang Slide #3 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #3/3 (1346×1742px • 5 KB • 1/6 chunk) trên Google Sheet CSDL (k6-tiet-1)",
+          "imageUrl": "/api/file-storage/slides/file/slide-3-k6-tiet-1-1794030672462-mhfvf.webp",
+          "sizeKb": 5,
+          "chunkCount": 1
+        }
+      ]
+    },
+    "k6-tiet-21": {
+      "lessonKey": "k6-tiet-21",
+      "grade": 6,
+      "period": 21,
+      "fileName": "Google_Drive_1AbCdEfG.pptx (Google Drive Live (.PPTX / .PDF))",
+      "slideCount": 1,
+      "totalCompressedKb": 45,
+      "updatedAt": "10:13",
+      "hasRealPdfPages": false,
+      "slidesPreview": [
+        {
+          "slideNumber": 1,
+          "totalSlides": 1,
+          "title": "Google Drive Live (.PPTX / .PDF): Google_Drive_1AbCdEfG.pptx",
+          "subtitle": "Khối 6 • Tiết 21: Tiết 21: Bài 12: Trình bày thông tin ở dạng bảng (mục 1, 2, 3)",
+          "bulletPoints": [
+            "Đang trình chiếu trực tiếp từ đường dẫn: https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz123456/view?usp=sharing",
+            "Hỗ trợ lật trang, phóng to và đồng bộ trực tiếp sang màn hình Học sinh Lớp 6A10."
+          ],
+          "highlightNote": "Đang chạy trực tiếp từ Google Drive Live (.PPTX / .PDF)",
+          "imageUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201280%20720%22%20width%3D%221280%22%20height%3D%22720%22%3E%0A%20%20%20%20%3Cdefs%3E%0A%20%20%20%20%20%20%3ClinearGradient%20id%3D%22bg%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%230f172a%22%2F%3E%0A%20%20%20%20%20%20%20%20%3Cstop%20offset%3D%2255%25%22%20stop-color%3D%22%231e1b4b%22%2F%3E%0A%20%20%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%230f172a%22%2F%3E%0A%20%20%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%20%20%3C%2Fdefs%3E%0A%20%20%20%20%3Crect%20width%3D%221280%22%20height%3D%22720%22%20fill%3D%22url(%23bg)%22%2F%3E%0A%20%20%20%20%3Ccircle%20cx%3D%221160%22%20cy%3D%22110%22%20r%3D%22210%22%20fill%3D%22%234f46e5%22%20opacity%3D%220.14%22%2F%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22120%22%20cy%3D%22640%22%20r%3D%22180%22%20fill%3D%22%23ea580c%22%20opacity%3D%220.12%22%2F%3E%0A%20%20%20%20%3Crect%20x%3D%2264%22%20y%3D%2248%22%20width%3D%221152%22%20height%3D%22624%22%20rx%3D%2228%22%20fill%3D%22%231e293b%22%20fill-opacity%3D%220.55%22%20stroke%3D%22%23475569%22%20stroke-width%3D%222%22%2F%3E%0A%20%20%20%20%3Crect%20x%3D%2288%22%20y%3D%2278%22%20width%3D%22360%22%20height%3D%2242%22%20rx%3D%2221%22%20fill%3D%22%23312e81%22%20stroke%3D%22%236366f1%22%20stroke-width%3D%221.5%22%2F%3E%0A%20%20%20%20%3Ctext%20x%3D%22268%22%20y%3D%22105%22%20text-anchor%3D%22middle%22%20fill%3D%22%23c7d2fe%22%20font-family%3D%22system-ui%2C%20sans-serif%22%20font-size%3D%2217%22%20font-weight%3D%22800%22%3EKH%E1%BB%90I%206%20%E2%80%A2%20TI%E1%BA%BET%2021%20%E2%80%A2%20SLIDE%201%2F1%3C%2Ftext%3E%0A%20%20%20%20%3Ctext%20x%3D%221180%22%20y%3D%22105%22%20text-anchor%3D%22end%22%20fill%3D%22%2394a3b8%22%20font-family%3D%22system-ui%2C%20sans-serif%22%20font-size%3D%2216%22%20font-weight%3D%22700%22%3ECHU%E1%BA%A8N%20GDPT%202018%20TIN%20H%E1%BB%8CC%3C%2Ftext%3E%0A%20%20%20%20%3Ctext%20x%3D%2288%22%20y%3D%22182%22%20fill%3D%22%23ffffff%22%20font-family%3D%22system-ui%2C%20sans-serif%22%20font-size%3D%2236%22%20font-weight%3D%22900%22%3EGoogle%20Drive%20Live%20(.PPTX%20%2F%20.PDF)%3A%20Google_Drive_1AbCdEfG.pptx%3C%2Ftext%3E%0A%20%20%20%20%3Ctext%20x%3D%2288%22%20y%3D%22226%22%20fill%3D%22%2393c5fd%22%20font-family%3D%22system-ui%2C%20sans-serif%22%20font-size%3D%2221%22%20font-weight%3D%22600%22%3EKh%E1%BB%91i%206%20%E2%80%A2%20Ti%E1%BA%BFt%2021%3A%20Ti%E1%BA%BFt%2021%3A%20B%C3%A0i%2012%3A%20Tr%C3%ACnh%20b%C3%A0y%20th%C3%B4ng%20tin%20%E1%BB%9F%20d%E1%BA%A1ng%20b%E1%BA%A3ng%20(m%E1%BB%A5c%201%2C%202%2C%203)%3C%2Ftext%3E%0A%20%20%20%20%3Cline%20x1%3D%2288%22%20y1%3D%22252%22%20x2%3D%221192%22%20y2%3D%22252%22%20stroke%3D%22%23334155%22%20stroke-width%3D%222%22%2F%3E%0A%20%20%20%20%0A%20%20%20%20%20%20%20%20%3Cg%20transform%3D%22translate(88%2C%20310)%22%3E%0A%20%20%20%20%20%20%20%20%20%20%3Crect%20x%3D%220%22%20y%3D%22-26%22%20width%3D%2238%22%20height%3D%2238%22%20rx%3D%2212%22%20fill%3D%22%234f46e5%22%20%2F%3E%0A%20%20%20%20%20%20%20%20%20%20%3Ctext%20x%3D%2219%22%20y%3D%220%22%20text-anchor%3D%22middle%22%20fill%3D%22%23ffffff%22%20font-family%3D%22system-ui%2C%20sans-serif%22%20font-size%3D%2218%22%20font-weight%3D%22800%22%3E1%3C%2Ftext%3E%0A%20%20%20%20%20%20%20%20%20%20%3Ctext%20x%3D%2256%22%20y%3D%22-1%22%20fill%3D%22%23f1f5f9%22%20font-family%3D%22system-ui%2C%20sans-serif%22%20font-size%3D%2222%22%20font-weight%3D%22600%22%3E%C4%90ang%20tr%C3%ACnh%20chi%E1%BA%BFu%20tr%E1%BB%B1c%20ti%E1%BA%BFp%20t%E1%BB%AB%20%C4%91%C6%B0%E1%BB%9Dng%20d%E1%BA%ABn%3A%20https%3A%2F%2Fdrive.google.com%2Ffile%2Fd%2F1AbCdEfGhIjKlMnO...%3C%2Ftext%3E%0A%20%20%20%20%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%20%20%0A%20%20%20%20%20%20%20%20%3Cg%20transform%3D%22translate(88%2C%20384)%22%3E%0A%20%20%20%20%20%20%20%20%20%20%3Crect%20x%3D%220%22%20y%3D%22-26%22%20width%3D%2238%22%20height%3D%2238%22%20rx%3D%2212%22%20fill%3D%22%234f46e5%22%20%2F%3E%0A%20%20%20%20%20%20%20%20%20%20%3Ctext%20x%3D%2219%22%20y%3D%220%22%20text-anchor%3D%22middle%22%20fill%3D%22%23ffffff%22%20font-family%3D%22system-ui%2C%20sans-serif%22%20font-size%3D%2218%22%20font-weight%3D%22800%22%3E2%3C%2Ftext%3E%0A%20%20%20%20%20%20%20%20%20%20%3Ctext%20x%3D%2256%22%20y%3D%22-1%22%20fill%3D%22%23f1f5f9%22%20font-family%3D%22system-ui%2C%20sans-serif%22%20font-size%3D%2222%22%20font-weight%3D%22600%22%3EH%E1%BB%97%20tr%E1%BB%A3%20l%E1%BA%ADt%20trang%2C%20ph%C3%B3ng%20to%20v%C3%A0%20%C4%91%E1%BB%93ng%20b%E1%BB%99%20tr%E1%BB%B1c%20ti%E1%BA%BFp%20sang%20m%C3%A0n%20h%C3%ACnh%20H%E1%BB%8Dc%20sinh%20L%E1%BB%9Bp%206A10.%3C%2Ftext%3E%0A%20%20%20%20%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%20%20%0A%20%20%20%20%3Crect%20x%3D%2288%22%20y%3D%22596%22%20width%3D%221104%22%20height%3D%2250%22%20rx%3D%2214%22%20fill%3D%22%230f172a%22%20fill-opacity%3D%220.7%22%20stroke%3D%22%23334155%22%20stroke-width%3D%221%22%2F%3E%0A%20%20%20%20%3Ctext%20x%3D%22112%22%20y%3D%22627%22%20fill%3D%22%23fcd34d%22%20font-family%3D%22system-ui%2C%20sans-serif%22%20font-size%3D%2218%22%20font-weight%3D%22700%22%3E%F0%9F%92%A1%20%C4%90ang%20ch%E1%BA%A1y%20tr%E1%BB%B1c%20ti%E1%BA%BFp%20t%E1%BB%AB%20Google%20Drive%20Live%20(.PPTX%20%2F%20.PDF)%3C%2Ftext%3E%0A%20%20%3C%2Fsvg%3E",
+          "sizeKb": 0,
+          "chunkCount": 1
+        }
+      ]
+    },
+    "k6-tiet-9": {
+      "lessonKey": "k6-tiet-9",
+      "grade": 6,
+      "period": 9,
+      "fileName": "Lợi_ích_Internet_và_AI.pdf (8 trang Base64 đã phân mảnh)",
+      "slideCount": 8,
+      "totalCompressedKb": 685,
+      "sourceSpreadsheetId": "1o0QYDVEy5yufzo4p5EUqnokYBjnFcF9l3fcNEIOw--0",
+      "updatedAt": "12:14",
+      "hasRealPdfPages": true,
+      "slidesPreview": [
+        {
+          "slideNumber": 1,
+          "totalSlides": 8,
+          "title": "Slide 1/8: Tiết 9 — Tiết 9: Bài 5: Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 9 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 1/8)",
+          "bulletPoints": [
+            "Trang Slide #1 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #1/8 (1651×922px • 48 KB • 2/6 chunk) trên Google Sheet CSDL (k6-tiet-9)",
+          "imageUrl": "/api/file-storage/slides/file/slide-1-k6-tiet-9-1794028496974-5slo0.webp",
+          "sizeKb": 48,
+          "chunkCount": 2
+        },
+        {
+          "slideNumber": 2,
+          "totalSlides": 8,
+          "title": "Slide 2/8: Tiết 9 — Tiết 9: Bài 5: Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 9 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 2/8)",
+          "bulletPoints": [
+            "Trang Slide #2 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #2/8 (1651×922px • 105 KB • 4/6 chunk) trên Google Sheet CSDL (k6-tiet-9)",
+          "imageUrl": "/api/file-storage/slides/file/slide-2-k6-tiet-9-1794028496975-cnhhn.webp",
+          "sizeKb": 105,
+          "chunkCount": 4
+        },
+        {
+          "slideNumber": 3,
+          "totalSlides": 8,
+          "title": "Slide 3/8: Tiết 9 — Tiết 9: Bài 5: Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 9 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 3/8)",
+          "bulletPoints": [
+            "Trang Slide #3 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #3/8 (1651×922px • 56 KB • 2/6 chunk) trên Google Sheet CSDL (k6-tiet-9)",
+          "imageUrl": "/api/file-storage/slides/file/slide-3-k6-tiet-9-1794028496975-lhhm7.webp",
+          "sizeKb": 56,
+          "chunkCount": 2
+        },
+        {
+          "slideNumber": 4,
+          "totalSlides": 8,
+          "title": "Slide 4/8: Tiết 9 — Tiết 9: Bài 5: Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 9 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 4/8)",
+          "bulletPoints": [
+            "Trang Slide #4 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #4/8 (1651×922px • 88 KB • 3/6 chunk) trên Google Sheet CSDL (k6-tiet-9)",
+          "imageUrl": "/api/file-storage/slides/file/slide-4-k6-tiet-9-1794028496975-p7bsr.webp",
+          "sizeKb": 88,
+          "chunkCount": 3
+        },
+        {
+          "slideNumber": 5,
+          "totalSlides": 8,
+          "title": "Slide 5/8: Tiết 9 — Tiết 9: Bài 5: Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 9 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 5/8)",
+          "bulletPoints": [
+            "Trang Slide #5 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #5/8 (1651×922px • 85 KB • 3/6 chunk) trên Google Sheet CSDL (k6-tiet-9)",
+          "imageUrl": "/api/file-storage/slides/file/slide-5-k6-tiet-9-1794028496976-b9bjd.webp",
+          "sizeKb": 85,
+          "chunkCount": 3
+        },
+        {
+          "slideNumber": 6,
+          "totalSlides": 8,
+          "title": "Slide 6/8: Tiết 9 — Tiết 9: Bài 5: Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 9 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 6/8)",
+          "bulletPoints": [
+            "Trang Slide #6 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #6/8 (1651×922px • 96 KB • 3/6 chunk) trên Google Sheet CSDL (k6-tiet-9)",
+          "imageUrl": "/api/file-storage/slides/file/slide-6-k6-tiet-9-1794028496976-irh08.webp",
+          "sizeKb": 96,
+          "chunkCount": 3
+        },
+        {
+          "slideNumber": 7,
+          "totalSlides": 8,
+          "title": "Slide 7/8: Tiết 9 — Tiết 9: Bài 5: Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 9 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 7/8)",
+          "bulletPoints": [
+            "Trang Slide #7 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #7/8 (1651×922px • 121 KB • 4/6 chunk) trên Google Sheet CSDL (k6-tiet-9)",
+          "imageUrl": "/api/file-storage/slides/file/slide-7-k6-tiet-9-1794028496977-8d8zj.webp",
+          "sizeKb": 121,
+          "chunkCount": 4
+        },
+        {
+          "slideNumber": 8,
+          "totalSlides": 8,
+          "title": "Slide 8/8: Tiết 9 — Tiết 9: Bài 5: Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 9 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 8/8)",
+          "bulletPoints": [
+            "Trang Slide #8 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #8/8 (1651×922px • 86 KB • 3/6 chunk) trên Google Sheet CSDL (k6-tiet-9)",
+          "imageUrl": "/api/file-storage/slides/file/slide-8-k6-tiet-9-1794028496977-cepyk.webp",
+          "sizeKb": 86,
+          "chunkCount": 3
+        }
+      ]
+    },
+    "k6-tiet-11": {
+      "lessonKey": "k6-tiet-11",
+      "grade": 6,
+      "period": 11,
+      "fileName": "Trang Slide trắng (Chưa có dữ liệu trên Google Sheet • Tiết 11)",
+      "slideCount": 1,
+      "totalCompressedKb": 45,
+      "sourceSpreadsheetId": "1o0QYDVEy5yufzo4p5EUqnokYBjnFcF9l3fcNEIOw--0",
+      "updatedAt": "10:40",
+      "hasRealPdfPages": false,
+      "slidesPreview": [
+        {
+          "slideNumber": 1,
+          "totalSlides": 1,
+          "title": "Trang Slide trắng — Chưa có dữ liệu Slide trong Google Sheet (1o0QYDVE...) cho Khối 6 • Tiết 11",
+          "subtitle": "Tiết 11: Bài 6: Mạng thông tin toàn cầu (mục 3 - Thực hành)",
+          "bulletPoints": [],
+          "highlightNote": "⬜ Chưa có dữ liệu Slide ảnh trong Google Sheet cho tiết học này (k6-tiet-11). Hãy nạp tệp PDF để lưu từng trang ảnh vào Sheet.",
+          "imageUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221280%22%20height%3D%22720%22%20viewBox%3D%220%200%201280%20720%22%3E%3Crect%20width%3D%221280%22%20height%3D%22720%22%20fill%3D%22%23ffffff%22%2F%3E%3C%2Fsvg%3E",
+          "sizeKb": 0,
+          "chunkCount": 1
+        }
+      ]
+    },
+    "k6-tiet-13": {
+      "lessonKey": "k6-tiet-13",
+      "grade": 6,
+      "period": 13,
+      "fileName": "Trang Slide trắng (Chưa có dữ liệu trên Google Sheet CSDL • Tiết 13)",
+      "slideCount": 1,
+      "totalCompressedKb": 45,
+      "sourceSpreadsheetId": "1o0QYDVEy5yufzo4p5EUqnokYBjnFcF9l3fcNEIOw--0",
+      "updatedAt": "12:14",
+      "hasRealPdfPages": false,
+      "slidesPreview": [
+        {
+          "slideNumber": 1,
+          "totalSlides": 1,
+          "title": "Trang Slide trắng — Chưa có dữ liệu Slide trong Google Sheet CSDL (1o0QYDVE...) cho Khối 6 • Tiết 13",
+          "subtitle": "Tiết 13: Bài 7: Tìm kiếm thông tin trên Internet (mục 2 - Thực hành)",
+          "bulletPoints": [],
+          "highlightNote": "⬜ Chưa có dữ liệu Slide ảnh trong Google Sheet CSDL cho tiết học này (k6-tiet-13). Hãy nạp tệp PDF để lưu từng trang ảnh WebP vào Sheet.",
+          "imageUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221280%22%20height%3D%22720%22%20viewBox%3D%220%200%201280%20720%22%3E%3Crect%20width%3D%221280%22%20height%3D%22720%22%20fill%3D%22%23ffffff%22%2F%3E%3C%2Fsvg%3E",
+          "sizeKb": 0,
+          "chunkCount": 1
+        }
+      ]
+    },
+    "k6-tiet-17": {
+      "lessonKey": "k6-tiet-17",
+      "grade": 6,
+      "period": 17,
+      "fileName": "Lợi_ích_Internet_và_AI.pdf (8 trang Base64 đã phân mảnh)",
+      "slideCount": 8,
+      "totalCompressedKb": 685,
+      "sourceSpreadsheetId": "1o0QYDVEy5yufzo4p5EUqnokYBjnFcF9l3fcNEIOw--0",
+      "updatedAt": "12:15",
+      "hasRealPdfPages": true,
+      "slidesPreview": [
+        {
+          "slideNumber": 1,
+          "totalSlides": 8,
+          "title": "Slide 1/8: Tiết 17 — Tiết 17: Bài 9: An toàn thông tin trên Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 17 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 1/8)",
+          "bulletPoints": [
+            "Trang Slide #1 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #1/8 (1651×922px • 48 KB • 2/6 chunk) trên Google Sheet CSDL (k6-tiet-17)",
+          "imageUrl": "/api/file-storage/slides/file/slide-1-k6-tiet-17-1794028550106-fu9ew.webp",
+          "sizeKb": 48,
+          "chunkCount": 2
+        },
+        {
+          "slideNumber": 2,
+          "totalSlides": 8,
+          "title": "Slide 2/8: Tiết 17 — Tiết 17: Bài 9: An toàn thông tin trên Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 17 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 2/8)",
+          "bulletPoints": [
+            "Trang Slide #2 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #2/8 (1651×922px • 105 KB • 4/6 chunk) trên Google Sheet CSDL (k6-tiet-17)",
+          "imageUrl": "/api/file-storage/slides/file/slide-2-k6-tiet-17-1794028550107-36a5p.webp",
+          "sizeKb": 105,
+          "chunkCount": 4
+        },
+        {
+          "slideNumber": 3,
+          "totalSlides": 8,
+          "title": "Slide 3/8: Tiết 17 — Tiết 17: Bài 9: An toàn thông tin trên Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 17 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 3/8)",
+          "bulletPoints": [
+            "Trang Slide #3 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #3/8 (1651×922px • 56 KB • 2/6 chunk) trên Google Sheet CSDL (k6-tiet-17)",
+          "imageUrl": "/api/file-storage/slides/file/slide-3-k6-tiet-17-1794028550107-m0ugb.webp",
+          "sizeKb": 56,
+          "chunkCount": 2
+        },
+        {
+          "slideNumber": 4,
+          "totalSlides": 8,
+          "title": "Slide 4/8: Tiết 17 — Tiết 17: Bài 9: An toàn thông tin trên Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 17 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 4/8)",
+          "bulletPoints": [
+            "Trang Slide #4 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #4/8 (1651×922px • 88 KB • 3/6 chunk) trên Google Sheet CSDL (k6-tiet-17)",
+          "imageUrl": "/api/file-storage/slides/file/slide-4-k6-tiet-17-1794028550107-9s3gt.webp",
+          "sizeKb": 88,
+          "chunkCount": 3
+        },
+        {
+          "slideNumber": 5,
+          "totalSlides": 8,
+          "title": "Slide 5/8: Tiết 17 — Tiết 17: Bài 9: An toàn thông tin trên Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 17 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 5/8)",
+          "bulletPoints": [
+            "Trang Slide #5 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #5/8 (1651×922px • 85 KB • 3/6 chunk) trên Google Sheet CSDL (k6-tiet-17)",
+          "imageUrl": "/api/file-storage/slides/file/slide-5-k6-tiet-17-1794028550108-zgdic.webp",
+          "sizeKb": 85,
+          "chunkCount": 3
+        },
+        {
+          "slideNumber": 6,
+          "totalSlides": 8,
+          "title": "Slide 6/8: Tiết 17 — Tiết 17: Bài 9: An toàn thông tin trên Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 17 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 6/8)",
+          "bulletPoints": [
+            "Trang Slide #6 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #6/8 (1651×922px • 96 KB • 3/6 chunk) trên Google Sheet CSDL (k6-tiet-17)",
+          "imageUrl": "/api/file-storage/slides/file/slide-6-k6-tiet-17-1794028550108-0i1gw.webp",
+          "sizeKb": 96,
+          "chunkCount": 3
+        },
+        {
+          "slideNumber": 7,
+          "totalSlides": 8,
+          "title": "Slide 7/8: Tiết 17 — Tiết 17: Bài 9: An toàn thông tin trên Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 17 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 7/8)",
+          "bulletPoints": [
+            "Trang Slide #7 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #7/8 (1651×922px • 121 KB • 4/6 chunk) trên Google Sheet CSDL (k6-tiet-17)",
+          "imageUrl": "/api/file-storage/slides/file/slide-7-k6-tiet-17-1794028550108-9vidl.webp",
+          "sizeKb": 121,
+          "chunkCount": 4
+        },
+        {
+          "slideNumber": 8,
+          "totalSlides": 8,
+          "title": "Slide 8/8: Tiết 17 — Tiết 17: Bài 9: An toàn thông tin trên Internet (mục 3)",
+          "subtitle": "Khối 6 • Tiết 17 • Nguồn: Lợi_ích_Internet_và_AI.pdf (Trang 8/8)",
+          "bulletPoints": [
+            "Trang Slide #8 kết xuất WebP từ tệp PDF Lợi_ích_Internet_và_AI.pdf"
+          ],
+          "highlightNote": "🖼️ Ảnh Slide #8/8 (1651×922px • 86 KB • 3/6 chunk) trên Google Sheet CSDL (k6-tiet-17)",
+          "imageUrl": "/api/file-storage/slides/file/slide-8-k6-tiet-17-1794028550108-70me5.webp",
+          "sizeKb": 86,
+          "chunkCount": 3
+        }
+      ]
+    }
+  },
+  "taughtPeriodsByClass": {},
+  "classesCount": 0,
+  "studentsCount": 0,
+  "classes": [],
+  "students": []
+}

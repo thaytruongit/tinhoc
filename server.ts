@@ -3458,6 +3458,100 @@ Nguyên tắc sư phạm:
     });
   });
 
+  // 10. GitHub Public Data Snapshot Sync Endpoint (Prioritize publishing to GitHub & GitHub Pages)
+  const GITHUB_SNAPSHOT_PATHS = [
+    path.join(__dirname, 'public', 'data', 'github-public-db-snapshot.json'),
+    path.join(__dirname, 'docs', 'data', 'github-public-db-snapshot.json'),
+    path.join(__dirname, 'gh-pages-dist', 'data', 'github-public-db-snapshot.json'),
+  ];
+
+  app.get('/api/github/sync-snapshot', (_req, res) => {
+    try {
+      const primaryPath = GITHUB_SNAPSHOT_PATHS[0];
+      if (fs.existsSync(primaryPath)) {
+        const raw = fs.readFileSync(primaryPath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        return res.json({ ok: true, snapshot: parsed });
+      }
+      return res.json({
+        ok: true,
+        snapshot: {
+          schemaVersion: '2.0.0',
+          appTitle: 'CloudPlay Interactive Learning — Tin Học GDPT 2018 (Khối 6-9)',
+          syncedAtIso: new Date().toISOString(),
+          prioritizeGitHubPublic: true,
+          googleSheetsCsdlConfig: liveClassroomSession.googleSheetsCsdlConfig || null,
+          sheetLessonsIndex: liveClassroomSession.googleSheetsSlideIndex || [],
+          activeLiveLesson: {
+            classId: String(liveClassroomSession.activeClassId || '6A10'),
+            grade: Number(liveClassroomSession.activeGrade) || 6,
+            period: Number(liveClassroomSession.activePeriod) || 1,
+            lessonKey: `k${Number(liveClassroomSession.activeGrade) || 6}-tiet-${Number(liveClassroomSession.activePeriod) || 1}`,
+            currentSlideNumber: 1,
+            totalSlides: 15,
+            slideViewMode: 'LARGE_16_9',
+            isBroadcasting: Boolean(liveClassroomSession.isBroadcasting ?? true),
+          },
+          slideDecksSummaryByLesson: {},
+          taughtPeriodsByClass: liveClassroomSession.taughtPeriodsByClass || {},
+          classesCount: inMemoryClasses.length,
+          studentsCount: inMemoryStudents.length,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Failed to read GitHub snapshot' });
+    }
+  });
+
+  app.post('/api/github/sync-snapshot', async (req, res) => {
+    try {
+      const incoming = req.body?.snapshot || req.body;
+      if (!incoming || typeof incoming !== 'object') {
+        return res.status(400).json({ ok: false, error: 'Missing snapshot payload' });
+      }
+
+      // Sync Google Sheets CSDL config & index into liveClassroomSession so Teacher & Student Live Rooms stay in sync
+      if (incoming.googleSheetsCsdlConfig?.spreadsheetId) {
+        liveClassroomSession.googleSheetsCsdlConfig = incoming.googleSheetsCsdlConfig;
+      }
+      if (Array.isArray(incoming.sheetLessonsIndex)) {
+        liveClassroomSession.googleSheetsSlideIndex = incoming.sheetLessonsIndex;
+      }
+      liveClassroomSession.updatedAt = new Date().toISOString();
+
+      const jsonFormatted = JSON.stringify(incoming, null, 2);
+      const writtenPaths: string[] = [];
+      for (const targetFile of GITHUB_SNAPSHOT_PATHS) {
+        try {
+          const dir = path.dirname(targetFile);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+          fs.writeFileSync(targetFile, jsonFormatted, 'utf-8');
+          writtenPaths.push(path.relative(__dirname, targetFile));
+        } catch (writeErr) {
+          console.warn('[GitHub Snapshot Sync] Warning writing to', targetFile, writeErr);
+        }
+      }
+
+      if (isPgConfigured()) {
+        saveLiveSessionStateToDb(
+          'global_live_session',
+          JSON.stringify(liveClassroomSession)
+        ).catch(() => {});
+      }
+
+      res.json({
+        ok: true,
+        writtenPaths,
+        syncedAtIso: incoming.syncedAtIso || new Date().toISOString(),
+        message: 'Đã ghi gói dữ liệu chuẩn GitHub Public vào public/data, docs/data và gh-pages-dist/data!',
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Failed to write GitHub snapshot' });
+    }
+  });
+
   const distPath = path.join(__dirname, 'dist');
   const hasDist = fs.existsSync(distPath) && fs.existsSync(path.join(distPath, 'index.html'));
 

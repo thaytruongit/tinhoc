@@ -46,11 +46,25 @@ import {
   getSlideDeckFromIndexedDb,
   deleteSlideDeckFromIndexedDb,
 } from '../utils/indexedDbSlideStorage';
-import { getGoogleSheetsAccessToken } from '../services/firebaseClient';
+import {
+  getGoogleSheetsAccessToken,
+  signInWithGoogleForSheets,
+} from '../services/firebaseClient';
 import {
   getSavedGoogleSheetsConfig,
+  saveGoogleSheetsConfig,
+  subscribeGoogleSheetsConfigChanges,
+  extractSpreadsheetIdFromInput,
+  buildGoogleSheetUrlFromId,
+  initializeCsdlGoogleSheetStructure,
+  createCsdlSpreadsheetInDrive,
   loadLessonSlideDeckFromGoogleSheet,
-} from '../utils/googleSheetsSlideDb';
+  pushPdfSlideDeckToCsdlSheet,
+  batchConvertAndUploadPdfPagesToGoogleSheet,
+  type GoogleSheetsConnectionConfig,
+  type PdfBatchAutoUploadProgress,
+} from '../utils/googleSheetsConnector';
+import { syncAllDataForGitHubPublic } from '../utils/githubPublicSync';
 
 interface TeacherLivePresenterRoomProps {
   grade: 6 | 7 | 8 | 9;
@@ -914,11 +928,51 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
   // On-demand PDF mapping & loading ONLY when a period (grade, period) is selected/opened.
   // - Preserves 100% original PDF visual pages (via pdfjs-dist canvas rendering).
   // - Displays a Blank White Slide ("trang slide trắng") when no PDF file is found.
+  // Live Room CSDL Google Sheets & GitHub Public Synchronization State
+  const [liveSheetConfig, setLiveSheetConfig] = useState<GoogleSheetsConnectionConfig | null>(
+    () => getSavedGoogleSheetsConfig() || liveSession?.googleSheetsCsdlConfig || null
+  );
+  const [liveSheetUrlInput, setLiveSheetUrlInput] = useState<string>(() => {
+    const saved = getSavedGoogleSheetsConfig() || liveSession?.googleSheetsCsdlConfig;
+    return saved?.spreadsheetUrl || saved?.spreadsheetId || '';
+  });
+  const [isSyncingLiveSheet, setIsSyncingLiveSheet] = useState<boolean>(false);
+  const [livePdfBatchProgress, setLivePdfBatchProgress] =
+    useState<PdfBatchAutoUploadProgress | null>(null);
+  const livePdfInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Lắng nghe thay đổi kết nối Google Sheet "CSDL" từ Trang chủ Giáo viên hoặc tab khác theo thời gian thực
+  useEffect(() => {
+    const unsubscribe = subscribeGoogleSheetsConfigChanges((nextCfg) => {
+      setLiveSheetConfig(nextCfg);
+      if (nextCfg?.spreadsheetUrl || nextCfg?.spreadsheetId) {
+        setLiveSheetUrlInput(nextCfg.spreadsheetUrl || nextCfg.spreadsheetId);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (
+      liveSession?.googleSheetsCsdlConfig?.spreadsheetId &&
+      liveSession.googleSheetsCsdlConfig.spreadsheetId !== liveSheetConfig?.spreadsheetId
+    ) {
+      setLiveSheetConfig(liveSession.googleSheetsCsdlConfig);
+      setLiveSheetUrlInput(
+        liveSession.googleSheetsCsdlConfig.spreadsheetUrl ||
+          liveSession.googleSheetsCsdlConfig.spreadsheetId
+      );
+      saveGoogleSheetsConfig(liveSession.googleSheetsCsdlConfig);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveSession?.googleSheetsCsdlConfig?.spreadsheetId]);
+
   const handleAutoMapPeriodSlideFromFixedFolder = async (
     targetGrade: 6 | 7 | 8 | 9 = grade,
     targetPeriod: number = period,
     rootFolderOverride?: string,
-    silentIfAlreadyLoaded = false
+    silentIfAlreadyLoaded = false,
+    forcePullFromSheet = false
   ) => {
     const activeRoot = normalizeFixedSlideRootFolder(
       rootFolderOverride || fixedSlideRootFolder || DEFAULT_FIXED_SLIDE_ROOT_FOLDER
@@ -928,11 +982,46 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
 
     setIsAutoMappingFolder(true);
     try {
-      // 0. If a Google Sheet CSDL is connected, query Google Sheet for this lesson (k{grade}-tiet-{period})!
-      //    If slide images exist in Google Sheet -> load & sync smoothly to Teacher & Student.
-      //    If no slide data exists in Google Sheet for this lesson -> display Blank White Slide ("trang slide trắng").
-      const savedSheetCfg = getSavedGoogleSheetsConfig();
+      // Kiểm tra xem tiết học đã có bộ Slide PDF thực sự trong phiên Live hoặc trong IndexedDB chưa
+      const inMemoryDeck = liveSession?.lectureSlidesByLesson?.[targetLessonKey];
+      const cachedIdbDeck = await getSlideDeckFromIndexedDb(targetLessonKey);
+      const existingRealDeck = isRealRenderedPdfSlideDeck(inMemoryDeck)
+        ? inMemoryDeck
+        : isRealRenderedPdfSlideDeck(cachedIdbDeck)
+        ? cachedIdbDeck
+        : null;
+
+      // 0. Đồng bộ trực tiếp với Google Sheet "CSDL" nếu đã kết nối (từ localStorage hoặc liveSession)
+      const savedSheetCfg =
+        getSavedGoogleSheetsConfig() || liveSession?.googleSheetsCsdlConfig || liveSheetConfig;
+
       if (savedSheetCfg?.spreadsheetId) {
+        // Nếu đã có Slide thực trong bộ nhớ và không ép tải lại từ Sheet -> ưu tiên giữ mượt tức thì, đồng thời tự đẩy lên Sheet nếu Sheet chưa có
+        if (existingRealDeck && !forcePullFromSheet) {
+          await saveSlideDeckToIndexedDb(targetLessonKey, existingRealDeck).catch(() => {});
+          onUpdateLiveSession((prev) => ({
+            ...prev,
+            googleSheetsCsdlConfig: savedSheetCfg,
+            lectureSlidesByLesson: {
+              ...(prev.lectureSlidesByLesson || {}),
+              [targetLessonKey]: existingRealDeck,
+            },
+            activeSlideIndexByLesson: {
+              ...(prev.activeSlideIndexByLesson || {}),
+              [targetLessonKey]: prev.activeSlideIndexByLesson?.[targetLessonKey] ?? 0,
+            },
+            unlockedSlideDeckByLesson: {
+              ...(prev.unlockedSlideDeckByLesson || {}),
+              [targetLessonKey]: true,
+            },
+            updatedAt: new Date().toISOString(),
+          }));
+          setQuickSlideStatusText(
+            `✅ Đã đồng bộ ${existingRealDeck.slides?.length || 1} trang Slide bài giảng (${targetLessonKey}) với CSDL Sheet "${savedSheetCfg.spreadsheetTitle || 'CSDL'}"!`
+          );
+          return;
+        }
+
         const sheetRes = await loadLessonSlideDeckFromGoogleSheet({
           spreadsheetId: savedSheetCfg.spreadsheetId,
           accessToken: getGoogleSheetsAccessToken(),
@@ -952,10 +1041,74 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
               activeSlideIndex: 0,
             }),
           }).catch(() => {});
+
+          onUpdateLiveSession((prev) => ({
+            ...prev,
+            googleSheetsCsdlConfig: savedSheetCfg,
+            googleSheetsSlideIndex: sheetRes.allLessonsIndex || prev.googleSheetsSlideIndex,
+            lectureSlidesByLesson: {
+              ...(prev.lectureSlidesByLesson || {}),
+              [targetLessonKey]: sheetRes.deck,
+            },
+            activeSlideIndexByLesson: {
+              ...(prev.activeSlideIndexByLesson || {}),
+              [targetLessonKey]: 0,
+            },
+            unlockedSlideDeckByLesson: {
+              ...(prev.unlockedSlideDeckByLesson || {}),
+              [targetLessonKey]: true,
+            },
+            updatedAt: new Date().toISOString(),
+          }));
+
+          setQuickSlideStatusText(sheetRes.statusMessage);
+          if (!silentIfAlreadyLoaded) {
+            onShowToast(sheetRes.statusMessage);
+          }
+          return;
         }
 
+        // Nếu trên Sheet chưa có tiết này NHƯNG trong Phòng Live / IndexedDB đang có bộ Slide PDF thực -> Giữ nguyên bộ Slide thực và tự động đẩy lên Sheet CSDL!
+        if (existingRealDeck) {
+          onUpdateLiveSession((prev) => ({
+            ...prev,
+            googleSheetsCsdlConfig: savedSheetCfg,
+            lectureSlidesByLesson: {
+              ...(prev.lectureSlidesByLesson || {}),
+              [targetLessonKey]: existingRealDeck,
+            },
+            unlockedSlideDeckByLesson: {
+              ...(prev.unlockedSlideDeckByLesson || {}),
+              [targetLessonKey]: true,
+            },
+            updatedAt: new Date().toISOString(),
+          }));
+
+          const token = getGoogleSheetsAccessToken();
+          if (token && Array.isArray(existingRealDeck.slides) && existingRealDeck.slides.length > 0) {
+            pushPdfSlideDeckToCsdlSheet({
+              spreadsheetId: savedSheetCfg.spreadsheetId,
+              accessToken: token,
+              grade: targetGrade,
+              period: targetPeriod,
+              lessonTitle: periodSpec.lessonTitle,
+              fileName:
+                existingRealDeck.fileName || `BaiGiang_Tin${targetGrade}_Tiet${targetPeriod}.pdf`,
+              slides: existingRealDeck.slides,
+            }).catch(() => {});
+          }
+
+          setQuickSlideStatusText(
+            `✅ Đang trình chiếu ${existingRealDeck.slides?.length || 1} trang Slide bài giảng (${existingRealDeck.fileName}) và tự động đồng bộ lên Google Sheet "CSDL"!`
+          );
+          return;
+        }
+
+        // Nếu cả Sheet lẫn bộ nhớ đều chưa có -> hiển thị Slide trắng
         onUpdateLiveSession((prev) => ({
           ...prev,
+          googleSheetsCsdlConfig: savedSheetCfg,
+          googleSheetsSlideIndex: sheetRes.allLessonsIndex || prev.googleSheetsSlideIndex,
           lectureSlidesByLesson: {
             ...(prev.lectureSlidesByLesson || {}),
             [targetLessonKey]: sheetRes.deck,
@@ -992,39 +1145,39 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
         }
       }
 
-      // 2. Check IndexedDB Slide Image Cache for genuine rendered PDF pages (reject any legacy synthetic SVG decks)
-      const cachedIdbDeck = await getSlideDeckFromIndexedDb(targetLessonKey);
-      if (cachedIdbDeck) {
-        if (isRealRenderedPdfSlideDeck(cachedIdbDeck)) {
-          const normalizedCachedDeck = {
-            ...cachedIdbDeck,
-            fileType: 'pdf' as const,
-            hasRealPdfPages: true,
-            isBlankSlideDeck: false,
-            mappedFolderPath: mapping.gradeFolderPath,
-            mappedFilePath: mapping.primaryFilePath,
-          };
-          onUpdateLiveSession((prev) => ({
-            ...prev,
-            lectureSlidesByLesson: {
-              ...(prev.lectureSlidesByLesson || {}),
-              [targetLessonKey]: normalizedCachedDeck,
-            },
-            activeSlideIndexByLesson: {
-              ...(prev.activeSlideIndexByLesson || {}),
-              [targetLessonKey]: prev.activeSlideIndexByLesson?.[targetLessonKey] ?? 0,
-            },
-            unlockedSlideDeckByLesson: {
-              ...(prev.unlockedSlideDeckByLesson || {}),
-              [targetLessonKey]: true,
-            },
-            updatedAt: new Date().toISOString(),
-          }));
-          return;
-        } else {
-          // Purge legacy synthetic text deck from IndexedDB
-          await deleteSlideDeckFromIndexedDb(targetLessonKey).catch(() => {});
-        }
+      // 2. Nếu đã có bộ Slide thực trong liveSession hoặc IndexedDB -> giữ nguyên để trình chiếu mượt mà
+      if (existingRealDeck) {
+        const normalizedCachedDeck = {
+          ...existingRealDeck,
+          fileType: 'pdf' as const,
+          hasRealPdfPages: true,
+          isBlankSlideDeck: false,
+          mappedFolderPath: mapping.gradeFolderPath,
+          mappedFilePath: mapping.primaryFilePath,
+        };
+        await saveSlideDeckToIndexedDb(targetLessonKey, normalizedCachedDeck).catch(() => {});
+        onUpdateLiveSession((prev) => ({
+          ...prev,
+          lectureSlidesByLesson: {
+            ...(prev.lectureSlidesByLesson || {}),
+            [targetLessonKey]: normalizedCachedDeck,
+          },
+          activeSlideIndexByLesson: {
+            ...(prev.activeSlideIndexByLesson || {}),
+            [targetLessonKey]: prev.activeSlideIndexByLesson?.[targetLessonKey] ?? 0,
+          },
+          unlockedSlideDeckByLesson: {
+            ...(prev.unlockedSlideDeckByLesson || {}),
+            [targetLessonKey]: true,
+          },
+          updatedAt: new Date().toISOString(),
+        }));
+        setQuickSlideStatusText(
+          `✅ Đang trình chiếu ${normalizedCachedDeck.slides?.length || 1} trang Ảnh Slide (${normalizedCachedDeck.fileName}) trong Phòng Live!`
+        );
+        return;
+      } else if (cachedIdbDeck) {
+        await deleteSlideDeckFromIndexedDb(targetLessonKey).catch(() => {});
       }
 
       // 3. Ask server to resolve physical .PDF file from the fixed folder path ( Tin {grade} / Tiet {period}.pdf )
@@ -1153,11 +1306,288 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     }
   };
 
-  // Auto-load mapped slide deck whenever TeacherLivePresenterRoom opens for (grade, period)
+  // Auto-load mapped slide deck whenever TeacherLivePresenterRoom opens for (grade, period) or when Sheet CSDL changes
   useEffect(() => {
-    handleAutoMapPeriodSlideFromFixedFolder(grade, period, fixedSlideRootFolder, true);
+    handleAutoMapPeriodSlideFromFixedFolder(grade, period, fixedSlideRootFolder, true, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [grade, period, lessonKey]);
+  }, [grade, period, lessonKey, liveSheetConfig?.spreadsheetId]);
+
+  // Kết nối nhanh Google Sheet "CSDL" ngay trong Phòng Live
+  const handleConnectSheetInLiveRoom = async () => {
+    const cleanId = extractSpreadsheetIdFromInput(liveSheetUrlInput);
+    if (!cleanId) {
+      onShowToast('⚠️ Vui lòng dán đường dẫn Google Sheet "CSDL" hoặc Spreadsheet ID hợp lệ!');
+      return;
+    }
+    setIsSyncingLiveSheet(true);
+    try {
+      let sheetTitle = liveSheetConfig?.spreadsheetTitle || 'CSDL';
+      const token = getGoogleSheetsAccessToken();
+      if (token) {
+        const initRes = await initializeCsdlGoogleSheetStructure(cleanId, token);
+        if (initRes.ok) {
+          sheetTitle = initRes.spreadsheetTitle || 'CSDL';
+        }
+      }
+      const nextCfg: GoogleSheetsConnectionConfig = {
+        spreadsheetId: cleanId,
+        spreadsheetUrl: buildGoogleSheetUrlFromId(cleanId),
+        spreadsheetTitle: sheetTitle,
+        connectedAtIso: new Date().toISOString(),
+        lastSyncedAtIso: new Date().toISOString(),
+      };
+      setLiveSheetConfig(nextCfg);
+      saveGoogleSheetsConfig(nextCfg);
+      onUpdateLiveSession((prev) => ({
+        ...prev,
+        googleSheetsCsdlConfig: nextCfg,
+        updatedAt: new Date().toISOString(),
+      }));
+      await handleAutoMapPeriodSlideFromFixedFolder(
+        grade,
+        period,
+        fixedSlideRootFolder,
+        false,
+        true
+      );
+      await syncAllDataForGitHubPublic({
+        googleSheetsConfig: nextCfg,
+        liveSession,
+        students,
+      });
+    } finally {
+      setIsSyncingLiveSheet(false);
+    }
+  };
+
+  // Đẩy bộ Slide đang trình chiếu trong Phòng Live lên thẳng Google Sheet "CSDL"
+  const handlePushCurrentLiveDeckToSheet = async () => {
+    const currentDeck = liveSession?.lectureSlidesByLesson?.[lessonKey];
+    if (!isRealRenderedPdfSlideDeck(currentDeck) || !Array.isArray(currentDeck?.slides)) {
+      onShowToast('⚠️ Tiết học đang hiển thị Slide trắng — Hãy chọn tệp PDF để tải lên Sheet CSDL!');
+      return;
+    }
+
+    let token = getGoogleSheetsAccessToken();
+    if (!token) {
+      const signInRes = await signInWithGoogleForSheets();
+      token = signInRes.accessToken;
+      if (!token) {
+        onShowToast('⚠️ Vui lòng đăng nhập Google để đẩy Slide Phòng Live lên Google Sheet "CSDL"!');
+        return;
+      }
+    }
+
+    setIsSyncingLiveSheet(true);
+    try {
+      let cleanId = extractSpreadsheetIdFromInput(
+        liveSheetConfig?.spreadsheetId || liveSheetUrlInput
+      );
+      if (!cleanId) {
+        const created = await createCsdlSpreadsheetInDrive(token, 'CSDL');
+        if (!created.ok) {
+          onShowToast(`⚠️ ${created.errorMessage}`);
+          return;
+        }
+        cleanId = created.spreadsheetId;
+        const nextCfg: GoogleSheetsConnectionConfig = {
+          spreadsheetId: created.spreadsheetId,
+          spreadsheetUrl: created.spreadsheetUrl,
+          spreadsheetTitle: created.spreadsheetTitle,
+          connectedAtIso: new Date().toISOString(),
+          lastSyncedAtIso: new Date().toISOString(),
+        };
+        setLiveSheetConfig(nextCfg);
+        setLiveSheetUrlInput(created.spreadsheetUrl);
+        saveGoogleSheetsConfig(nextCfg);
+      }
+
+      const pushRes = await pushPdfSlideDeckToCsdlSheet({
+        spreadsheetId: cleanId,
+        accessToken: token,
+        grade,
+        period,
+        lessonTitle: periodSpec.lessonTitle,
+        fileName: currentDeck.fileName || `BaiGiang_Tin${grade}_Tiet${period}.pdf`,
+        slides: currentDeck.slides,
+        onProgress: (msg) => setQuickSlideStatusText(msg),
+      });
+
+      if (!pushRes.ok) {
+        onShowToast(`⚠️ ${pushRes.errorMessage}`);
+        return;
+      }
+
+      const nextCfg: GoogleSheetsConnectionConfig = {
+        spreadsheetId: cleanId,
+        spreadsheetUrl: buildGoogleSheetUrlFromId(cleanId),
+        spreadsheetTitle: liveSheetConfig?.spreadsheetTitle || 'CSDL',
+        connectedAtIso: liveSheetConfig?.connectedAtIso || new Date().toISOString(),
+        lastSyncedAtIso: new Date().toISOString(),
+      };
+      setLiveSheetConfig(nextCfg);
+      saveGoogleSheetsConfig(nextCfg);
+
+      onUpdateLiveSession((prev) => ({
+        ...prev,
+        googleSheetsCsdlConfig: nextCfg,
+        googleSheetsSlideIndex: pushRes.allLessonsIndex || prev.googleSheetsSlideIndex,
+        updatedAt: new Date().toISOString(),
+      }));
+
+      await syncAllDataForGitHubPublic({
+        googleSheetsConfig: nextCfg,
+        sheetLessonsIndex: pushRes.allLessonsIndex,
+        liveSession,
+        students,
+      });
+
+      const doneMsg = `🎉 Đã đồng bộ ${currentDeck.slides.length} trang Slide đang chiếu tại Phòng Live (${lessonKey}) lên Google Sheet "CSDL" & chuẩn hóa dữ liệu GitHub!`;
+      setQuickSlideStatusText(doneMsg);
+      onShowToast(doneMsg);
+    } finally {
+      setIsSyncingLiveSheet(false);
+    }
+  };
+
+  // Chọn tệp PDF ngay trong Phòng Live -> Batch Process qua pdfjs-dist Worker -> Đẩy lên Sheet CSDL & Phát Live tức thì
+  const handleUploadPdfInLiveRoomAndSyncSheet = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setIsSyncingLiveSheet(true);
+    try {
+      const cleanId = extractSpreadsheetIdFromInput(
+        liveSheetConfig?.spreadsheetId || liveSheetUrlInput
+      );
+      const token = getGoogleSheetsAccessToken();
+
+      const batchRes = await batchConvertAndUploadPdfPagesToGoogleSheet({
+        file,
+        grade,
+        period,
+        lessonTitle: periodSpec.lessonTitle,
+        spreadsheetId: cleanId,
+        accessToken: token,
+        targetWidth: 1440,
+        webpQuality: 0.82,
+        onProgress: (prog) => {
+          setLivePdfBatchProgress(prog);
+          setQuickSlideStatusText(prog.statusText);
+        },
+      });
+
+      if (!batchRes.ok || batchRes.slides.length === 0) {
+        onShowToast(`⚠️ ${batchRes.errorMessage || 'Lỗi chuyển đổi PDF trong Phòng Live'}`);
+        return;
+      }
+
+      let updatedCfg = liveSheetConfig;
+      if (batchRes.spreadsheetId) {
+        updatedCfg = {
+          spreadsheetId: batchRes.spreadsheetId,
+          spreadsheetUrl:
+            batchRes.spreadsheetUrl || buildGoogleSheetUrlFromId(batchRes.spreadsheetId),
+          spreadsheetTitle:
+            batchRes.spreadsheetTitle || liveSheetConfig?.spreadsheetTitle || 'CSDL',
+          connectedAtIso: liveSheetConfig?.connectedAtIso || new Date().toISOString(),
+          lastSyncedAtIso: new Date().toISOString(),
+        };
+        setLiveSheetConfig(updatedCfg);
+        setLiveSheetUrlInput(updatedCfg.spreadsheetUrl);
+        saveGoogleSheetsConfig(updatedCfg);
+      }
+
+      const totalKb = batchRes.slides.reduce((acc, s) => acc + s.sizeKb, 0);
+      const liveDeck = {
+        lessonKey,
+        grade,
+        period,
+        fileName: batchRes.uploadedToSheet
+          ? `${file.name} (Google Sheets CSDL • ${batchRes.slides.length} Slide)`
+          : `${file.name} (${batchRes.slides.length} Slide Base64)`,
+        fileType: 'pdf' as const,
+        fileSize: `${totalKb} KB`,
+        fileSizeLabel: `Đồng bộ Phòng Live & Sheet CSDL (${lessonKey})`,
+        uploadedAt: new Date().toLocaleTimeString('vi-VN', {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        storageBucket: 'slide-storage-1gb' as const,
+        totalCompressedKb: totalKb,
+        isUserUploaded: true,
+        hasRealPdfPages: true,
+        isBlankSlideDeck: false,
+        isLazyLoaded: true,
+        sourceSpreadsheetId: batchRes.spreadsheetId || cleanId,
+        slides: batchRes.slides,
+      };
+
+      await saveSlideDeckToIndexedDb(lessonKey, liveDeck).catch(() => {});
+      fetch('/api/db/slides', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lessonKey,
+          deck: liveDeck,
+          activeSlideIndex: 0,
+        }),
+      }).catch(() => {});
+
+      const syncVer = Date.now();
+      onUpdateLiveSession((prev) => ({
+        ...prev,
+        isBroadcasting: true,
+        activeGrade: grade,
+        activePeriod: period,
+        activeClassId: classId,
+        activeLiveView: 'slide',
+        googleSheetsCsdlConfig: updatedCfg || prev.googleSheetsCsdlConfig,
+        googleSheetsSlideIndex: batchRes.allLessonsIndex || prev.googleSheetsSlideIndex,
+        lectureSlidesByLesson: {
+          ...(prev.lectureSlidesByLesson || {}),
+          [lessonKey]: liveDeck,
+        },
+        activeSlideIndexByLesson: {
+          ...(prev.activeSlideIndexByLesson || {}),
+          [lessonKey]: 0,
+        },
+        slideSyncVersionByLesson: {
+          ...(prev.slideSyncVersionByLesson || {}),
+          [lessonKey]: syncVer,
+        },
+        unlockedSlideDeckByLesson: {
+          ...(prev.unlockedSlideDeckByLesson || {}),
+          [lessonKey]: true,
+        },
+        updatedAt: new Date().toISOString(),
+      }));
+
+      await syncAllDataForGitHubPublic({
+        googleSheetsConfig: updatedCfg,
+        sheetLessonsIndex: batchRes.allLessonsIndex,
+        liveSession: {
+          ...(liveSession || {}),
+          grade,
+          period,
+          lectureSlidesByLesson: {
+            ...(liveSession?.lectureSlidesByLesson || {}),
+            [lessonKey]: liveDeck,
+          },
+        },
+        students,
+      });
+
+      const msg = `🎉 Đã nạp "${file.name}" (${batchRes.slides.length} trang), đồng bộ với CSDL Sheet & phát Live tức thì tới toàn bộ máy Học sinh!`;
+      setQuickSlideStatusText(msg);
+      onShowToast(msg);
+    } finally {
+      setIsSyncingLiveSheet(false);
+    }
+  };
 
 
   // Stop any currently active Live activity or Slide presentation and stay cleanly at the current spot without jumping tabs
@@ -2870,6 +3300,173 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     </span>
                   )}
                 </div>
+              </div>
+
+              {/* THANH ĐỒNG BỘ TRỰC TIẾP: KẾT NỐI CSDL GOOGLE SHEETS ("CSDL") ↔ SLIDE BÀI GIẢNG PHÒNG LIVE & PUBLIC GITHUB */}
+              <div
+                data-testid="live-room-csdl-sheet-sync-bar"
+                className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50/95 via-white to-teal-50/90 border-2 border-emerald-400/90 flex flex-col gap-3 shadow-2xs"
+              >
+                <input
+                  ref={livePdfInputRef}
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  onChange={handleUploadPdfInLiveRoomAndSyncSheet}
+                  className="hidden"
+                />
+
+                <div className="flex flex-wrap items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2.5 py-1 rounded-xl bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[16px]">sync</span>
+                      <span>ĐỒNG BỘ CSDL SHEET &quot;{liveSheetConfig?.spreadsheetTitle || 'CSDL'}&quot; ↔ SLIDE PHÒNG LIVE</span>
+                    </span>
+                    <span className="px-2.5 py-1 rounded-xl bg-emerald-100 border border-emerald-300 text-emerald-950 text-[11px] font-black">
+                      Khóa bài giảng: {lessonKey.toUpperCase()}
+                    </span>
+                    {liveSheetConfig?.spreadsheetId ? (
+                      <a
+                        href={liveSheetConfig.spreadsheetUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1 rounded-xl bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 text-[11px] font-black"
+                      >
+                        ↗ Đã gắn Sheet ID: {liveSheetConfig.spreadsheetId.slice(0, 10)}...
+                      </a>
+                    ) : (
+                      <span className="px-2.5 py-1 rounded-xl bg-amber-100 border border-amber-300 text-amber-900 text-[11px] font-bold">
+                        Chưa gắn ID Google Sheet (Có thể dán link Sheet hoặc chọn PDF ngay bên dưới)
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      data-testid="live-room-upload-pdf-sheet-btn"
+                      onClick={() => livePdfInputRef.current?.click()}
+                      disabled={isSyncingLiveSheet}
+                      className="px-3.5 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-xs font-black cursor-pointer flex items-center gap-1.5 shadow-2xs transition-all"
+                      title="Chọn tệp PDF ngay tại Phòng Live để tự động chuyển từng trang sang Base64 WebP, đẩy vào Google Sheet CSDL và phát Live ngay cho Học sinh"
+                    >
+                      <span>📤 Chọn PDF → Đẩy Vào Sheet &amp; Phát Live</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="live-room-pull-sheet-btn"
+                      onClick={() =>
+                        handleAutoMapPeriodSlideFromFixedFolder(
+                          grade,
+                          period,
+                          fixedSlideRootFolder,
+                          false,
+                          true
+                        )
+                      }
+                      disabled={isSyncingLiveSheet || isAutoMappingFolder}
+                      className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-black cursor-pointer flex items-center gap-1.5 shadow-2xs transition-all"
+                      title="Tải lại bộ Slide của tiết học này từ Google Sheet CSDL vào Phòng Live"
+                    >
+                      <span>🔄 Đồng Bộ Từ Sheet CSDL</span>
+                    </button>
+
+                    {isRealRenderedPdfSlideDeck(existingSlideDeck) && (
+                      <button
+                        type="button"
+                        data-testid="live-room-push-sheet-btn"
+                        onClick={handlePushCurrentLiveDeckToSheet}
+                        disabled={isSyncingLiveSheet}
+                        className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-black cursor-pointer flex items-center gap-1.5 shadow-2xs transition-all"
+                        title="Đẩy bộ Slide đang chiếu tại Phòng Live lên Google Sheet CSDL"
+                      >
+                        <span>☁️ Đẩy Slide Đang Chiếu Lên Sheet</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      data-testid="live-room-github-sync-btn"
+                      onClick={async () => {
+                        setIsSyncingLiveSheet(true);
+                        try {
+                          const res = await syncAllDataForGitHubPublic({
+                            googleSheetsConfig: liveSheetConfig || getSavedGoogleSheetsConfig(),
+                            sheetLessonsIndex: liveSession?.googleSheetsSlideIndex,
+                            liveSession,
+                            students,
+                          });
+                          setQuickSlideStatusText(res.statusMessage);
+                          onShowToast(res.statusMessage);
+                        } finally {
+                          setIsSyncingLiveSheet(false);
+                        }
+                      }}
+                      disabled={isSyncingLiveSheet}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-xs font-black cursor-pointer flex items-center gap-1.5 shadow-2xs transition-all"
+                      title="Đồng bộ toàn bộ dữ liệu Phòng Live & CSDL Sheet để ưu tiên public lên GitHub"
+                    >
+                      <span>🚀 Đồng Bộ Public GitHub</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick Sheet URL/ID Connection Row inside Live Room */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <input
+                    type="text"
+                    data-testid="live-room-sheet-url-input"
+                    value={liveSheetUrlInput}
+                    onChange={(e) => setLiveSheetUrlInput(e.target.value)}
+                    placeholder="Dán link Google Sheet 'CSDL' hoặc Spreadsheet ID để đồng bộ trực tiếp với Slide Phòng Live..."
+                    className="flex-1 px-3.5 py-2 rounded-xl bg-white border border-emerald-300 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <button
+                    type="button"
+                    data-testid="live-room-connect-sheet-btn"
+                    onClick={handleConnectSheetInLiveRoom}
+                    disabled={isSyncingLiveSheet}
+                    className="px-3.5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-xs font-black cursor-pointer shrink-0 transition-all"
+                  >
+                    🔗 Kết nối Sheet &amp; Đồng bộ Slide
+                  </button>
+                  {quickSlideStatusText && (
+                    <span
+                      data-testid="live-room-sheet-status-text"
+                      className="text-xs font-bold text-emerald-950 bg-emerald-100/80 border border-emerald-300 px-3 py-1.5 rounded-xl"
+                    >
+                      {quickSlideStatusText}
+                    </span>
+                  )}
+                </div>
+
+                {/* Live Room Batch Upload Progress Bar */}
+                {livePdfBatchProgress && (
+                  <div
+                    data-testid="live-room-pdf-progress-bar"
+                    className="p-3 rounded-xl bg-orange-50 border border-orange-300 text-orange-950 flex flex-col gap-1.5 text-xs font-bold"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span>
+                        ⚡ {livePdfBatchProgress.fileName}: Trang{' '}
+                        {livePdfBatchProgress.currentPage}/{livePdfBatchProgress.totalPages} (
+                        {livePdfBatchProgress.percent}%)
+                      </span>
+                      {livePdfBatchProgress.phase === 'completed' && (
+                        <button
+                          type="button"
+                          onClick={() => setLivePdfBatchProgress(null)}
+                          className="px-2 py-0.5 rounded bg-white text-slate-700 text-[10px] font-black cursor-pointer"
+                        >
+                          Đóng
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-700">
+                      {livePdfBatchProgress.statusText}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* TEACHER SLIDE CONTROLLER TOOLBAR: 1) AUTO-ADVANCE TIMER, 2) EXPLANATION VIDEO, 3) WIRELESS CLICKER KEYS */}

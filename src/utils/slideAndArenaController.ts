@@ -798,6 +798,28 @@ export function normalizeLiveSession<T extends Record<string, any>>(
         ? raw.verifiedLessonsMap
         : {}),
     },
+    googleSheetsCsdlConfig:
+      raw.googleSheetsCsdlConfig &&
+      typeof raw.googleSheetsCsdlConfig === 'object' &&
+      typeof raw.googleSheetsCsdlConfig.spreadsheetId === 'string' &&
+      raw.googleSheetsCsdlConfig.spreadsheetId.trim().length > 0
+        ? {
+            spreadsheetId: String(raw.googleSheetsCsdlConfig.spreadsheetId).trim(),
+            spreadsheetUrl: String(raw.googleSheetsCsdlConfig.spreadsheetUrl || ''),
+            spreadsheetTitle: String(raw.googleSheetsCsdlConfig.spreadsheetTitle || 'CSDL'),
+            connectedAtIso: String(
+              raw.googleSheetsCsdlConfig.connectedAtIso || new Date().toISOString()
+            ),
+            lastSyncedAtIso: String(
+              raw.googleSheetsCsdlConfig.lastSyncedAtIso || new Date().toISOString()
+            ),
+          }
+        : defaultSession.googleSheetsCsdlConfig || null,
+    googleSheetsSlideIndex: Array.isArray(raw.googleSheetsSlideIndex)
+      ? raw.googleSheetsSlideIndex
+      : Array.isArray(defaultSession.googleSheetsSlideIndex)
+      ? defaultSession.googleSheetsSlideIndex
+      : [],
     updatedAt:
       typeof raw.updatedAt === 'string' && raw.updatedAt.length > 0
         ? raw.updatedAt

@@ -632,17 +632,87 @@ export function getSavedGoogleSheetsConfig(): GoogleSheetsConnectionConfig | nul
   }
 }
 
+export const GOOGLE_SHEETS_CONFIG_CHANGED_EVENT = 'cloudplay:google-sheets-config-changed';
+
 export function saveGoogleSheetsConfig(config: GoogleSheetsConnectionConfig | null): void {
   if (typeof window === 'undefined') return;
   try {
     if (!config || !config.spreadsheetId) {
       window.localStorage.removeItem(GOOGLE_SHEETS_SLIDE_DB_STORAGE_KEY);
-      return;
+    } else {
+      window.localStorage.setItem(GOOGLE_SHEETS_SLIDE_DB_STORAGE_KEY, JSON.stringify(config));
     }
-    window.localStorage.setItem(GOOGLE_SHEETS_SLIDE_DB_STORAGE_KEY, JSON.stringify(config));
+    try {
+      window.dispatchEvent(
+        new CustomEvent(GOOGLE_SHEETS_CONFIG_CHANGED_EVENT, { detail: config })
+      );
+    } catch {
+      // ignore CustomEvent errors
+    }
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('cloudplay_realtime_sync');
+        bc.postMessage({
+          type: 'GOOGLE_SHEETS_CONFIG_CHANGED',
+          config,
+          timestamp: Date.now(),
+        });
+        bc.close();
+      }
+    } catch {
+      // ignore BroadcastChannel errors
+    }
   } catch {
     // ignore storage quota warning
   }
+}
+
+/**
+ * Đăng ký lắng nghe thay đổi cấu hình kết nối Google Sheet "CSDL" theo thời gian thực
+ * giữa Trang chủ Giáo viên (`GoogleSheetsSlideDbPanel`), Phòng Live (`TeacherLivePresenterRoom`) và Học sinh (`StudentLiveRoom`).
+ */
+export function subscribeGoogleSheetsConfigChanges(
+  onChange: (config: GoogleSheetsConnectionConfig | null) => void
+): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  const handleCustomEvent = (e: Event) => {
+    const customEvt = e as CustomEvent<GoogleSheetsConnectionConfig | null>;
+    onChange(customEvt.detail ?? getSavedGoogleSheetsConfig());
+  };
+
+  const handleStorageEvent = (e: StorageEvent) => {
+    if (e.key === GOOGLE_SHEETS_SLIDE_DB_STORAGE_KEY) {
+      onChange(getSavedGoogleSheetsConfig());
+    }
+  };
+
+  window.addEventListener(GOOGLE_SHEETS_CONFIG_CHANGED_EVENT, handleCustomEvent);
+  window.addEventListener('storage', handleStorageEvent);
+
+  let bc: BroadcastChannel | null = null;
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      bc = new BroadcastChannel('cloudplay_realtime_sync');
+      bc.onmessage = (event) => {
+        if (event.data?.type === 'GOOGLE_SHEETS_CONFIG_CHANGED') {
+          onChange(event.data.config ?? getSavedGoogleSheetsConfig());
+        }
+      };
+    }
+  } catch {
+    // ignore
+  }
+
+  return () => {
+    window.removeEventListener(GOOGLE_SHEETS_CONFIG_CHANGED_EVENT, handleCustomEvent);
+    window.removeEventListener('storage', handleStorageEvent);
+    try {
+      bc?.close();
+    } catch {
+      // ignore
+    }
+  };
 }
 
 /**
@@ -1522,7 +1592,12 @@ export async function loadPdfJsEngine(): Promise<any> {
   }
 
   // Danh sách nguồn `pdfjs-dist` v3.11.174 chuẩn trình duyệt + Worker Script (0% phụ thuộc Node `getBuiltinModule`)
+  // Ưu tiên đường dẫn tương đối `./pdfjs/...` để tương thích 100% khi public trên GitHub Pages subpath
   const safeWorkerSources = [
+    {
+      libUrl: './pdfjs/pdf.min.js',
+      workerUrl: './pdfjs/pdf.worker.min.js',
+    },
     {
       libUrl: '/pdfjs/pdf.min.js',
       workerUrl: '/pdfjs/pdf.worker.min.js',

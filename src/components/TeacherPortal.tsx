@@ -2306,6 +2306,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                           `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`
                         ]
                       }
+                      liveSession={liveSession}
                       periodList={gradePeriods.map((p) => ({
                         period: p.period,
                         lessonTitle: p.lessonTitle,
@@ -2324,6 +2325,15 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       }}
                       onSheetIndexChange={(records) => {
                         setSheetIndexRecords(records);
+                      }}
+                      onSyncSheetConfigToLiveSession={(nextCfg, nextRecords) => {
+                        if (onUpdateLiveSession) {
+                          onUpdateLiveSession((prev) => ({
+                            ...prev,
+                            googleSheetsCsdlConfig: nextCfg || prev.googleSheetsCsdlConfig,
+                            googleSheetsSlideIndex: nextRecords || prev.googleSheetsSlideIndex,
+                          }));
+                        }
                       }}
                       onApplyLoadedDeck={async (
                         nextDeck,
@@ -2638,6 +2648,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`
                   ]
                 }
+                liveSession={liveSession}
                 periodList={gradePeriods.map((p) => ({
                   period: p.period,
                   lessonTitle: p.lessonTitle,
@@ -2656,6 +2667,15 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                 }}
                 onSheetIndexChange={(records) => {
                   setSheetIndexRecords(records);
+                }}
+                onSyncSheetConfigToLiveSession={(nextCfg, nextRecords) => {
+                  if (onUpdateLiveSession) {
+                    onUpdateLiveSession((prev) => ({
+                      ...prev,
+                      googleSheetsCsdlConfig: nextCfg || prev.googleSheetsCsdlConfig,
+                      googleSheetsSlideIndex: nextRecords || prev.googleSheetsSlideIndex,
+                    }));
+                  }
                 }}
                 onApplyLoadedDeck={async (
                   nextDeck,
@@ -2769,6 +2789,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`
                     ]
                   }
+                  liveSession={liveSession}
                   periodList={gradePeriods.map((p) => ({
                     period: p.period,
                     lessonTitle: p.lessonTitle,
@@ -2788,6 +2809,15 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   }}
                   onSheetIndexChange={(records) => {
                     setSheetIndexRecords(records);
+                  }}
+                  onSyncSheetConfigToLiveSession={(nextCfg, nextRecords) => {
+                    if (onUpdateLiveSession) {
+                      onUpdateLiveSession((prev) => ({
+                        ...prev,
+                        googleSheetsCsdlConfig: nextCfg || prev.googleSheetsCsdlConfig,
+                        googleSheetsSlideIndex: nextRecords || prev.googleSheetsSlideIndex,
+                      }));
+                    }
                   }}
                   onApplyLoadedDeck={async (
                     nextDeck,

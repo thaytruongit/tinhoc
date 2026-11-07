@@ -51,6 +51,14 @@ import {
   formatTeacherStageCompletionToast,
   type ActivityStageCode,
 } from './utils/realtimeProgressAnalytics';
+import {
+  loadGitHubPublicSnapshotFromStaticUrl,
+  mergeGitHubPublicSnapshotIntoLiveSession,
+} from './utils/githubPublicSync';
+import {
+  getSavedGoogleSheetsConfig,
+  saveGoogleSheetsConfig,
+} from './utils/googleSheetsConnector';
 
 type AppMode = 'login' | 'student' | 'teacher';
 
@@ -301,7 +309,7 @@ export default function App() {
           }));
         }
 
-        const [clsRes, stRes, liveRes, slidesRes] = await Promise.all([
+        const [clsRes, stRes, liveRes, slidesRes, githubSnap] = await Promise.all([
           fetch('/api/db/classes')
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
@@ -314,6 +322,7 @@ export default function App() {
           fetch('/api/db/slides')
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
+          loadGitHubPublicSnapshotFromStaticUrl().catch(() => null),
         ]);
         if (clsRes?.ok && Array.isArray(clsRes.classes) && clsRes.classes.length > 0) {
           setClasses((prev) => normalizeClassroomList(clsRes.classes, prev));
@@ -322,6 +331,8 @@ export default function App() {
           if (Array.isArray(sbClasses) && sbClasses.length > 0) {
             setClasses((prev) => normalizeClassroomList(sbClasses, prev));
           }
+        } else if (githubSnap && Array.isArray(githubSnap.classes) && githubSnap.classes.length > 0) {
+          setClasses((prev) => normalizeClassroomList(githubSnap.classes!, prev));
         }
 
         if (stRes?.ok && Array.isArray(stRes.students) && stRes.students.length > 0) {
@@ -331,6 +342,8 @@ export default function App() {
           if (Array.isArray(sbStudents) && sbStudents.length > 0) {
             setStudents((prev) => normalizeStudentRosterList(sbStudents, prev));
           }
+        } else if (githubSnap && Array.isArray(githubSnap.students) && githubSnap.students.length > 0) {
+          setStudents((prev) => normalizeStudentRosterList(githubSnap.students!, prev));
         }
 
         if (liveRes && typeof liveRes === 'object') {
@@ -356,10 +369,16 @@ export default function App() {
               mergedDecks,
               activeLessonKey
             ) as Record<string, LectureSlideDeck>;
-            return {
+            const withDecks = {
               ...normalized,
+              googleSheetsCsdlConfig:
+                normalized.googleSheetsCsdlConfig ||
+                getSavedGoogleSheetsConfig() ||
+                githubSnap?.googleSheetsCsdlConfig ||
+                undefined,
               lectureSlidesByLesson: governedDecks,
             };
+            return mergeGitHubPublicSnapshotIntoLiveSession(withDecks, githubSnap);
           });
         } else if (supabase && isSupabaseRealtimeConfigured) {
           const { data: sbLiveRow } = await supabase
@@ -372,8 +391,15 @@ export default function App() {
               typeof sbLiveRow.state_json === 'string'
                 ? JSON.parse(sbLiveRow.state_json)
                 : sbLiveRow.state_json;
-            setLiveSession((prev) => normalizeLiveSession(parsed, prev));
+            setLiveSession((prev) =>
+              mergeGitHubPublicSnapshotIntoLiveSession(
+                normalizeLiveSession(parsed, prev),
+                githubSnap
+              )
+            );
           }
+        } else if (githubSnap) {
+          setLiveSession((prev) => mergeGitHubPublicSnapshotIntoLiveSession(prev, githubSnap));
         }
       } catch (err) {
         console.warn('Backend db fetch notice:', err);
@@ -415,6 +441,16 @@ export default function App() {
         setSelectedClass(data.classId);
       } else if (data.type === 'LIVE_SESSION_UPDATED' && data.session) {
         setLiveSession((prev) => normalizeLiveSession(data.session, prev));
+      } else if (data.type === 'GOOGLE_SHEETS_CONFIG_CHANGED') {
+        if (data.config?.spreadsheetId) {
+          saveGoogleSheetsConfig(data.config);
+        }
+        setLiveSession((prev) => ({
+          ...prev,
+          googleSheetsCsdlConfig: data.config || undefined,
+        }));
+      } else if (data.type === 'GITHUB_PUBLIC_SNAPSHOT_SYNCED' && data.snapshot) {
+        setLiveSession((prev) => mergeGitHubPublicSnapshotIntoLiveSession(prev, data.snapshot));
       } else if (data.type === 'STUDENT_STAGE_COMPLETED' && data.completionEvent) {
         const evt = data.completionEvent;
         setLiveSession((prev) => {

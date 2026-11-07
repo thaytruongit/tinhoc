@@ -15,6 +15,10 @@ import {
   sanitizeBrowserProcessForPdfJs,
 } from './googleSheetsConnector';
 import { BLANK_WHITE_SLIDE_DATA_URL } from './slideDeckManager';
+import {
+  buildGitHubPublicDataSnapshot,
+  mergeGitHubPublicSnapshotIntoLiveSession,
+} from './githubPublicSync';
 
 test('CSDL_GOOGLE_SHEETS_SCHEMA defines exact 2-table structure Slides_Index (A->I) and Slides_Pages (A->N)', () => {
   assert.equal(CSDL_GOOGLE_SHEETS_SCHEMA.DEFAULT_SPREADSHEET_TITLE, 'CSDL');
@@ -183,5 +187,95 @@ test('sanitizeBrowserProcessForPdfJs ensures process.getBuiltinModule is always 
   sanitizeBrowserProcessForPdfJs();
   assert.equal(typeof (globalThis as any).process?.getBuiltinModule, 'function');
 });
+
+test('buildGitHubPublicDataSnapshot and mergeGitHubPublicSnapshotIntoLiveSession synchronize CSDL Sheet config and Live Room slide decks without exposing tokens', () => {
+  const sheetCfg = {
+    spreadsheetId: '1o0QYDVE_testSheetCsdl999',
+    spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/1o0QYDVE_testSheetCsdl999/edit',
+    spreadsheetTitle: 'CSDL',
+    connectedAtIso: '2025-05-15T08:00:00.000Z',
+  };
+
+  const sampleSlideDeck = {
+    lessonKey: 'k6-tiet-1',
+    grade: 6 as const,
+    period: 1,
+    fileName: 'Lợi_ích_Internet_và_AI.pdf',
+    fileType: 'pdf' as const,
+    hasRealPdfPages: true,
+    isBlankSlideDeck: false,
+    totalCompressedKb: 120,
+    slides: [
+      {
+        slideNumber: 1,
+        totalSlides: 2,
+        title: 'Slide 1: Lợi ích Internet và AI',
+        bulletPoints: ['Tìm kiếm thông tin nhanh'],
+        imageUrl: 'data:image/webp;base64,SAMPLE_PAGE_1_BASE64',
+        sizeKb: 60,
+        chunkCount: 1,
+      },
+      {
+        slideNumber: 2,
+        totalSlides: 2,
+        title: 'Slide 2: Ứng dụng AI trong học tập',
+        bulletPoints: ['Cá nhân hóa lộ trình học'],
+        imageUrl: 'data:image/webp;base64,SAMPLE_PAGE_2_BASE64',
+        sizeKb: 60,
+        chunkCount: 1,
+      },
+    ],
+  };
+
+  const snapshot = buildGitHubPublicDataSnapshot({
+    googleSheetsConfig: sheetCfg,
+    liveSession: {
+      classId: '6A10',
+      grade: 6,
+      period: 1,
+      currentSlideNumber: 1,
+      totalSlides: 2,
+      lectureSlidesByLesson: {
+        'k6-tiet-1': sampleSlideDeck,
+      },
+    },
+    includeSlideImages: true,
+  });
+
+  assert.equal(snapshot.schemaVersion, '2.0.0');
+  assert.equal(snapshot.prioritizeGitHubPublic, true);
+  assert.equal(snapshot.googleSheetsCsdlConfig?.spreadsheetId, '1o0QYDVE_testSheetCsdl999');
+  assert.equal(snapshot.sheetLessonsIndex.length, 1);
+  assert.equal(snapshot.sheetLessonsIndex[0].lessonKey, 'k6-tiet-1');
+  assert.equal(snapshot.sheetLessonsIndex[0].slideCount, 2);
+  assert.ok(snapshot.slideDecksSummaryByLesson['k6-tiet-1']);
+  assert.equal(snapshot.slideDecksSummaryByLesson['k6-tiet-1'].slidesPreview?.length, 2);
+
+  // Merge into a fresh liveSession that doesn't have the slide deck yet
+  const mergedLiveSession = mergeGitHubPublicSnapshotIntoLiveSession(
+    {
+      classId: '6A10',
+      grade: 6,
+      period: 1,
+      lectureSlidesByLesson: {},
+    },
+    snapshot
+  );
+
+  assert.equal(
+    mergedLiveSession.googleSheetsCsdlConfig?.spreadsheetId,
+    '1o0QYDVE_testSheetCsdl999'
+  );
+  assert.equal(mergedLiveSession.googleSheetsSlideIndex?.length, 1);
+  assert.equal(
+    mergedLiveSession.lectureSlidesByLesson['k6-tiet-1']?.slides?.length,
+    2
+  );
+  assert.equal(
+    mergedLiveSession.lectureSlidesByLesson['k6-tiet-1']?.hasRealPdfPages,
+    true
+  );
+});
+
 
 

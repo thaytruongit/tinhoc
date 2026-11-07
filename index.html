@@ -26,6 +26,11 @@
         if (typeof window !== 'undefined') {
           window.global = window.global || window;
           window.process = window.process || { env: {} };
+          if (typeof window.process.getBuiltinModule !== 'function') {
+            window.process.getBuiltinModule = function () {
+              return undefined;
+            };
+          }
           if (typeof URL !== 'undefined' && typeof URL.parse !== 'function') {
             URL.parse = function (url, base) {
               try {
