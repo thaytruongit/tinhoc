@@ -128,8 +128,8 @@ export function sanitizeWorksheetRecord(rawWs: any, lessonKey: string) {
 
   const rawSaQuestions = Array.isArray(rawStage2.shortAnswerQuestions)
     ? rawStage2.shortAnswerQuestions.filter(
-        (q: any) => q && String(q.question || '').trim().length > 0
-      )
+      (q: any) => q && String(q.question || '').trim().length > 0
+    )
     : [];
 
   const rawParagraph = String(
@@ -148,15 +148,15 @@ export function sanitizeWorksheetRecord(rawWs: any, lessonKey: string) {
 
   const normalizedDragDropQuestions =
     Array.isArray(rawStage2.dragDropQuestions) &&
-    rawStage2.dragDropQuestions.length > 0 &&
-    !hasLegacyBlankDragDrop
+      rawStage2.dragDropQuestions.length > 0 &&
+      !hasLegacyBlankDragDrop
       ? rawStage2.dragDropQuestions
       : fallbackWs.stage2.dragDropQuestions;
 
   const normalizedDragItems =
     Array.isArray(rawStage2.dragItems) &&
-    rawStage2.dragItems.length > 0 &&
-    !hasLegacyBlankDragDrop
+      rawStage2.dragItems.length > 0 &&
+      !hasLegacyBlankDragDrop
       ? rawStage2.dragItems
       : fallbackWs.stage2.dragItems;
 

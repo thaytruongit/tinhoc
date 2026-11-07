@@ -186,195 +186,121 @@ export function getWaitingRoomChalkboardQuizzes(
     ''
   );
 
-  if (grade === 6) {
-    return [
-      {
-        id: `wr-k6-p${period}-q1`,
-        order: 1,
-        question: `Khởi động "${cleanTitle}": Phát biểu nào đúng về Thông tin và Dữ liệu?`,
-        options: [
-          {
-            letter: 'A',
-            text: 'Thông tin đem lại hiểu biết cho con người từ dữ liệu.',
-            isCorrect: true,
-          },
-          {
-            letter: 'B',
-            text: 'Thông tin chỉ là các thiết bị phần cứng máy tính.',
-            isCorrect: false,
-          },
-          {
-            letter: 'C',
-            text: 'Dữ liệu không thể lưu trữ trên vật mang tin.',
-            isCorrect: false,
-          },
-        ],
-        explanation: 'Thông tin là những gì đem lại hiểu biết cho con người về thế giới xung quanh.',
-      },
-      {
-        id: `wr-k6-p${period}-q2`,
-        order: 2,
-        question: 'Đơn vị nào sau đây là đơn vị cơ bản đo dung lượng thông tin trong máy tính?',
-        options: [
-          {
-            letter: 'A',
-            text: 'Mét vuông (m²) và Kilôgam (kg).',
-            isCorrect: false,
-          },
-          {
-            letter: 'B',
-            text: 'Byte (B), Kilobyte (KB), Megabyte (MB), Gigabyte (GB).',
-            isCorrect: true,
-          },
-          {
-            letter: 'C',
-            text: 'Giây (s) và Phút (min).',
-            isCorrect: false,
-          },
-        ],
-        explanation: 'Byte (B) cùng các bội số KB, MB, GB, TB là đơn vị đo dung lượng dữ liệu số.',
-      },
-      {
-        id: `wr-k6-p${period}-q3`,
-        order: 3,
-        question: 'Khi sử dụng Internet để học tập, hành động nào sau đây là AN TOÀN nhất?',
-        options: [
-          {
-            letter: 'A',
-            text: 'Chia sẻ mật khẩu tài khoản học tập cho người lạ.',
-            isCorrect: false,
-          },
-          {
-            letter: 'B',
-            text: 'Nhấn vào mọi liên kết trúng thưởng không rõ nguồn gốc.',
-            isCorrect: false,
-          },
-          {
-            letter: 'C',
-            text: 'Bảo mật thông tin cá nhân và hỏi ý kiến thầy cô, cha mẹ.',
-            isCorrect: true,
-          },
-        ],
-        explanation: 'Luôn giữ bí mật mật khẩu và thông tin cá nhân trên môi trường mạng.',
-      },
-      {
-        id: `wr-k6-p${period}-q4`,
-        order: 4,
-        question: 'Sơ đồ tư duy (Mindmap) giúp ích gì cho em trong học tập môn Tin học?',
-        options: [
-          {
-            letter: 'A',
-            text: 'Tóm tắt, hệ thống hóa kiến thức trực quan và dễ nhớ.',
-            isCorrect: true,
-          },
-          {
-            letter: 'B',
-            text: 'Làm tăng dung lượng ổ cứng của máy tính.',
-            isCorrect: false,
-          },
-          {
-            letter: 'C',
-            text: 'Thay thế hoàn toàn hệ điều hành Windows.',
-            isCorrect: false,
-          },
-        ],
-        explanation: 'Sơ đồ tư duy giúp kết nối từ khóa và hình ảnh giúp ghi nhớ sâu.',
-      },
-      {
-        id: `wr-k6-p${period}-q5`,
-        order: 5,
-        question: 'Trong thuật toán, cấu trúc rẽ nhánh dùng để biểu diễn điều gì?',
-        options: [
-          {
-            letter: 'A',
-            text: 'Tắt máy tính ngay lập tức khi hết giờ.',
-            isCorrect: false,
-          },
-          {
-            letter: 'B',
-            text: 'Thực hiện công việc tùy thuộc vào điều kiện đúng hay sai.',
-            isCorrect: true,
-          },
-          {
-            letter: 'C',
-            text: 'Xóa toàn bộ tệp văn bản trong thư mục.',
-            isCorrect: false,
-          },
-        ],
-        explanation: 'Cấu trúc rẽ nhánh kiểm tra điều kiện: Nếu Đúng làm việc A, Nếu Sai làm việc B.',
-      },
-    ];
-  }
-
   return [
     {
       id: `wr-k${grade}-p${period}-q1`,
       order: 1,
-      question: `Khởi động "${cleanTitle}": Nguyên tắc vàng khi thực hành tại Phòng máy Tin học là gì?`,
+      question: `Khởi động "${cleanTitle}": Mục tiêu quan trọng nhất mà em cần đạt được trong bài học này là gì?`,
       options: [
         {
           letter: 'A',
-          text: 'Ngồi đúng số máy, tập trung theo dõi bài giảng và lưu bài đúng thư mục.',
+          text: `Nắm vững kiến thức trọng tâm của "${cleanTitle}", rèn luyện kỹ năng số và ứng dụng giải quyết bài toán thực tế.`,
           isCorrect: true,
         },
         {
           letter: 'B',
-          text: 'Tự ý thay đổi dây cáp mạng và cài đặt phần mềm lạ.',
+          text: 'Chỉ đọc lướt qua lý thuyết mà không cần thực hành hay kiểm chứng kết quả.',
           isCorrect: false,
         },
         {
           letter: 'C',
-          text: 'Mở nhiều tab giải trí khi thầy cô đang giảng bài.',
+          text: 'Tùy ý thao tác phần mềm mà không tuân thủ hướng dẫn kỹ thuật.',
           isCorrect: false,
         },
       ],
-      explanation: 'Ngồi đúng vị trí máy và tập trung thực hành giúp tiết học hiệu quả 100%.',
+      explanation: `Mỗi bài học Tin học đều hướng tới việc hình thành phẩm chất, năng lực số và giải quyết vấn đề thực tiễn.`,
     },
     {
       id: `wr-k${grade}-p${period}-q2`,
       order: 2,
-      question: `Trong chương trình Tin học Khối ${grade}, kỹ năng số nào giúp em giải quyết vấn đề hiệu quả?`,
+      question: `Khi thực hành và làm bài tập về "${cleanTitle}", thao tác nào sau đây là chuẩn mực nhất?`,
       options: [
         {
           letter: 'A',
-          text: 'Sao chép nguyên văn nội dung trên mạng mà không kiểm chứng.',
+          text: 'Làm việc tùy tiện, không lưu tệp sản phẩm và không đặt tên có ý nghĩa.',
           isCorrect: false,
         },
         {
           letter: 'B',
-          text: 'Phân tích bài toán, chia nhỏ bước thực hiện và kiểm thử kết quả.',
+          text: 'Quan sát kỹ hướng dẫn, thực hiện tuần tự các bước và lưu bài vào đúng thư mục được chỉ định.',
           isCorrect: true,
         },
         {
           letter: 'C',
-          text: 'Bỏ qua bước lưu tệp khi làm bài thực hành.',
+          text: 'Tắt máy tính ngay khi chuông reo mà chưa lưu dữ liệu bài làm.',
           isCorrect: false,
         },
       ],
-      explanation: 'Tư duy máy tính gồm: phân rã bài toán, thiết kế từng bước và kiểm thử.',
+      explanation: 'Tuân thủ quy trình chuẩn mực giúp bảo vệ dữ liệu và rèn luyện tác phong làm việc khoa học trong môi trường số.',
     },
     {
       id: `wr-k${grade}-p${period}-q3`,
       order: 3,
-      question: 'Khi làm việc nhóm trong dự án Tin học, yếu tố nào quyết định thành công?',
+      question: `Trong môi trường học tập số và mạng Internet liên quan đến "${cleanTitle}", hành động nào thể hiện văn hóa số và an toàn thông tin?`,
       options: [
         {
           letter: 'A',
-          text: 'Chỉ một bạn làm hết, các bạn khác ngồi xem.',
+          text: 'Chia sẻ mật khẩu tài khoản học tập cá nhân cho người lạ trên mạng.',
           isCorrect: false,
         },
         {
           letter: 'B',
-          text: 'Mỗi người làm một chủ đề không liên quan nhau.',
+          text: 'Tải và cài đặt các phần mềm lạ không rõ nguồn gốc lên máy tính phòng học.',
           isCorrect: false,
         },
         {
           letter: 'C',
-          text: 'Phân công rõ ràng, trao đổi tích cực và hỗ trợ bạn cùng máy.',
+          text: 'Bảo mật thông tin cá nhân, tôn trọng bản quyền số và hỏi ý kiến thầy cô khi gặp tình huống nghi vấn.',
           isCorrect: true,
         },
       ],
-      explanation: 'Hợp tác đôi bạn cùng tiến giúp hoàn thành bài tập nhanh và chính xác hơn.',
+      explanation: 'Bảo mật thông tin và tôn trọng bản quyền là chuẩn mực cốt lõi của công dân số văn minh.',
+    },
+    {
+      id: `wr-k${grade}-p${period}-q4`,
+      order: 4,
+      question: `Phương pháp học tập nào giúp em ghi nhớ sâu và làm chủ kiến thức bài "${cleanTitle}"?`,
+      options: [
+        {
+          letter: 'A',
+          text: 'Tóm tắt từ khóa bằng sơ đồ tư duy, tích cực trao đổi cùng bạn và thực hành trực tiếp trên máy.',
+          isCorrect: true,
+        },
+        {
+          letter: 'B',
+          text: 'Chỉ học vẹt các định nghĩa mà không mở phần mềm thao tác.',
+          isCorrect: false,
+        },
+        {
+          letter: 'C',
+          text: 'Sao chép bài làm của bạn khác để nộp cho nhanh.',
+          isCorrect: false,
+        },
+      ],
+      explanation: 'Học thông qua trải nghiệm thực hành và tư duy trực quan giúp phát triển năng lực Tin học bền vững.',
+    },
+    {
+      id: `wr-k${grade}-p${period}-q5`,
+      order: 5,
+      question: `Khi ứng dụng Trợ lý Trí tuệ nhân tạo (AI) hỗ trợ học tập bài "${cleanTitle}", em nên làm gì?`,
+      options: [
+        {
+          letter: 'A',
+          text: 'Phụ thuộc 100% vào AI, sao chép nguyên văn câu trả lời mà không suy nghĩ hay kiểm chứng.',
+          isCorrect: false,
+        },
+        {
+          letter: 'B',
+          text: 'Đặt câu lệnh rõ ràng, sử dụng AI như một trợ lý gợi ý ý tưởng và luôn tự mình kiểm tra, đối chiếu SGK.',
+          isCorrect: true,
+        },
+        {
+          letter: 'C',
+          text: 'Cung cấp thông tin nhạy cảm của bản thân và gia đình lên các công cụ AI công cộng.',
+          isCorrect: false,
+        },
+      ],
+      explanation: 'Sử dụng AI có trách nhiệm: xem AI là công cụ hỗ trợ tư duy, luôn kiểm chứng thông tin và bảo mật dữ liệu.',
     },
   ];
 }

@@ -548,10 +548,10 @@ export function buildDefaultAnimatedHtmlSimulation(params: {
     lower.includes('mạng') || lower.includes('internet') || lower.includes('web')
       ? 'network'
       : lower.includes('thuật toán') || lower.includes('lập trình') || lower.includes('scratch') || lower.includes('rẽ nhánh') || lower.includes('lặp')
-      ? 'algorithm'
-      : lower.includes('an toàn') || lower.includes('bảo mật') || lower.includes('đạo đức') || lower.includes('phần mềm')
-      ? 'security'
-      : 'dataflow';
+        ? 'algorithm'
+        : lower.includes('an toàn') || lower.includes('bảo mật') || lower.includes('đạo đức') || lower.includes('phần mềm')
+          ? 'security'
+          : 'dataflow';
 
   return `<!DOCTYPE html>
 <html lang="vi">
@@ -1205,7 +1205,7 @@ export async function loadHybridSlideDeck3Tier(params: {
   if (localDeck && localDeck.slides && localDeck.slides.length > 0) {
     // Nếu có ở IndexedDB nhưng chưa có trên Server (hoặc bản ở IndexedDB mới hơn), tự động đồng bộ ngầm lên Server
     if (!serverDeck || (localDeck.version || 1) > (serverDeck.version || 0)) {
-      pushHybridDeckToServer(localDeck).catch(() => {});
+      pushHybridDeckToServer(localDeck).catch(() => { });
     }
     return {
       ...localDeck,

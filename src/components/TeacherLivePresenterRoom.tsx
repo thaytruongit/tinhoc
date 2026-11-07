@@ -3,7 +3,6 @@ import {
   type CurriculumPeriodSpec,
   type LiveClassroomSession,
   type StudentRosterItem,
-  type StudentFocusAlertItem,
 } from '../data/mockCurriculumData';
 import {
   playStageBroadcastSound,
@@ -141,64 +140,8 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     );
   };
 
-  // Focus & Anti-Distraction Monitor State
-  const [focusAlerts, setFocusAlerts] = useState<Record<string, StudentFocusAlertItem>>(() => {
-    return liveSession?.studentFocusAlerts || {};
-  });
-  const [showFocusMonitorModal, setShowFocusMonitorModal] = useState<boolean>(false);
-
   // Low-Bandwidth Mode state (Tiết kiệm băng thông phòng máy)
   const isLowBandwidthMode = Boolean(liveSession?.lowBandwidthMode);
-
-  // Listen to Student Focus Alerts from BroadcastChannel & Firestore
-  useEffect(() => {
-    if (typeof BroadcastChannel === 'undefined') return;
-    const bc = new BroadcastChannel('cloudplay_realtime_sync');
-    bc.onmessage = (event) => {
-      const data = event.data;
-      if (!data) return;
-      if (data.type === 'STUDENT_FOCUS_ALERT' && data.alert) {
-        const item: StudentFocusAlertItem = data.alert;
-        setFocusAlerts((prev) => {
-          const next = { ...prev, [item.studentId]: item };
-          onUpdateLiveSession((ls) => ({
-            ...ls,
-            studentFocusAlerts: next,
-            updatedAt: new Date().toISOString(),
-          }));
-          return next;
-        });
-      } else if (data.type === 'STUDENT_FOCUS_REGAINED' && data.studentId) {
-        setFocusAlerts((prev) => {
-          const existing = prev[data.studentId];
-          if (!existing) return prev;
-          const next = {
-            ...prev,
-            [data.studentId]: {
-              ...existing,
-              isCurrentlyBlurred: false,
-            },
-          };
-          onUpdateLiveSession((ls) => ({
-            ...ls,
-            studentFocusAlerts: next,
-            updatedAt: new Date().toISOString(),
-          }));
-          return next;
-        });
-      }
-    };
-    return () => bc.close();
-  }, [onUpdateLiveSession]);
-
-  useEffect(() => {
-    if (liveSession?.studentFocusAlerts) {
-      setFocusAlerts(liveSession.studentFocusAlerts);
-    }
-  }, [liveSession?.studentFocusAlerts]);
-
-  const blurredStudentsList = Object.values(focusAlerts).filter((a) => a.isCurrentlyBlurred);
-  const totalSwitchedCount = Object.values(focusAlerts).filter((a) => a.tabSwitchCount > 0).length;
 
   const handleToggleLowBandwidthMode = () => {
     const next = !isLowBandwidthMode;
@@ -1678,24 +1621,6 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
               <span>Push Nhắc HS</span>
             </button>
 
-            {/* Real-time Focus Monitor Chip */}
-            <button
-              type="button"
-              onClick={() => setShowFocusMonitorModal(true)}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs border ${blurredStudentsList.length > 0
-                ? 'bg-rose-50 text-rose-700 border-rose-300 animate-pulse'
-                : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                }`}
-              title="Xem giám sát tập trung học sinh thời gian thực (phát hiện rời tab/chơi game)"
-            >
-              <span>{blurredStudentsList.length > 0 ? '⚠️' : '👁️'}</span>
-              <span>
-                {blurredStudentsList.length > 0
-                  ? `${blurredStudentsList.length} HS rời tab!`
-                  : '100% HS tập trung'}
-              </span>
-            </button>
-
             {/* Low-Bandwidth Mode Toggle Button */}
             <button
               type="button"
@@ -2620,169 +2545,6 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
           )}
         </div>
       </main>
-
-      {/* 1. FOCUS & ANTI-DISTRACTION MONITOR MODAL */}
-      {showFocusMonitorModal && (
-        <div className="fixed inset-0 z-[120] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-7 shadow-2xl border border-slate-200 flex flex-col gap-5 max-h-[90vh] overflow-hidden">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-xl">
-                  👁️
-                </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-black text-slate-900">
-                    Bảng Giám Sát Tập Trung Học Sinh (Phòng Máy Lớp {classId})
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Phát hiện học sinh chuyển tab sang Youtube/Game hoặc thu nhỏ cửa sổ học
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowFocusMonitorModal(false)}
-                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-sm font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Quick Status Stats */}
-            <div className="grid grid-cols-3 gap-3">
-              <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-center">
-                <span className="text-[11px] font-bold text-rose-700 block uppercase tracking-wider">
-                  Đang rời tab học
-                </span>
-                <strong className="text-2xl font-black text-rose-600">
-                  {blurredStudentsList.length}
-                </strong>
-                <span className="text-[10px] text-rose-500 block">học sinh</span>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-center">
-                <span className="text-[11px] font-bold text-emerald-700 block uppercase tracking-wider">
-                  Đang tập trung
-                </span>
-                <strong className="text-2xl font-black text-emerald-600">
-                  {Math.max(0, effectiveClassStudents.length - blurredStudentsList.length)}
-                </strong>
-                <span className="text-[10px] text-emerald-500 block">học sinh</span>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-center">
-                <span className="text-[11px] font-bold text-amber-700 block uppercase tracking-wider">
-                  Tổng lượt chuyển tab
-                </span>
-                <strong className="text-2xl font-black text-amber-600">
-                  {Object.values(focusAlerts).reduce((sum, a) => sum + (a.tabSwitchCount || 0), 0)}
-                </strong>
-                <span className="text-[10px] text-amber-500 block">lượt vi phạm</span>
-              </div>
-            </div>
-
-            {/* Quick Action Button */}
-            <div className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-slate-50 border border-slate-200">
-              <span className="text-xs font-medium text-slate-600">
-                Nhắc nhở học sinh tập trung:
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleManualTriggerPushNotification();
-                    onShowToast('📢 Đã phát chuông và gửi cảnh báo tập trung tới toàn bộ máy học sinh!');
-                  }}
-                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold text-xs cursor-pointer shadow-xs flex items-center gap-1.5"
-                >
-                  <span>🔔</span>
-                  <span>Phát chuông nhắc nhở toàn lớp</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFocusAlerts({});
-                    onUpdateLiveSession((prev) => ({
-                      ...prev,
-                      studentFocusAlerts: {},
-                      updatedAt: new Date().toISOString(),
-                    }));
-                    onShowToast('🧹 Đã xóa sạch lịch sử cảnh báo tập trung.');
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-xs cursor-pointer"
-                >
-                  Xóa lịch sử
-                </button>
-              </div>
-            </div>
-
-            {/* Focus Table List */}
-            <div className="flex-1 overflow-y-auto max-h-[300px] rounded-2xl border border-slate-200">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-slate-600 font-bold tracking-wider uppercase border-b border-slate-200 sticky top-0">
-                  <tr>
-                    <th className="p-3">Máy #</th>
-                    <th className="p-3">Học sinh</th>
-                    <th className="p-3 text-center">Trạng thái</th>
-                    <th className="p-3 text-center">Số lần rời tab</th>
-                    <th className="p-3 text-right">Thời điểm gần nhất</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {effectiveClassStudents.map((st) => {
-                    const alert = focusAlerts[st.id];
-                    const isBlurred = alert?.isCurrentlyBlurred ?? false;
-                    const switchCount = alert?.tabSwitchCount ?? 0;
-                    return (
-                      <tr
-                        key={st.id}
-                        className={
-                          isBlurred
-                            ? 'bg-rose-50/70'
-                            : switchCount > 0
-                              ? 'bg-amber-50/40'
-                              : 'hover:bg-slate-50'
-                        }
-                      >
-                        <td className="p-3 font-bold text-slate-700">
-                          Máy #{st.stationNumber || '01'}
-                        </td>
-                        <td className="p-3 font-bold text-slate-900">{st.name}</td>
-                        <td className="p-3 text-center">
-                          <span
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black ${isBlurred
-                              ? 'bg-rose-600 text-white animate-pulse'
-                              : switchCount > 0
-                                ? 'bg-amber-100 text-amber-800'
-                                : 'bg-emerald-100 text-emerald-800'
-                              }`}
-                          >
-                            {isBlurred ? '⚠️ Đang rời tab' : switchCount > 0 ? 'Đã quay lại' : '✓ Tập trung'}
-                          </span>
-                        </td>
-                        <td className="p-3 text-center font-black">
-                          {switchCount > 0 ? (
-                            <span className="text-rose-600">{switchCount} lần</span>
-                          ) : (
-                            <span className="text-slate-400">0</span>
-                          )}
-                        </td>
-                        <td className="p-3 text-right text-slate-500 font-mono text-[11px]">
-                          {alert?.lastBlurAtIso
-                            ? new Date(alert.lastBlurAtIso).toLocaleTimeString('vi-VN', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              second: '2-digit',
-                            })
-                            : '—'}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );

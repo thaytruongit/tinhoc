@@ -7,7 +7,9 @@ import {
   type TaggedLessonSubmission,
   INITIAL_MINIGAME_QUESTIONS,
   getPeriodsForGrade,
+  getDefaultWorksheetForLesson,
 } from '../data/mockCurriculumData';
+import { UnifiedDiscoveryWorksheet } from './UnifiedDiscoveryWorksheet';
 import {
   WarmupEssayActivity,
   DragDropActivity,
@@ -141,82 +143,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
       return next;
     });
   };
-
-  // Real-Time Student Focus & Anti-Distraction Monitor
-  const [tabSwitchCount, setTabSwitchCount] = useState<number>(0);
-  const [isCurrentlyBlurred, setIsCurrentlyBlurred] = useState<boolean>(false);
-  const [showDistractionWarningModal, setShowDistractionWarningModal] = useState<boolean>(false);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-
-    const handleFocusLoss = () => {
-      setIsCurrentlyBlurred(true);
-      setShowDistractionWarningModal(true);
-      setTabSwitchCount((prev) => {
-        const next = prev + 1;
-        try {
-          if (typeof BroadcastChannel !== 'undefined') {
-            const bc = new BroadcastChannel('cloudplay_realtime_sync');
-            bc.postMessage({
-              type: 'STUDENT_FOCUS_ALERT',
-              alert: {
-                studentId: currentStudent.id,
-                studentName: currentStudent.name,
-                stationNumber: currentStudent.stationNumber || '01',
-                classId: currentStudent.classId,
-                tabSwitchCount: next,
-                lastBlurAtIso: new Date().toISOString(),
-                isCurrentlyBlurred: true,
-              },
-            });
-            bc.close();
-          }
-        } catch {}
-        return next;
-      });
-    };
-
-    const handleFocusGain = () => {
-      setIsCurrentlyBlurred(false);
-      try {
-        if (typeof BroadcastChannel !== 'undefined') {
-          const bc = new BroadcastChannel('cloudplay_realtime_sync');
-          bc.postMessage({
-            type: 'STUDENT_FOCUS_REGAINED',
-            studentId: currentStudent.id,
-          });
-          bc.close();
-        }
-      } catch {}
-    };
-
-    const onVisChange = () => {
-      if (document.hidden) {
-        handleFocusLoss();
-      } else {
-        handleFocusGain();
-      }
-    };
-
-    const onBlur = () => {
-      handleFocusLoss();
-    };
-
-    const onFocus = () => {
-      handleFocusGain();
-    };
-
-    document.addEventListener('visibilitychange', onVisChange);
-    window.addEventListener('blur', onBlur);
-    window.addEventListener('focus', onFocus);
-
-    return () => {
-      document.removeEventListener('visibilitychange', onVisChange);
-      window.removeEventListener('blur', onBlur);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, [currentStudent]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1199,149 +1125,26 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
           ) : (
             <div className="flex flex-col gap-6">
 
-              {/* STAGE 2: KHÁM PHÁ (WORKSHEET) */}
+              {/* STAGE 2: KHÁM PHÁ (1 TRANG PHIẾU HỌC TẬP MINIGAME CHUẨN GDPT 2018 - 4.0 ĐIỂM) */}
               {activeView === 2 && (
-                <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col gap-6">
-                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-2xl bg-sky-100 text-sky-800 flex items-center justify-center font-black">
-                        2
-                      </div>
-                      <div>
-                        <h2 className="text-lg font-bold text-slate-900">Hoạt động 2: Khám phá</h2>
-                        <p className="text-xs text-slate-500">
-                          Phiếu học tập tương tác chuẩn GDPT 2018 (4.0 điểm)
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Sub-tabs for Stage 2 */}
-                    <div className="flex items-center gap-1.5 p-1 rounded-full bg-slate-100 flex-wrap">
-                      {[
-                        { id: 'drag', label: '1. Kéo thả', isFin: isStage2DragFinalized },
-                        { id: 'fill', label: '2. Điền khuyết', isFin: isStage2FillFinalized },
-                        { id: 'match', label: '3. Nối cột', isFin: isStage2MatchFinalized },
-                        { id: 'short', label: '4. Trả lời ngắn', isFin: isStage2ShortFinalized },
-                      ].map((st) => (
-                        <button
-                          key={st.id}
-                          type="button"
-                          onClick={() => setStage2SubTab(st.id as any)}
-                          className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                            stage2SubTab === st.id
-                              ? 'bg-sky-600 text-white shadow-2xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          <span>{st.label}</span>
-                          {st.isFin && <span className="text-[11px]">🔒</span>}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {isStage2Finalized && (
-                    <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-900 font-semibold flex items-center justify-between gap-3 shadow-2xs">
-                      <div className="flex items-center gap-2.5">
-                        <span className="material-symbols-outlined text-rose-600 text-[22px]">lock</span>
-                        <span>
-                          <strong>HOẠT ĐỘNG 2 ĐÃ ĐƯỢC GIÁO VIÊN CHỐT KẾT QUẢ:</strong> Đã khóa toàn bộ Phiếu Khám phá và các bài tập. Em chỉ xem lại bài làm, không thể nộp thêm bài mới.
-                        </span>
-                      </div>
-                      <span className="px-3 py-1 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
-                        ĐÃ ĐÓNG NỘP BÀI
-                      </span>
-                    </div>
-                  )}
-
-                  {stage2SubTab === 'drag' && (
-                    <DragDropActivity
-                      title="Kéo thả thuật ngữ & phân loại"
-                      instruction="Kéo các từ ngữ vào đúng ô phân loại phù hợp."
-                      wordBank={['Thông tin', 'Dữ liệu', 'Vật mang tin', 'Xử lý thông tin']}
-                      slots={dragSlots}
-                      isReadOnly={isStage2DragFinalized}
-                      onSlotChange={(s, val) => {
-                        if (isStage2DragFinalized) return;
-                        setDragSlots((prev) => ({ ...prev, [s]: val }));
-                      }}
-                    />
-                  )}
-
-                  {stage2SubTab === 'fill' && (
-                    <FillBlankActivity
-                      title="Điền từ thích hợp vào chỗ trống"
-                      answers={fillBlankAnswers}
-                      isReadOnly={isStage2FillFinalized}
-                      onChange={(k, val) => {
-                        if (isStage2FillFinalized) return;
-                        setFillBlankAnswers((prev) => ({ ...prev, [k]: val }));
-                      }}
-                    />
-                  )}
-
-                  {stage2SubTab === 'match' && (
-                    <MatchingActivity
-                      title="Nối cột Khái niệm với Diễn giải tương ứng"
-                      connections={matchingConnections}
-                      isReadOnly={isStage2MatchFinalized}
-                      onConnect={(a: string, b: string) => {
-                        if (isStage2MatchFinalized) return;
-                        setMatchingConnections((prev) => ({ ...prev, [a]: b }));
-                      }}
-                      onDisconnect={(a: string) => {
-                        if (isStage2MatchFinalized) return;
-                        setMatchingConnections((prev) => {
-                          const copy = { ...prev };
-                          delete copy[a];
-                          return copy;
-                        });
-                      }}
-                    />
-                  )}
-
-                  {stage2SubTab === 'short' && (
-                    <ShortAnswerActivity
-                      answers={shortAnswers}
-                      isReadOnly={isStage2ShortFinalized}
-                      onChange={(k, val) => {
-                        if (isStage2ShortFinalized) return;
-                        setShortAnswers((prev) => ({ ...prev, [k]: val }));
-                      }}
-                    />
-                  )}
-
-                  <div className="pt-4 border-t border-slate-100 flex items-center justify-between flex-wrap gap-3">
-                    <span className="text-xs text-slate-500">
-                      💡 Em có thể chuyển qua lại giữa 4 phần hoặc quay lại Hoạt động 1 bất cứ lúc nào.
-                    </span>
-                    {isStage2Finalized ? (
-                      <button
-                        type="button"
-                        disabled
-                        className="px-6 py-2.5 rounded-full bg-slate-200 text-slate-500 text-xs font-bold cursor-not-allowed flex items-center gap-1.5 shadow-2xs"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">lock</span>
-                        <span>🔒 Giáo viên đã chốt HĐ 2 (Đã đóng nộp bài)</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          markStageCompleted(
-                            2,
-                            40,
-                            '🎵🎉 Đã nộp Phiếu học tập Hoạt động 2: Khám phá (+40 XP)!'
-                          )
-                        }
-                        className="px-6 py-2.5 rounded-full bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-700 hover:to-blue-700 text-white text-xs font-bold shadow-md cursor-pointer flex items-center gap-1.5"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">check_circle</span>
-                        <span>Hoàn thành &amp; Nộp Phiếu Khám Phá (+40 XP)</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
+                <UnifiedDiscoveryWorksheet
+                  lessonTitle={periodSpec.lessonTitle}
+                  grade={periodSpec.grade}
+                  period={periodSpec.period}
+                  worksheet={getDefaultWorksheetForLesson(periodSpec.grade, periodSpec.period)}
+                  isReadOnly={isStage2Finalized}
+                  isFinalized={isStage2Finalized}
+                  submitted={Boolean(completedStages[2])}
+                  onSubmit={(result) => {
+                    markStageCompleted(
+                      2,
+                      40,
+                      `🎵🎉 Đã nộp thành công Phiếu Khám Phá: ${result.totalScore.toFixed(2)}/4.0 điểm (+40 XP)!`
+                    );
+                  }}
+                  onShowToast={onShowToast}
+                  onAwardXp={onAwardXp}
+                />
               )}
 
               {/* STAGE 3: LUYỆN TẬP (ARENA 25S, ĐỒNG HỒ ĐẾM NGƯỢC ĐẤU TRƯỜNG & SYNCHRONIZED PRACTICAL ACTIVITY) */}
@@ -1745,40 +1548,6 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
                 );
               })}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ANTI-DISTRACTION WARNING MODAL: Pops up when student switches tabs or minimizes browser */}
-      {showDistractionWarningModal && (
-        <div className="fixed inset-0 z-[120] bg-slate-900/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl border-2 border-amber-400 text-center animate-in fade-in zoom-in-95 duration-200">
-            <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-4 text-3xl shadow-inner border border-amber-200">
-              ⚠️
-            </div>
-            <h3 className="text-lg sm:text-xl font-black text-slate-900 mb-2">
-              Nhắc nhở tập trung vào tiết học!
-            </h3>
-            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed mb-4">
-              Em <strong className="text-indigo-600 font-bold">{currentStudent.name}</strong> (Máy {currentStudent.stationNumber || '01'}) vừa rời khỏi cửa sổ tiết học Tin học{' '}
-              <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 font-bold text-xs inline-block">
-                {tabSwitchCount} lần
-              </span>
-              . Thầy/Cô giáo đang quản lý tiến trình phòng máy thời gian thực!
-            </p>
-            <div className="bg-amber-50 rounded-2xl p-3 text-xs text-amber-900 font-medium mb-5 border border-amber-200 text-left flex items-start gap-2">
-              <span className="text-base shrink-0">💡</span>
-              <span>
-                <strong>Mẹo:</strong> Nhấn phím <strong>F</strong> để bật Chế độ tập trung hoặc phóng to toàn màn hình để không bị phân tâm bởi các thông báo khác.
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowDistractionWarningModal(false)}
-              className="w-full py-3.5 px-4 rounded-2xl font-black text-white bg-gradient-to-r from-amber-500 via-orange-500 to-indigo-600 hover:from-amber-600 hover:to-indigo-700 shadow-lg shadow-indigo-500/25 transition-all cursor-pointer active:scale-98 text-sm"
-            >
-              Em đã quay lại — Tiếp tục học ngay ✨
-            </button>
           </div>
         </div>
       )}

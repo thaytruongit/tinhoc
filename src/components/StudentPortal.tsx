@@ -9,6 +9,7 @@ import {
   buildLessonBlueprintFromPeriod,
   getDefaultWorksheetForLesson,
   getPeriodsForGrade,
+  type CustomLessonWorksheet,
   type CurriculumPeriodSpec,
   type LiveClassroomSession,
   type PracticalProductSubmission,
@@ -34,6 +35,7 @@ import {
   WarmupEssayActivity,
   ApplicationThreeTasksActivity,
 } from './InteractiveActivities';
+import { UnifiedDiscoveryWorksheet } from './UnifiedDiscoveryWorksheet';
 import { evaluateAnswerBySuggestedPercentage } from '../utils/essayPercentageGrader';
 import { isActivityFinalized } from '../utils/slideAndArenaController';
 import { StudentNotificationBannerModal } from './StudentNotificationBannerModal';
@@ -480,58 +482,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         stage4Prompts: [],
       };
   const customWorksheet = liveSession?.customWorksheetsByLesson?.[currentLessonKey];
-  const activeWorksheet = isLessonVerified
-    ? (customWorksheet || getDefaultWorksheetForLesson(selectedGrade, currentPeriodSpec.period))
-    : {
-        lessonId: currentLessonKey,
-        stage1: {
-          title: '',
-          scenario: '',
-          question: '',
-          sampleAnswer: '',
-          points: 1.0,
-        },
-        stage2: {
-          bucketA: '',
-          bucketB: '',
-          dragItems: [],
-          dragDropTitle: '',
-          dragDropInstruction: '',
-          dragDropWordBank: [],
-          dragDropParagraph: '',
-          dragDropQuestions: [],
-          dragDropSentenceLines: [],
-          fillBlankTitle: '',
-          fillBlankInstruction: '',
-          fillBlankQuestions: [],
-          matchingTitle: '',
-          matchingInstruction: '',
-          matchingQuestions: [],
-          shortAnswerPrompt: '',
-          shortAnswerQuestions: [],
-        },
-        stage3QuizQuestions: [],
-        stage4: {
-          deepAnalysis: {
-            title: '',
-            prompt: '',
-            guideAnswer: '',
-            points: 1.0,
-          },
-          practicalTask: {
-            title: '',
-            prompt: '',
-            guideAnswer: '',
-            points: 1.0,
-          },
-          extendedTask: {
-            title: '',
-            prompt: '',
-            guideAnswer: '',
-            points: 1.0,
-          },
-        },
-      };
+  const activeWorksheet: CustomLessonWorksheet =
+    customWorksheet || getDefaultWorksheetForLesson(selectedGrade, currentPeriodSpec.period);
 
   const currentGradeSource =
     NOTEBOOK_GRADE_SOURCES.find((g) => g.grade === selectedGrade) ||
@@ -3003,269 +2955,49 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         </div>
                       )}
 
-                      {/* ================= HOẠT ĐỘNG 2: KHÁM PHÁ ================= */}
+                      {/* ================= HOẠT ĐỘNG 2: KHÁM PHÁ (1 TRANG PHIẾU HỌC TẬP MINIGAME - 4.0 ĐIỂM) ================= */}
                       {activeInlineStage === 2 && (
-                        <div className="bg-surface-container-lowest rounded-2xl p-space-lg shadow-md flex flex-col gap-space-lg">
-                          {(isStage2Finalized ||
-                            isStage2DragFinalized ||
-                            isStage2FillFinalized ||
-                            isStage2MatchFinalized ||
-                            isStage2ShortFinalized) && (
-                            <div className="p-3.5 rounded-xl bg-amber-500/15 border-2 border-amber-500/50 flex flex-wrap items-center justify-between gap-3 text-amber-900 dark:text-amber-200">
-                              <div className="flex items-center gap-2.5">
-                                <span className="material-symbols-outlined text-amber-600 font-black text-[22px]">
-                                  lock
-                                </span>
-                                <div>
-                                  <span className="font-black text-xs uppercase tracking-wide block">
-                                    {isStage2Finalized
-                                      ? 'HOẠT ĐỘNG 2 ĐÃ ĐƯỢC GIÁO VIÊN CHỐT KẾT QUẢ TOÀN BỘ'
-                                      : 'MỘT SỐ BÀI TẬP TRONG HOẠT ĐỘNG 2 ĐÃ ĐƯỢC GIÁO VIÊN CHỐT KẾT QUẢ'}
-                                  </span>
-                                  <span className="text-xs font-medium">
-                                    {isStage2Finalized
-                                      ? 'Giáo viên đã chốt toàn bộ Hoạt động 2. Hệ thống đã đóng nộp bài cho mọi bài tập.'
-                                      : 'Các bài tập có biểu tượng 🔒 Đã chốt không nhận thêm bài làm từ học sinh.'}
-                                  </span>
-                                </div>
-                              </div>
-                              <span className="px-3 py-1 rounded-full bg-amber-600 text-white font-bold text-xs shrink-0">
-                                🔒 ĐÃ ĐÓNG NỘP BÀI
-                              </span>
-                            </div>
-                          )}
-
-                          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-outline-variant/20">
-                            <div className="flex items-center gap-2">
-                              <span className="w-10 h-10 rounded-full bg-secondary-fixed text-secondary flex items-center justify-center font-headline-sm font-black">
-                                2
-                              </span>
-                              <div>
-                                <h3 className="font-headline-md text-headline-md text-on-surface">
-                                  Khám phá
-                                </h3>
-                                <span className="text-xs text-on-surface-variant font-medium">Phiếu học tập điện tử (4.0 điểm)</span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <button
-                                type="button"
-                                onClick={() => setShowWorksheetScannerModal(true)}
-                                className="px-3.5 py-1.5 rounded-full bg-secondary-container hover:bg-secondary-container/80 text-on-secondary-container font-label-sm text-label-sm font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
-                                title="Chụp hoặc tải ảnh phiếu học tập giấy, AI tự động nhận diện và điền câu trả lời"
-                              >
-                                <span className="material-symbols-outlined text-[18px]">document_scanner</span>
-                                <span>📷 Quét Phiếu AI (OCR)</span>
-                              </button>
-                              {worksheetSubmitted && (
-                                <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs">
-                                  ✓ Đã nộp: {(worksheetScore ?? 4.0).toFixed(2)} / 4.0 điểm
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Thanh 4 tab ngang theo đúng bố cục ảnh mẫu */}
-                          <div
-                            data-testid="stage2-subtabs-bar"
-                            className="p-2 rounded-2xl bg-white border border-slate-200 shadow-2xs grid grid-cols-2 lg:grid-cols-4 gap-2.5"
-                          >
-                            {(
-                              [
-                                {
-                                  id: 'drag' as const,
-                                  icon: 'extension',
-                                  label: '1. Kéo Thả (1.0đ)',
-                                  finalized: isStage2Finalized || isStage2DragFinalized,
-                                },
-                                {
-                                  id: 'fill' as const,
-                                  icon: 'edit_square',
-                                  label: '2. Điền Khuyết (1.0đ)',
-                                  finalized: isStage2Finalized || isStage2FillFinalized,
-                                },
-                                {
-                                  id: 'match' as const,
-                                  icon: 'account_tree',
-                                  label: '3. Nối Cột (1.0đ)',
-                                  finalized: isStage2Finalized || isStage2MatchFinalized,
-                                },
-                                {
-                                  id: 'short' as const,
-                                  icon: 'format_list_bulleted',
-                                  label: '4. Trả Lời Ngắn (1.0đ)',
-                                  finalized: isStage2Finalized || isStage2ShortFinalized,
-                                },
-                              ] as const
-                            ).map((tab) => {
-                              const isActive = stage2SubTab === tab.id;
-                              return (
-                                <button
-                                  key={tab.id}
-                                  type="button"
-                                  data-testid={`stage2-tab-${tab.id}`}
-                                  onClick={() => setStage2SubTab(tab.id)}
-                                  className={`py-3 px-4 rounded-xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                                    isActive
-                                      ? 'bg-[#4f39f6] text-white shadow-sm'
-                                      : 'bg-slate-100/90 text-slate-700 hover:bg-slate-200/75'
-                                  }`}
-                                >
-                                  <span className="material-symbols-outlined text-[18px]">
-                                    {tab.icon}
-                                  </span>
-                                  <span>{tab.label}</span>
-                                  {tab.finalized && (
-                                    <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-black">
-                                      🔒 ĐÃ CHỐT
-                                    </span>
-                                  )}
-                                </button>
+                        <div className="bg-surface-container-lowest rounded-2xl p-space-md shadow-md flex flex-col gap-space-md">
+                          <UnifiedDiscoveryWorksheet
+                            lessonTitle={currentPeriodSpec.lessonTitle}
+                            grade={selectedGrade}
+                            period={currentPeriodSpec.period}
+                            worksheet={activeWorksheet}
+                            isReadOnly={isStage2Finalized}
+                            isFinalized={isStage2Finalized}
+                            submitted={worksheetSubmitted}
+                            submittedScore={worksheetScore}
+                            initialAnswers={{
+                              dragAssignments: dragSlots as any,
+                              fillBlankInputs,
+                              matchingConnections,
+                              shortAnswers,
+                            }}
+                            onSubmit={(res) => {
+                              setWorksheetScore(res.totalScore);
+                              setWorksheetSubmitted(true);
+                              recordTaggedSubmission(
+                                2,
+                                'HĐ2: Phiếu học tập Khám phá',
+                                res.totalScore,
+                                4.0
                               );
-                            })}
-                          </div>
-
-                          {/* 1. KÉO - THẢ MINIGAME (1.0đ) */}
-                          {stage2SubTab === 'drag' && (
-                            <DragDropActivity
-                              title={activeWorksheet.stage2.dragDropTitle}
-                              instruction={activeWorksheet.stage2.dragDropInstruction}
-                              wordBank={activeWorksheet.stage2.dragDropWordBank}
-                              paragraph={activeWorksheet.stage2.dragDropParagraph}
-                              customQuestions={activeWorksheet.stage2.dragDropQuestions}
-                              sentenceLines={activeWorksheet.stage2.dragDropSentenceLines}
-                              bucketA={activeWorksheet.stage2.bucketA}
-                              bucketB={activeWorksheet.stage2.bucketB}
-                              dragItems={activeWorksheet.stage2.dragItems}
-                              slots={dragSlots}
-                              onSlotChange={(num, val) =>
-                                setDragSlots((prev) => ({ ...prev, [num]: val }))
+                              const xpEarned = Math.round(res.totalScore * 25) + 20;
+                              onAwardXp(xpEarned);
+                              onShowToast(
+                                `🎉 Đã nộp Phiếu Học Tập HĐ2 [${
+                                  activeLearningMode === 'IN_CLASS_LIVE'
+                                    ? 'TRÊN LỚP'
+                                    : `TỰ LUYỆN Ở NHÀ #${attemptCount}`
+                                }]! Đạt ${res.totalScore.toFixed(2)} / 4.0 điểm (+${xpEarned} XP)`
+                              );
+                              if (activeLearningMode === 'IN_CLASS_LIVE') {
+                                handleRequestFastFinisherChallenge();
                               }
-                              showAnswers={worksheetSubmitted}
-                            />
-                          )}
-
-                          {/* 2. ĐIỀN KHUYẾT (1.0đ) */}
-                          {stage2SubTab === 'fill' && (
-                            <FillBlankActivity
-                              title={activeWorksheet.stage2.fillBlankTitle}
-                              instruction={activeWorksheet.stage2.fillBlankInstruction}
-                              answers={fillBlankInputs}
-                              onChange={(k, val) =>
-                                setFillBlankInputs((prev) => ({ ...prev, [k]: val }))
-                              }
-                              showAnswers={worksheetSubmitted}
-                              customItems={activeWorksheet.stage2.fillBlankQuestions}
-                            />
-                          )}
-
-                          {/* 3. NỐI CỘT (1.0đ) */}
-                          {stage2SubTab === 'match' && (
-                            <MatchingActivity
-                              title={activeWorksheet.stage2.matchingTitle}
-                              instruction={activeWorksheet.stage2.matchingInstruction}
-                              connections={matchingConnections}
-                              onConnect={(aId, bId) =>
-                                setMatchingConnections((prev) => ({ ...prev, [aId]: bId }))
-                              }
-                              onDisconnect={(aId) =>
-                                setMatchingConnections((prev) => {
-                                  const next = { ...prev };
-                                  delete next[aId];
-                                  return next;
-                                })
-                              }
-                              showAnswers={worksheetSubmitted}
-                              customPairs={activeWorksheet.stage2.matchingQuestions}
-                            />
-                          )}
-
-                          {/* 4. CÂU HỎI TRẢ LỜI NGẮN (1.0đ) */}
-                          {stage2SubTab === 'short' && (
-                            <ShortAnswerActivity
-                              answers={shortAnswers}
-                              onChange={(k, val) =>
-                                setShortAnswers((prev) => ({ ...prev, [k]: val }))
-                              }
-                              showAnswers={worksheetSubmitted}
-                              customPrompt={activeWorksheet.stage2.shortAnswerPrompt}
-                              customQuestions={activeWorksheet.stage2.shortAnswerQuestions}
-                            />
-                          )}
-
-                          {/* Submission Footer */}
-                          <div className="flex items-center justify-between flex-wrap gap-3 pt-4 border-t border-outline-variant/30">
-                            <span className="text-sm font-bold text-tertiary">
-                              {isStage2Finalized
-                                ? '🔒 Hoạt động 2 đã được Giáo viên chốt kết quả và đóng nộp bài!'
-                                : worksheetSubmitted
-                                ? '✓ Phiếu học tập Hoạt động 2 (4.0đ) đã được chấm tự động và nộp lên hệ thống!'
-                                : 'Hoàn thành 4 nhiệm vụ trên rồi bấm Nộp Phiếu để chấm điểm Hoạt động 2 (Thang 4.0 điểm)'}
-                            </span>
-
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <button
-                                type="button"
-                                disabled={isStage2Finalized}
-                                onClick={() => {
-                                  if (isStage2Finalized) {
-                                    onShowToast('🔒 Hoạt động 2 đã được Giáo viên chốt kết quả và đóng nộp bài!');
-                                    return;
-                                  }
-                                  const sc = calculatePdfStage2Score();
-                                  setWorksheetScore(sc);
-                                  setWorksheetSubmitted(true);
-                                  recordTaggedSubmission(
-                                    2,
-                                    'HĐ2: Phiếu học tập Khám phá',
-                                    sc,
-                                    4.0
-                                  );
-                                  const xpEarned = Math.round(sc * 25) + 20;
-                                  onAwardXp(xpEarned);
-                                  onShowToast(
-                                    `🎉 Đã nộp Phiếu Học Tập HĐ2 [${
-                                      activeLearningMode === 'IN_CLASS_LIVE'
-                                        ? 'TRÊN LỚP'
-                                        : `TỰ LUYỆN Ở NHÀ #${attemptCount}`
-                                    }]! Đạt ${sc.toFixed(2)} / 4.0 điểm (+${xpEarned} XP)`
-                                  );
-                                  if (activeLearningMode === 'IN_CLASS_LIVE') {
-                                    handleRequestFastFinisherChallenge();
-                                  }
-                                }}
-                                className={`px-6 py-2.5 rounded-full font-bold text-sm shadow-md flex items-center gap-2 ${
-                                  isStage2Finalized
-                                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                                    : 'bg-primary text-on-primary cursor-pointer hover:bg-primary/90'
-                                }`}
-                              >
-                                <span className="material-symbols-outlined text-[18px]">
-                                  {isStage2Finalized ? 'lock' : 'send'}
-                                </span>
-                                <span>
-                                  {isStage2Finalized
-                                    ? '🔒 Đã chốt HĐ 2 - Đóng nộp'
-                                    : worksheetSubmitted
-                                    ? `🔄 Chấm lại Hoạt động 2 (Lần #${attemptCount})`
-                                    : `📝 Nộp Phiếu Học Tập HĐ2 (${
-                                        activeLearningMode === 'IN_CLASS_LIVE'
-                                          ? '🔴 Trên lớp'
-                                          : '🏠 Tự luyện'
-                                      })`}
-                                </span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => setActiveInlineStage(3)}
-                                className="px-5 py-2.5 rounded-full bg-secondary text-on-secondary font-bold text-sm cursor-pointer hover:bg-secondary/90 flex items-center gap-1"
-                              >
-                                <span>Sang Luyện tập</span>
-                                <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
-                              </button>
-                            </div>
-                          </div>
+                            }}
+                            onShowToast={onShowToast}
+                            onAwardXp={onAwardXp}
+                          />
 
                           {/* Fast-Finisher AI Cú Vàng Card when finished early in In-Class Live mode */}
                           {worksheetSubmitted && activeLearningMode === 'IN_CLASS_LIVE' && (
@@ -3317,6 +3049,17 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                               </div>
                             </div>
                           )}
+
+                          <div className="flex items-center justify-end pt-2">
+                            <button
+                              type="button"
+                              onClick={() => setActiveInlineStage(3)}
+                              className="px-5 py-2.5 rounded-full bg-secondary text-on-secondary font-bold text-sm cursor-pointer hover:bg-secondary/90 flex items-center gap-1 shadow-sm"
+                            >
+                              <span>Sang Hoạt động 3: Luyện tập</span>
+                              <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+                            </button>
+                          </div>
                         </div>
                       )}
 

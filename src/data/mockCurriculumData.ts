@@ -735,6 +735,18 @@ export interface LiveWheelCallState {
   calledAt?: string;
 }
 
+export interface CustomDragItem {
+  id: string;
+  text: string;
+  correctBox: 'data' | 'info';
+}
+
+export interface CustomMatchingPair {
+  id: string;
+  left: string;
+  right: string;
+}
+
 export interface DragDropSentenceLine {
   sentenceNum?: number;
   textBefore?: string;
@@ -766,6 +778,7 @@ export interface CustomFillBlankQuestion {
 export interface CustomMatchingQuestion {
   id: string;
   num: number;
+  leftKey?: string;
   leftText: string;
   rightKey: string;
   rightText: string;
@@ -1648,7 +1661,7 @@ export function buildLessonBlueprintFromPeriod(
     competencyTarget: `${spec.yccd} | ${spec.digitalCompetency} | ${spec.aiCompetency}`,
     stage1: {
       videoTitle: `Video Khởi động Khối ${spec.grade} - ${spec.lessonTitle} (03:00)`,
-      videoUrl: `https://cloudstorage.cloudplay.edu.vn/tinhoc${spec.grade}/tiet${spec.period}/khoi-dong.mp4`,
+      videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
       videoStops: [
         {
           time: '00:45',
@@ -1663,39 +1676,36 @@ export function buildLessonBlueprintFromPeriod(
       ],
       secretPictureTitle: `TRANH BÍ MẬT KHỐI ${spec.grade} • TIẾT ${spec.period}`,
       secretPictureMeaning: `Chinh phục mục tiêu ${spec.lessonTitle}: Kết hợp vững vàng kiến thức ${spec.sgkFile} cùng Năng lực số & Trí tuệ nhân tạo (${spec.nlsAiFile})!`,
-      crosswordClues:
-        spec.grade === 6 && spec.period === 1
-          ? baseDefault.stage1.crosswordClues
-          : [
-            {
-              id: `${spec.id}-cw1`,
-              rowNumber: 1,
-              clue: `Khái niệm nền tảng đầu tiên trong ${spec.sgkFile} của bài học này là gì?`,
-              answer: 'DULIEUSO',
-              hintTileLabel: 'Mảnh ghép 1: Kiến thức cốt lõi SGK',
-            },
-            {
-              id: `${spec.id}-cw2`,
-              rowNumber: 2,
-              clue: `Năng lực khai thác và ứng dụng công nghệ hiện đại trong ${spec.nlsAiFile} gọi là gì?`,
-              answer: 'NANGLUCSO',
-              hintTileLabel: 'Mảnh ghép 2: Năng lực số (NLS)',
-            },
-            {
-              id: `${spec.id}-cw3`,
-              rowNumber: 3,
-              clue: `Công nghệ thông minh hỗ trợ con người giải quyết vấn đề tự động là gì?`,
-              answer: 'TRITUENHANTAO',
-              hintTileLabel: 'Mảnh ghép 3: Năng lực AI',
-            },
-            {
-              id: `${spec.id}-cw4`,
-              rowNumber: 4,
-              clue: `Nguyên tắc quan trọng nhất khi hoạt động trên môi trường mạng Internet là gì?`,
-              answer: 'ANTOAN',
-              hintTileLabel: 'Mảnh ghép 4: An toàn & Đạo đức số',
-            },
-          ],
+      crosswordClues: [
+        {
+          id: `${spec.id}-cw1`,
+          rowNumber: 1,
+          clue: `Khái niệm nền tảng đầu tiên trong ${spec.sgkFile} của bài học này là gì?`,
+          answer: 'DULIEUSO',
+          hintTileLabel: 'Mảnh ghép 1: Kiến thức cốt lõi SGK',
+        },
+        {
+          id: `${spec.id}-cw2`,
+          rowNumber: 2,
+          clue: `Năng lực khai thác và ứng dụng công nghệ hiện đại trong ${spec.nlsAiFile} gọi là gì?`,
+          answer: 'NANGLUCSO',
+          hintTileLabel: 'Mảnh ghép 2: Năng lực số (NLS)',
+        },
+        {
+          id: `${spec.id}-cw3`,
+          rowNumber: 3,
+          clue: `Công nghệ thông minh hỗ trợ con người giải quyết vấn đề tự động là gì?`,
+          answer: 'TRITUENHANTAO',
+          hintTileLabel: 'Mảnh ghép 3: Năng lực AI',
+        },
+        {
+          id: `${spec.id}-cw4`,
+          rowNumber: 4,
+          clue: `Nguyên tắc quan trọng nhất khi hoạt động trên môi trường mạng Internet là gì?`,
+          answer: 'ANTOAN',
+          hintTileLabel: 'Mảnh ghép 4: An toàn & Đạo đức số',
+        },
+      ],
       openScenarioPrompt: `Liên hệ thực tế (${spec.lessonTitle}): Em hãy nêu 1 ví dụ ứng dụng công nghệ số hoặc AI liên quan đến bài học hôm nay?`,
       expectedWordCloud: [
         `Tin học ${spec.grade}`,
@@ -1705,128 +1715,73 @@ export function buildLessonBlueprintFromPeriod(
         'Sáng tạo số',
       ],
     },
-    stage2: {
-      worksheetTitle: `Phiếu học tập số ${spec.period} (Khối ${spec.grade}): ${spec.lessonTitle}`,
-      bucketA:
-        spec.grade === 6 && spec.period === 1
-          ? baseDefault.stage2.bucketA
-          : 'Hộp A: Kiến thức & Công cụ Chuẩn',
-      bucketB:
-        spec.grade === 6 && spec.period === 1
-          ? baseDefault.stage2.bucketB
-          : 'Hộp B: Ứng dụng Năng lực số & AI',
-      dragItems:
-        spec.grade === 6 && spec.period === 1
-          ? baseDefault.stage2.dragItems
-          : [
-            {
-              id: `${spec.id}-d1`,
-              text: `Nắm vững khái niệm cốt lõi trong ${spec.sgkFile} (${spec.sgkPages})`,
-              correctBox: 'data',
-            },
-            {
-              id: `${spec.id}-d2`,
-              text: `Vận dụng ${spec.digitalCompetency.split('(')[0].trim()}`,
-              correctBox: 'info',
-            },
-            {
-              id: `${spec.id}-d3`,
-              text: `Tuân thủ quy trình chuẩn mực thao tác trên máy tính`,
-              correctBox: 'data',
-            },
-            {
-              id: `${spec.id}-d4`,
-              text: `Tích hợp ${spec.aiCompetency.split('(')[0].trim()}`,
-              correctBox: 'info',
-            },
-          ],
-      blank1Label: (() => {
-        const ext = AUTHENTIC_PDF_EXTRACTS[spec.id] || AUTHENTIC_PDF_EXTRACTS[`k${spec.grade}-tiet-${spec.period}`];
-        return ext?.fillBlankQuestions?.[0]?.label ? `Điền khuyết ${ext.fillBlankQuestions[0].label}` : 'Từ khóa 1';
-      })(),
-      blank1Answer: (() => {
-        const ext = AUTHENTIC_PDF_EXTRACTS[spec.id] || AUTHENTIC_PDF_EXTRACTS[`k${spec.grade}-tiet-${spec.period}`];
-        return ext?.fillBlankQuestions?.[0]?.correctAnswer || 'Xử lý thông tin';
-      })(),
-      blank2Label: (() => {
-        const ext = AUTHENTIC_PDF_EXTRACTS[spec.id] || AUTHENTIC_PDF_EXTRACTS[`k${spec.grade}-tiet-${spec.period}`];
-        return ext?.fillBlankQuestions?.[1]?.label ? `Điền khuyết ${ext.fillBlankQuestions[1].label}` : 'Từ khóa 2';
-      })(),
-      blank2Answer: (() => {
-        const ext = AUTHENTIC_PDF_EXTRACTS[spec.id] || AUTHENTIC_PDF_EXTRACTS[`k${spec.grade}-tiet-${spec.period}`];
-        return ext?.fillBlankQuestions?.[1]?.correctAnswer || 'Lưu trữ thông tin';
-      })(),
-      matchingPairs:
-        spec.grade === 6 && spec.period === 1
-          ? baseDefault.stage2.matchingPairs
-          : [
-            {
-              id: `${spec.id}-mp1`,
-              left: `Yêu cầu cần đạt (${spec.sgkFile})`,
-              right: spec.yccd,
-            },
-            {
-              id: `${spec.id}-mp2`,
-              left: `Năng lực số (${spec.nlsAiFile})`,
-              right: spec.digitalCompetency,
-            },
-            {
-              id: `${spec.id}-mp3`,
-              left: `Năng lực AI (${spec.nlsAiFile})`,
-              right: spec.aiCompetency,
-            },
-          ],
-      textImagePrompt: (() => {
-        const ext = AUTHENTIC_PDF_EXTRACTS[spec.id] || AUTHENTIC_PDF_EXTRACTS[`k${spec.grade}-tiet-${spec.period}`];
-        return ext?.shortAnswerPrompt || `Dựa vào nội dung ${spec.lessonTitle} (${spec.sgkPages}), hãy trả lời câu hỏi thực tế.`;
-      })(),
-      textImageAnswerKeywords: ['dữ liệu', 'thông tin', 'năng lực số', 'trí tuệ nhân tạo'],
-      fillBlankQuestions: (AUTHENTIC_PDF_EXTRACTS[spec.id] || AUTHENTIC_PDF_EXTRACTS[`k${spec.grade}-tiet-${spec.period}`])?.fillBlankQuestions || [],
-      shortAnswerPrompt: (AUTHENTIC_PDF_EXTRACTS[spec.id] || AUTHENTIC_PDF_EXTRACTS[`k${spec.grade}-tiet-${spec.period}`])?.shortAnswerPrompt || '',
-      shortAnswerQuestions: (AUTHENTIC_PDF_EXTRACTS[spec.id] || AUTHENTIC_PDF_EXTRACTS[`k${spec.grade}-tiet-${spec.period}`])?.shortAnswerQuestions || [],
-    },
+    stage2: (() => {
+      const authenticWs = generateAuthenticWorksheetForGradeAndPeriod(
+        (spec.grade === 7 ? 7 : spec.grade === 8 ? 8 : spec.grade === 9 ? 9 : 6) as 6 | 7 | 8 | 9,
+        spec.period
+      );
+      return {
+        worksheetTitle: authenticWs.worksheetTitle || `Phiếu học tập số ${spec.period} (Khối ${spec.grade}): ${spec.lessonTitle}`,
+        bucketA: authenticWs.stage2?.bucketA || 'Hộp A: Kiến thức & Công cụ Chuẩn',
+        bucketB: authenticWs.stage2?.bucketB || 'Hộp B: Ứng dụng Năng lực số & AI',
+        dragItems: authenticWs.stage2?.dragItems || [],
+        blank1Label: 'Từ khóa 1',
+        blank1Answer: 'Xử lý thông tin',
+        blank2Label: 'Từ khóa 2',
+        blank2Answer: 'Lưu trữ thông tin',
+        matchingPairs: (authenticWs.stage2?.matchingQuestions || []).map((m) => ({
+          id: m.id,
+          left: m.leftText,
+          right: m.rightText,
+        })),
+        textImagePrompt:
+          authenticWs.stage2?.shortAnswerPrompt ||
+          `Dựa vào nội dung ${spec.lessonTitle} (${spec.sgkPages}), hãy trả lời câu hỏi thực tế.`,
+        textImageAnswerKeywords: ['dữ liệu', 'thông tin', 'năng lực số', 'trí tuệ nhân tạo'],
+        fillBlankQuestions: authenticWs.stage2?.fillBlankQuestions || [],
+        shortAnswerPrompt: authenticWs.stage2?.shortAnswerPrompt || '',
+        shortAnswerQuestions: authenticWs.stage2?.shortAnswerQuestions || [],
+      };
+    })(),
     stage3: {
       recommendedMode: isPractice ? 'practice' : 'theory',
-      quizQuestions:
-        spec.grade === 6 && spec.period === 1
-          ? INITIAL_MINIGAME_QUESTIONS.slice(0, 6).map((q) => ({ ...q, points: 0.5 }))
-          : [
+      quizQuestions: [
+        {
+          id: `${spec.id}-q1`,
+          order: 1,
+          question: `Câu 1 [Nhận biết - ${spec.lessonTitle}]: Trọng tâm kiến thức "${spec.knowledgeSection}" giúp em nắm vững điều gì?`,
+          timeLimitSec: 25,
+          points: 0.5,
+          status: 'Đã duyệt',
+          options: [
             {
-              id: `${spec.id}-q1`,
-              order: 1,
-              question: `Câu 1 [Nhận biết - ${spec.lessonTitle}]: Trọng tâm kiến thức "${spec.knowledgeSection}" giúp em nắm vững điều gì?`,
-              timeLimitSec: 25,
-              points: 0.5,
-              status: 'Đã duyệt',
-              options: [
-                {
-                  letter: 'A',
-                  text: spec.yccd,
-                  explanation: `Đúng chuẩn Yêu cầu cần đạt của ${spec.lessonTitle} (${spec.sgkFile}).`,
-                  isCorrect: true,
-                },
-                {
-                  letter: 'B',
-                  text: 'Bỏ qua việc kiểm tra dữ liệu đầu vào và quy tắc an toàn thông tin.',
-                  explanation: 'Sai nguyên tắc chuẩn Tin học GDPT 2018.',
-                  isCorrect: false,
-                },
-                {
-                  letter: 'C',
-                  text: 'Chỉ ghi nhớ lý thuyết mà không cần thực hành hay vận dụng.',
-                  explanation: 'Sai định hướng phát triển năng lực.',
-                  isCorrect: false,
-                },
-                {
-                  letter: 'D',
-                  text: 'Sử dụng phần mềm tùy ý không theo hướng dẫn.',
-                  explanation: 'Sai quy trình kỹ thuật.',
-                  isCorrect: false,
-                },
-              ],
+              letter: 'A',
+              text: spec.yccd,
+              explanation: `Đúng chuẩn Yêu cầu cần đạt của ${spec.lessonTitle} (${spec.sgkFile}).`,
+              isCorrect: true,
             },
             {
-              id: `${spec.id}-q2`,
+              letter: 'B',
+              text: 'Bỏ qua việc kiểm tra dữ liệu đầu vào và quy tắc an toàn thông tin.',
+              explanation: 'Sai nguyên tắc chuẩn Tin học GDPT 2018.',
+              isCorrect: false,
+            },
+            {
+              letter: 'C',
+              text: 'Chỉ ghi nhớ lý thuyết mà không cần thực hành hay vận dụng.',
+              explanation: 'Sai định hướng phát triển năng lực.',
+              isCorrect: false,
+            },
+            {
+              letter: 'D',
+              text: 'Sử dụng phần mềm tùy ý không theo hướng dẫn.',
+              explanation: 'Sai quy trình kỹ thuật.',
+              isCorrect: false,
+            },
+          ],
+        },
+        {
+          id: `${spec.id}-q2`,
               order: 2,
               question: `Câu 2 [Nhận biết - Chủ đề ${spec.topic}]: Khi thực hiện nhiệm vụ trong ${spec.lessonTitle}, thao tác nào sau đây là chuẩn xác nhất?`,
               timeLimitSec: 25,
@@ -2070,7 +2025,7 @@ export const NOTEBOOK_LM_LESSONS: NotebookLMLessonBlueprint[] = [
       'YCCĐ: Phân biệt Thông tin, Dữ liệu, Vật mang tin | Tích hợp NLS 1.1 & NL-AI 1 (NLS-AI-6.docx)',
     stage1: {
       videoTitle: 'Tiết 1: Thế giới thông tin quanh ta (03:15)',
-      videoUrl: 'https://cloudstorage.cloudplay.edu.vn/tinhoc6/tiet1/the-gioi-thong-tin.mp4',
+      videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
       videoStops: [
         {
           time: '00:45',

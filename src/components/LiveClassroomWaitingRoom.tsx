@@ -6,7 +6,9 @@ import {
   type LiveClassroomSession,
   type StudentRosterItem,
   type WaitingRoomState,
+  getDefaultWorksheetForLesson,
 } from '../data/mockCurriculumData';
+import { UnifiedDiscoveryWorksheet } from './UnifiedDiscoveryWorksheet';
 import {
   buildDesignatedClassDeskRoster,
   createInitialWaitingRoomState,
@@ -37,6 +39,7 @@ import {
   type HybridSlideDeckRecord,
 } from '../utils/hybridSlideStorage';
 import { PreLiveSlideConfigModal } from './PreLiveSlideConfigModal';
+import { isActivityFinalized } from '../utils/slideAndArenaController';
 
 export type ChalkboardStageMode = 'slide' | 'hd1' | 'hd2' | 'hd3' | 'hd3-practice' | 'hd4';
 
@@ -1929,213 +1932,24 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
             </div>
           )}
 
-          {/* MODE 3: HOẠT ĐỘNG 2 — KHÁM PHÁ (PHIẾU HỌC TẬP TƯƠNG TÁC TRỰC QUAN ĐỒNG BỘ TRÊN BẢNG) */}
+          {/* MODE 3: HOẠT ĐỘNG 2 — KHÁM PHÁ (1 TRANG PHIẾU HỌC TẬP MINIGAME ĐỒNG BỘ TRÊN BẢNG LỚP) */}
           {resolvedBoardMode === 'hd2' && (
-            <div className="flex flex-col h-full justify-between gap-3 flex-1">
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-white/15">
-                <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-0.5 rounded-full bg-sky-400 text-slate-950 text-[11px] font-black">
-                    🔍 HOẠT ĐỘNG 2: KHÁM PHÁ (PHIẾU HỌC TẬP SỐ)
-                  </span>
-                  <span className="text-xs font-bold text-emerald-200">
-                    {blueprint.stage2.worksheetTitle}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {[
-                    { id: 'drag' as const, label: '1. Phân loại' },
-                    { id: 'fill' as const, label: '2. Điền khuyết' },
-                    { id: 'match' as const, label: '3. Ghép cột' },
-                    { id: 'short' as const, label: '4. Tự luận ngắn' },
-                  ].map((st) => (
-                    <button
-                      key={st.id}
-                      type="button"
-                      onClick={() => setHd2SubTab(st.id)}
-                      className={`px-2.5 py-1 rounded-full text-xs font-black cursor-pointer ${
-                        hd2SubTab === st.id
-                          ? 'bg-amber-400 text-slate-950'
-                          : 'bg-white/15 hover:bg-white/25 text-white'
-                      }`}
-                    >
-                      {st.label}
-                    </button>
-                  ))}
-
-                  {role === 'teacher' && (
-                    <button
-                      type="button"
-                      onClick={() => setHd2RevealAnswers((prev) => !prev)}
-                      className="px-3 py-1 rounded-full bg-emerald-500/30 hover:bg-emerald-500/45 border border-emerald-300/50 text-emerald-100 text-xs font-black cursor-pointer"
-                    >
-                      {hd2RevealAnswers ? '🙈 Ẩn đáp án mẫu' : '✨ Hiện đáp án mẫu'}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Interactive Worksheet Body inside Chalkboard */}
-              <div className="flex-1 bg-black/25 rounded-xl p-3.5 border border-white/15 overflow-y-auto max-h-[280px]">
-                {hd2SubTab === 'drag' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                    {(blueprint.stage2.dragItems || []).map((item) => {
-                      const picked = hd2DragAssignments[item.id];
-                      return (
-                        <div
-                          key={item.id}
-                          className="p-3 rounded-xl bg-white/10 border border-white/20 flex flex-col justify-between gap-2"
-                        >
-                          <span className="text-xs sm:text-sm font-bold text-white">
-                            • {item.text}
-                          </span>
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setHd2DragAssignments((p) => ({ ...p, [item.id]: 'data' }))
-                                }
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer ${
-                                  picked === 'data'
-                                    ? 'bg-amber-400 text-slate-950'
-                                    : 'bg-white/15 text-white hover:bg-white/25'
-                                }`}
-                              >
-                                {blueprint.stage2.bucketA}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setHd2DragAssignments((p) => ({ ...p, [item.id]: 'info' }))
-                                }
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer ${
-                                  picked === 'info'
-                                    ? 'bg-sky-400 text-slate-950'
-                                    : 'bg-white/15 text-white hover:bg-white/25'
-                                }`}
-                              >
-                                {blueprint.stage2.bucketB}
-                              </button>
-                            </div>
-                            {hd2RevealAnswers && (
-                              <span className="px-2 py-0.5 rounded-full bg-emerald-400 text-slate-950 text-[10px] font-black">
-                                ✓ Đúng: {item.correctBox === 'data' ? 'Hộp A' : 'Hộp B'}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {hd2SubTab === 'fill' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="p-3.5 rounded-xl bg-white/10 border border-white/20 flex flex-col gap-2">
-                      <label className="text-xs font-black text-amber-300">
-                        1. {blueprint.stage2.blank1Label}:
-                      </label>
-                      <input
-                        type="text"
-                        value={hd2Blank1}
-                        onChange={(e) => setHd2Blank1(e.target.value)}
-                        placeholder="Nhập cụm từ còn thiếu..."
-                        className="px-3 py-2 rounded-lg bg-slate-950/70 border border-white/30 text-white text-xs font-bold outline-none focus:ring-2 focus:ring-amber-300"
-                      />
-                      {hd2RevealAnswers && (
-                        <span className="text-xs font-black text-emerald-300">
-                          ✓ Đáp án chuẩn: {blueprint.stage2.blank1Answer}
-                        </span>
-                      )}
-                    </div>
-                    <div className="p-3.5 rounded-xl bg-white/10 border border-white/20 flex flex-col gap-2">
-                      <label className="text-xs font-black text-amber-300">
-                        2. {blueprint.stage2.blank2Label}:
-                      </label>
-                      <input
-                        type="text"
-                        value={hd2Blank2}
-                        onChange={(e) => setHd2Blank2(e.target.value)}
-                        placeholder="Nhập cụm từ còn thiếu..."
-                        className="px-3 py-2 rounded-lg bg-slate-950/70 border border-white/30 text-white text-xs font-bold outline-none focus:ring-2 focus:ring-amber-300"
-                      />
-                      {hd2RevealAnswers && (
-                        <span className="text-xs font-black text-emerald-300">
-                          ✓ Đáp án chuẩn: {blueprint.stage2.blank2Answer}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {hd2SubTab === 'match' && (
-                  <div className="flex flex-col gap-2.5">
-                    {(blueprint.stage2.matchingPairs || []).map((pair) => (
-                      <div
-                        key={pair.id}
-                        className="p-3 rounded-xl bg-white/10 border border-white/20 grid grid-cols-1 md:grid-cols-12 gap-2 items-center"
-                      >
-                        <div className="md:col-span-5 text-xs font-black text-amber-200">
-                          🔗 {pair.left}
-                        </div>
-                        <div className="md:col-span-7">
-                          <select
-                            value={hd2MatchSelections[pair.id] || ''}
-                            onChange={(e) =>
-                              setHd2MatchSelections((p) => ({ ...p, [pair.id]: e.target.value }))
-                            }
-                            aria-label={`Chọn nội dung ghép cho ${pair.left}`}
-                            className="w-full px-3 py-1.5 rounded-lg bg-slate-950/80 border border-white/30 text-white text-xs font-bold"
-                          >
-                            <option value="">-- Chọn mệnh đề tương ứng --</option>
-                            {(blueprint.stage2.matchingPairs || []).map((opt) => (
-                              <option key={opt.id} value={opt.right}>
-                                {opt.right}
-                              </option>
-                            ))}
-                          </select>
-                          {hd2RevealAnswers && (
-                            <div className="text-[11px] font-bold text-emerald-300 mt-1">
-                              ✓ Ghép đúng: {pair.right}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {hd2SubTab === 'short' && (
-                  <div className="flex flex-col gap-2.5">
-                    <p className="text-xs sm:text-sm font-extrabold text-amber-200">
-                      💡 Câu hỏi khám phá: {blueprint.stage2.textImagePrompt}
-                    </p>
-                    <textarea
-                      rows={3}
-                      value={hd2ShortAnswer}
-                      onChange={(e) => setHd2ShortAnswer(e.target.value)}
-                      placeholder="Nhập câu trả lời của em ngay trên Bảng lớp..."
-                      className="w-full p-3 rounded-xl bg-slate-950/75 border border-white/30 text-white text-xs font-medium outline-none focus:ring-2 focus:ring-amber-300"
-                    />
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center justify-between gap-2 pt-1">
-                <span className="text-xs font-bold text-emerald-200">
-                  {hd2SubmittedScore !== null
-                    ? `🌟 Điểm Phiếu học tập HĐ 2: ${hd2SubmittedScore}/10 điểm`
-                    : '📌 Hoàn thành 4 mục khám phá và nhấn Nộp bài lên Bảng lớp'}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleSubmitStage2OnBoard}
-                  className="px-4 py-1.5 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 text-xs font-black cursor-pointer shadow-md"
-                >
-                  ✅ Nộp Phiếu Học Tập HĐ 2 Lên Bảng (+3đ Tổ)
-                </button>
-              </div>
+            <div className="flex flex-col h-full justify-between gap-3 flex-1 overflow-y-auto max-h-[520px] p-1">
+              <UnifiedDiscoveryWorksheet
+                lessonTitle={periodSpec.lessonTitle}
+                grade={grade}
+                period={period}
+                worksheet={getDefaultWorksheetForLesson(grade, period)}
+                isReadOnly={role === 'teacher'}
+                isFinalized={isActivityFinalized(liveSession, lessonKey, 2)}
+                submitted={hd2SubmittedScore !== null}
+                submittedScore={hd2SubmittedScore}
+                onSubmit={(res) => {
+                  handleSubmitStage2OnBoard();
+                }}
+                onShowToast={onShowToast}
+                onAwardXp={onAwardXp}
+              />
             </div>
           )}
 
