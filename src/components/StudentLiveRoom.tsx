@@ -389,21 +389,29 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     }
   };
 
-  // Track last teacher broadcast view so whenever Teacher switches to an isolated activity, Student follows cleanly without jumping when stopped
-  const lastTeacherViewRef = useRef<string | undefined>(teacherActiveView);
+  // Track last teacher broadcast view and waitingRoom board mode so whenever Teacher switches to an activity, Student follows cleanly in real time
+  const waitingRoomBoardMode = liveSession?.waitingRoomByLesson?.[lessonKey]?.activeBoardMode;
+  const effectiveTeacherBroadcastMode =
+    waitingRoomBoardMode && waitingRoomBoardMode !== 'slide'
+      ? waitingRoomBoardMode
+      : teacherActiveView;
+  const lastTeacherViewRef = useRef<string | undefined>(effectiveTeacherBroadcastMode);
 
   useEffect(() => {
-    if (teacherActiveView && teacherActiveView !== lastTeacherViewRef.current) {
-      lastTeacherViewRef.current = teacherActiveView;
-      if (teacherActiveView === 'waiting') {
+    if (
+      effectiveTeacherBroadcastMode &&
+      effectiveTeacherBroadcastMode !== lastTeacherViewRef.current
+    ) {
+      lastTeacherViewRef.current = effectiveTeacherBroadcastMode;
+      if (effectiveTeacherBroadcastMode === 'waiting' || effectiveTeacherBroadcastMode === 'slide') {
         setActiveView('waiting');
         playStageBroadcastSound();
         onShowToast(
-          '🏫 Giáo viên đã mở Phòng Chờ Lớp Học Trực Tuyến — Vào bàn học & thi đua Tổ 1 vs Tổ 2!'
+          '🏫 Giáo viên đã chuyển về Bảng Slide Bài Giảng trên Phòng Live Chính!'
         );
         return;
       }
-      if (teacherActiveView === 'hd3-practice') {
+      if (effectiveTeacherBroadcastMode === 'hd3-practice') {
         setActiveView('hd3-practice');
         playStageBroadcastSound();
         onShowToast(
@@ -417,7 +425,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
         hd3: 3,
         hd4: 4,
       };
-      const mapped = stageMap[teacherActiveView];
+      const mapped = stageMap[effectiveTeacherBroadcastMode];
       if (mapped) {
         setActiveView(mapped);
         playStageBroadcastSound();
@@ -426,7 +434,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
         );
       }
     }
-  }, [teacherActiveView]);
+  }, [effectiveTeacherBroadcastMode, onShowToast]);
 
   // When Teacher exits the live room or ends broadcast, automatically close student live room
   useEffect(() => {
@@ -539,6 +547,52 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     triggerSynchronizedCelebration('xp');
     onAwardXp(xpBonus);
     onShowToast(msg);
+
+    const completedStageItem: 'hd3-practice' | 1 | 2 | 3 | 4 =
+      stageKey === 'hd3-practice'
+        ? 'hd3-practice'
+        : stageKey === 3 || stageKey === '3'
+        ? 3
+        : stageKey === 2 || stageKey === '2' || String(stageKey).startsWith('hd2')
+        ? 2
+        : stageKey === 4 || stageKey === '4'
+        ? 4
+        : 1;
+    if (onUpdateLiveSession) {
+      onUpdateLiveSession((prev) => {
+        const prevMap = prev.completedStagesByStudent || {};
+        const prevList = prevMap[currentStudent.id] || [];
+        const nextList: ('hd3-practice' | 1 | 2 | 3 | 4)[] = prevList.includes(completedStageItem)
+          ? prevList
+          : [...prevList, completedStageItem];
+        return {
+          ...prev,
+          completedStagesByStudent: {
+            ...prevMap,
+            [currentStudent.id]: nextList,
+          },
+          updatedAt: new Date().toISOString(),
+        };
+      });
+    }
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('cloudplay_realtime_sync');
+        bc.postMessage({
+          type: 'STUDENT_STAGE_COMPLETED',
+          studentId: currentStudent.id,
+          studentName: currentStudent.name,
+          classId: liveSession?.activeClassId || currentStudent.classId,
+          lessonKey,
+          stage: completedStageItem,
+          score: 10,
+          timestampIso: new Date().toISOString(),
+        });
+        bc.close();
+      }
+    } catch {
+      // ignore
+    }
   };
 
   const isArenaStage3Unlocked = isViewUnlocked(3);

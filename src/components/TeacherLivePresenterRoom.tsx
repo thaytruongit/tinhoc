@@ -1038,7 +1038,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 }`}
               >
                 <div
-                  onClick={() => setActiveTab('waiting')}
+                  onClick={() => handleOpenWaitingRoomLobby()}
                   className="flex items-center justify-between cursor-pointer"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
@@ -1167,7 +1167,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     }`}
                   >
                     <div
-                      onClick={() => setActiveTab(item.id)}
+                      onClick={() => handleBroadcastStage(item.stage)}
                       className="flex items-center justify-between cursor-pointer"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
@@ -1263,7 +1263,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 }`}
               >
                 <div
-                  onClick={() => setActiveTab('hd3-practice')}
+                  onClick={() => handleBroadcastPracticeStage3()}
                   className="flex items-center justify-between cursor-pointer"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
@@ -1381,7 +1381,13 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     }`}
                   >
                     <div
-                      onClick={() => setActiveTab(item.id)}
+                      onClick={() => {
+                        if (item.stage) {
+                          handleBroadcastStage(item.stage);
+                        } else {
+                          setActiveTab(item.id);
+                        }
+                      }}
                       className="flex items-center justify-between cursor-pointer"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
@@ -1520,10 +1526,17 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
       <main className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-slate-50/50">
         {/* Top Control Bar */}
         <header className="min-h-16 py-2.5 px-6 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-20 shadow-2xs">
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-3 min-w-0 flex-wrap">
             <span className="px-3 py-1 rounded-full bg-red-600 text-white text-xs font-black flex items-center gap-1.5 shrink-0 animate-pulse">
               <span className="w-2 h-2 rounded-full bg-white" />
               <span>PHÒNG LIVE GIÁO VIÊN</span>
+            </span>
+            <span
+              className="px-3 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-xs font-black flex items-center gap-1.5 shrink-0"
+              title="Học sinh có thể nhập Mã Phòng này hoặc bấm Kết nối 1 chạm trên trang Học sinh để vào thẳng Phòng Live"
+            >
+              <span className="material-symbols-outlined text-[15px] text-amber-700">vpn_key</span>
+              <span>Mã Phòng: {classId}-T{period}</span>
             </span>
             <h1 className="text-sm sm:text-base font-black text-slate-900 truncate max-w-[340px] xl:max-w-[480px]">
               Khối {grade} • Tiết {period}: {periodSpec.lessonTitle} — Lớp {classId}

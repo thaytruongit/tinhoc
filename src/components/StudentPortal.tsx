@@ -163,14 +163,20 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const [studentResultScope, setStudentResultScope] = useState<'ca-nhan' | 'lop' | 'khoi'>('ca-nhan');
   const [isInLiveRoom, setIsInLiveRoom] = useState<boolean>(false);
 
-  // Mandatory Companion Selection Gate before entering Live Room:
-  // Student must explicitly confirm a companion ('paired') or no companion ('solo') first
-  const [companionMode, setCompanionMode] = useState<CompanionSelectionMode>('unselected');
+  // Companion mode defaults to 'paired' (if partnerName set) or 'solo' so students can connect to Live Room immediately without friction
+  const [companionMode, setCompanionMode] = useState<CompanionSelectionMode>(() =>
+    currentStudent.partnerName && currentStudent.partnerName !== 'Học cá nhân (1 mình)'
+      ? 'paired'
+      : 'solo'
+  );
   const [forceCompanionModal, setForceCompanionModal] = useState<boolean>(false);
   const [pendingLiveTarget, setPendingLiveTarget] = useState<{
     period: number;
     stage: 1 | 2 | 3 | 4;
   } | null>(null);
+  const [roomCodeInput, setRoomCodeInput] = useState<string>('');
+  const [isScanningLiveRoom, setIsScanningLiveRoom] = useState<boolean>(false);
+  const [connectedToTeacherBroadcast, setConnectedToTeacherBroadcast] = useState<boolean>(false);
 
   // Class and Grade Rankings
   const classMatesList = students.filter((s) => s.classId === currentStudent.classId);
@@ -221,24 +227,111 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
   const handleRequestEnterLiveRoom = (periodNum: number, stageNum: 1 | 2 | 3 | 4) => {
     if (companionMode === 'unselected') {
-      setPendingLiveTarget({ period: periodNum, stage: stageNum });
-      setForceCompanionModal(true);
-      onShowToast(
-        '👥 Vui lòng chọn Bạn đồng hành ngồi cùng máy hoặc chọn "Không có bạn đồng hành (1 mình)" trước khi vào Phòng Live!'
+      setCompanionMode(
+        currentStudent.partnerName && currentStudent.partnerName !== 'Học cá nhân (1 mình)'
+          ? 'paired'
+          : 'solo'
       );
-      return;
     }
+    setConnectedToTeacherBroadcast(true);
+    setStudentManuallyExitedLive(false);
     setOpenedPeriodNumber(periodNum);
     setActiveInlineStage(stageNum);
     setIsInLiveRoom(true);
   };
 
-  // Check if Teacher is currently broadcasting Live specifically to this student's Grade AND Class
+  // Check if Teacher is currently broadcasting Live (either for this student's class or connected by the student)
+  const isAnyTeacherLiveActive = Boolean(liveSession?.isBroadcasting);
   const isLiveForStudentClass = Boolean(
     liveSession?.isBroadcasting &&
-      liveSession.activeGrade === selectedGrade &&
-      liveSession.activeClassId === currentStudent.classId
+      (connectedToTeacherBroadcast ||
+        (liveSession.activeGrade === selectedGrade &&
+          liveSession.activeClassId === currentStudent.classId))
   );
+
+  // Instant 1-Click or Room-Code Connector to Teacher's Live Room
+  const handleConnectToTeacherLiveRoom = async (customCode?: string) => {
+    setIsScanningLiveRoom(true);
+    let latestSession = liveSession;
+    try {
+      const res = await fetch('/api/live-session');
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.session && onUpdateLiveSession) {
+          latestSession = json.session;
+          onUpdateLiveSession((prev) => ({
+            ...prev,
+            ...json.session,
+          }));
+        }
+      }
+    } catch {
+      // fallback to local liveSession
+    } finally {
+      setIsScanningLiveRoom(false);
+    }
+
+    const codeClean = (customCode ?? roomCodeInput).trim().toUpperCase();
+    // Parse optional room code like "6A10-T9", "6A10", "T9", "9"
+    let parsedPeriod: number | null = null;
+    if (codeClean) {
+      const tMatch = codeClean.match(/T(\d{1,2})/i) || codeClean.match(/^(\d{1,2})$/);
+      if (tMatch) {
+        const pNum = Number(tMatch[1]);
+        if (pNum >= 1 && pNum <= 29) parsedPeriod = pNum;
+      }
+    }
+
+    if (latestSession?.isBroadcasting) {
+      const targetPeriod = parsedPeriod || latestSession.activePeriod || 1;
+      const targetStage = (latestSession.activeStage as 1 | 2 | 3 | 4) || 1;
+      if (companionMode === 'unselected') {
+        setCompanionMode('paired');
+      }
+      setConnectedToTeacherBroadcast(true);
+      setStudentManuallyExitedLive(false);
+      setOpenedPeriodNumber(targetPeriod);
+      setActiveInlineStage(targetStage);
+      setIsInLiveRoom(true);
+      onChangeView('trang-chu');
+      onShowToast(
+        `🚀 Đã kết nối thẳng vào Phòng Live Giáo Viên: Lớp ${latestSession.activeClassId} • Khối ${latestSession.activeGrade} • Tiết ${targetPeriod}!`
+      );
+      return;
+    }
+
+    if (codeClean) {
+      const targetPeriod = parsedPeriod || liveSession?.activePeriod || 1;
+      if (companionMode === 'unselected') {
+        setCompanionMode('paired');
+      }
+      if (onUpdateLiveSession) {
+        onUpdateLiveSession((prev) => ({
+          ...prev,
+          isBroadcasting: true,
+          activeClassId: currentStudent.classId,
+          activeGrade: selectedGrade,
+          activePeriod: targetPeriod,
+          activeLiveView: prev.activeLiveView || 'waiting',
+          updatedAt: new Date().toISOString(),
+        }));
+      }
+      setConnectedToTeacherBroadcast(true);
+      setStudentManuallyExitedLive(false);
+      setOpenedPeriodNumber(targetPeriod);
+      setActiveInlineStage(1);
+      setIsInLiveRoom(true);
+      onChangeView('trang-chu');
+      onShowToast(
+        `🚀 Đã kết nối Mã Phòng "${codeClean}" — Đang vào Phòng Live Chính Lớp ${currentStudent.classId} (Tiết ${targetPeriod})!`
+      );
+      return;
+    }
+
+    onShowToast(
+      '📡 Đã quét sóng Live: Hiện Giáo viên chưa bấm mở phiên Live. Em có thể nhập Mã Phòng (VD: 6A10-T1) để vào trước Phòng Live Chính!'
+    );
+  };
 
   const [studentManuallyExitedLive, setStudentManuallyExitedLive] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -1008,27 +1101,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     return () => clearInterval(timer);
   }, [activeView, openedPeriodNumber, activeInlineStage, arenaFinished, arenaQuestionIndex]);
 
-  // Jump directly into the Teacher's Live Broadcast Lesson (strictly class-specific)
+  // Jump directly into the Teacher's Live Broadcast Lesson
   const handleJoinTeacherLiveLesson = () => {
-    if (!liveSession) return;
-    if (!isLiveForStudentClass) {
-      onShowToast(
-        `Giáo viên hiện đang phát Live cho Lớp ${liveSession.activeClassId} (Khối ${liveSession.activeGrade}), chưa phát cho Lớp ${currentStudent.classId} của em.`
-      );
-      return;
-    }
-    setStudentManuallyExitedLive(false);
-    setOpenedPeriodNumber(liveSession.activePeriod);
-    setActiveInlineStage(liveSession.activeStage || 1);
-    setIsInLiveRoom(true);
-    onChangeView('trang-chu');
-    onShowToast(
-      `Đã đồng bộ vào Tiết Live của Lớp ${currentStudent.classId}: Khối ${selectedGrade} • Tiết ${liveSession.activePeriod} (${
-        liveSession.activeLiveView === 'waiting'
-          ? 'Phòng Chờ Lớp Học'
-          : `Hoạt động ${liveSession.activeStage}`
-      })!`
-    );
+    void handleConnectToTeacherLiveRoom();
   };
 
   // Submit student practical file into Google Drive Class Folder (Max 3.0 points for Hoạt động 3)
@@ -1226,13 +1301,29 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
   // DEDICATED STUDENT LIVE ROOM (BRIGHT WHITE THEME, AUTO-FOLLOWS TEACHER BROADCAST STAGE)
   if ((isInLiveRoom || (isLiveForStudentClass && !studentManuallyExitedLive)) && openedPeriodNumber !== null) {
+    const activeLiveGrade =
+      liveSession?.isBroadcasting && liveSession.activeGrade
+        ? liveSession.activeGrade
+        : selectedGrade;
+    const activeLivePeriodNum =
+      liveSession?.isBroadcasting && liveSession.activePeriod
+        ? liveSession.activePeriod
+        : openedPeriodNumber;
+    const liveGradePeriods = getPeriodsForGrade(activeLiveGrade);
+    const effectiveLivePeriodSpec =
+      liveGradePeriods.find((p) => p.period === activeLivePeriodNum) || currentPeriodSpec;
+    const effectiveLiveUnlocked = getUnlockedStagesForPeriod(
+      activeLiveGrade,
+      effectiveLivePeriodSpec.period
+    );
+
     return (
       <StudentLiveRoom
         currentStudent={currentStudent}
         students={students}
-        periodSpec={currentPeriodSpec}
+        periodSpec={effectiveLivePeriodSpec}
         liveSession={liveSession}
-        unlockedStages={currentPeriodUnlocked}
+        unlockedStages={effectiveLiveUnlocked}
         companionMode={companionMode}
         onExitLiveRoom={() => {
           setStudentManuallyExitedLive(true);
@@ -1371,40 +1462,51 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               </button>
             </nav>
 
-            {/* Live Classroom Sync Status Box in Sidebar (Class-Specific) */}
-            {isLiveForStudentClass && liveSession ? (
+            {/* Live Classroom Sync Status Box in Sidebar */}
+            {isAnyTeacherLiveActive && liveSession ? (
               <div className="p-space-md rounded-xl bg-gradient-to-br from-primary-fixed/40 via-surface-container-low to-secondary-fixed/30 border border-primary/20 flex flex-col gap-2">
                 <div className="flex items-center justify-between">
                   <span className="font-label-sm text-label-sm text-primary uppercase font-bold flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-error animate-ping" />
-                    Đang phát Live Lớp {currentStudent.classId}
+                    Sóng Live: Lớp {liveSession.activeClassId}
                   </span>
                   <span className="px-2 py-0.5 rounded-full bg-surface-container-lowest text-secondary font-label-sm text-label-sm font-bold">
-                    Khối {liveSession.activeGrade}
+                    Mã: {liveSession.activeClassId}-T{liveSession.activePeriod}
                   </span>
                 </div>
                 <p className="font-label-md text-label-md text-on-surface leading-snug">
-                  Tiết {liveSession.activePeriod} • Đang mở Hoạt động {liveSession.activeStage}
+                  Khối {liveSession.activeGrade} • Tiết {liveSession.activePeriod} •{' '}
+                  {liveSession.activeLiveView === 'waiting' || liveSession.activeLiveView === 'slide'
+                    ? 'Bảng Slide Bài Giảng'
+                    : liveSession.activeLiveView === 'hd3-practice'
+                    ? 'HĐ 3: Thực hành'
+                    : `Hoạt động ${liveSession.activeStage || 1}`}
                 </p>
                 <button
                   type="button"
-                  onClick={handleJoinTeacherLiveLesson}
+                  onClick={() => void handleConnectToTeacherLiveRoom()}
                   className="w-full py-2 px-3 rounded-full bg-primary text-on-primary font-label-sm text-label-sm font-bold shadow-sm hover:opacity-95 transition-all flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-[16px]">sensors</span>
-                  <span>Vào tiết GV đang mở cho {currentStudent.classId}</span>
+                  <span>Kết nối vào Phòng Live GV ngay</span>
                 </button>
               </div>
             ) : (
-              <div className="p-space-md rounded-xl bg-surface-container-low border border-outline-variant/25 flex flex-col gap-1.5">
+              <div className="p-space-md rounded-xl bg-surface-container-low border border-outline-variant/25 flex flex-col gap-2">
                 <span className="font-label-sm text-label-sm text-secondary uppercase font-bold">
-                  Trạng thái Lớp {currentStudent.classId}
+                  Kết nối Phòng Live ({currentStudent.classId})
                 </span>
                 <p className="font-body-sm text-body-sm text-on-surface-variant">
-                  {liveSession?.isBroadcasting
-                    ? `GV đang phát Live cho Lớp ${liveSession.activeClassId} (Khối ${liveSession.activeGrade}). Lớp ${currentStudent.classId} ở chế độ Tự luyện.`
-                    : 'Chưa phát Live. Em có thể tìm hiểu trước Hoạt động 1 hoặc Tự luyện các tiết đã học.'}
+                  Nhập Mã Phòng (VD: {currentStudent.classId}-T1) hoặc bấm Quét Sóng Live để vào phòng học của Thầy/Cô.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => void handleConnectToTeacherLiveRoom(`${currentStudent.classId}-T1`)}
+                  className="w-full py-1.5 px-3 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-label-sm text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[15px]">meeting_room</span>
+                  <span>Vào Phòng Live Chính ({currentStudent.classId})</span>
+                </button>
               </div>
             )}
           </div>
@@ -1790,19 +1892,131 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     </button>
                   </div>
 
-                  {/* TAB 1: HỌC LIVE (HIỂN THỊ DUY NHẤT TIẾT LIVE) */}
+                  {/* TAB 1: HỌC LIVE & CỔNG KẾT NỐI PHÒNG LIVE GIÁO VIÊN (ĐỒNG BỘ THỜI GIAN THỰC 2 CHIỀU) */}
                   {homeTab === 'hoc-live' ? (
-                    <div className="w-full rounded-3xl bg-white p-6 sm:p-8 border border-slate-100 shadow-xs flex flex-col gap-5">
-                      {isLiveForStudentClass && liveSession ? (
+                    <div className="w-full rounded-3xl bg-white p-6 sm:p-8 border border-slate-100 shadow-xs flex flex-col gap-6">
+                      {/* CỔNG KẾT NỐI PHÒNG LIVE CỦA GIÁO VIÊN (1-CLICK CONNECT & MÃ PHÒNG / PIN) */}
+                      <div className="rounded-2xl bg-gradient-to-r from-emerald-950 via-teal-900 to-slate-900 text-white p-5 sm:p-6 border border-emerald-400/30 shadow-md flex flex-col gap-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-11 h-11 rounded-2xl bg-emerald-400/20 border border-emerald-400/40 text-emerald-300 flex items-center justify-center shrink-0">
+                              <span className="material-symbols-outlined text-[24px] animate-pulse">
+                                sensors
+                              </span>
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-black uppercase tracking-wider text-emerald-300">
+                                  📡 CỔNG KẾT NỐI PHÒNG LIVE CỦA GIÁO VIÊN
+                                </span>
+                                {isAnyTeacherLiveActive && liveSession ? (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-red-600 text-white text-[11px] font-black flex items-center gap-1 animate-pulse">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                                    ĐANG PHÁT SÓNG ({liveSession.activeClassId}-T{liveSession.activePeriod})
+                                  </span>
+                                ) : (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-emerald-100 text-[11px] font-bold">
+                                    Sẵn sàng kết nối tức thì (SSE &lt; 30ms)
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-emerald-100/90 mt-0.5">
+                                Đồng bộ 2 chiều thời gian thực toàn bộ Slide Bài Giảng, HĐ 1 (Khởi động), HĐ 2 (Khám phá), HĐ 3 (Luyện tập &amp; Thực hành) và HĐ 4 (Vận dụng) với máy Giáo viên.
+                              </p>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={isScanningLiveRoom}
+                            onClick={() => void handleConnectToTeacherLiveRoom()}
+                            className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-emerald-200 border border-emerald-400/30 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all shrink-0"
+                          >
+                            <span
+                              className={`material-symbols-outlined text-[16px] ${
+                                isScanningLiveRoom ? 'animate-spin' : ''
+                              }`}
+                            >
+                              sync
+                            </span>
+                            <span>
+                              {isScanningLiveRoom ? 'Đang quét sóng Live...' : '🔄 Quét & Đồng Bộ Sóng Live'}
+                            </span>
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-center pt-2 border-t border-white/10">
+                          <div className="lg:col-span-7 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                            <div className="relative flex-1">
+                              <input
+                                type="text"
+                                value={roomCodeInput}
+                                onChange={(e) => setRoomCodeInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    void handleConnectToTeacherLiveRoom(roomCodeInput);
+                                  }
+                                }}
+                                placeholder={`Nhập Mã Phòng Live (VD: ${
+                                  liveSession?.activeClassId || currentStudent.classId
+                                }-T${liveSession?.activePeriod || 1} hoặc T1..T29)`}
+                                className="w-full px-4 py-2.5 rounded-xl bg-black/35 border border-emerald-400/35 text-white placeholder:text-emerald-200/50 text-xs sm:text-sm font-bold focus:outline-none focus:border-amber-400"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleConnectToTeacherLiveRoom(
+                                  roomCodeInput.trim() ||
+                                    `${liveSession?.activeClassId || currentStudent.classId}-T${
+                                      liveSession?.activePeriod || 1
+                                    }`
+                                )
+                              }
+                              className="px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs sm:text-sm cursor-pointer shadow-md transition-all flex items-center justify-center gap-1.5 shrink-0"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">vpn_key</span>
+                              <span>Kết Nối Bằng Mã Phòng</span>
+                            </button>
+                          </div>
+
+                          <div className="lg:col-span-5 flex items-center justify-end">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleConnectToTeacherLiveRoom(
+                                  `${liveSession?.activeClassId || currentStudent.classId}-T${
+                                    liveSession?.activePeriod || 1
+                                  }`
+                                )
+                              }
+                              className="w-full py-3 px-5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs sm:text-sm shadow-lg cursor-pointer transition-all flex items-center justify-center gap-2"
+                            >
+                              <span className="material-symbols-outlined text-[20px]">bolt</span>
+                              <span>
+                                🚀 VÀO NGAY PHÒNG LIVE GIÁO VIÊN (
+                                {liveSession?.activeClassId || currentStudent.classId} • TIẾT{' '}
+                                {liveSession?.activePeriod || 1})
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {isAnyTeacherLiveActive && liveSession ? (
                         <div className="flex flex-col gap-6">
                           <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100">
-                            <div className="flex items-center gap-2.5">
+                            <div className="flex items-center gap-2.5 flex-wrap">
                               <span className="px-3.5 py-1.5 rounded-full bg-red-500 text-white text-xs font-black flex items-center gap-1.5 animate-pulse">
                                 <span className="w-2 h-2 rounded-full bg-white" />
                                 <span>TIẾT HỌC ĐANG PHÁT TRỰC TIẾP</span>
                               </span>
-                              <span className="text-xs text-slate-500 font-semibold">
-                                Lớp {liveSession.activeClassId} • Khối {liveSession.activeGrade}
+                              <span className="text-xs text-slate-700 font-bold">
+                                Lớp {liveSession.activeClassId} • Khối {liveSession.activeGrade} • Mã Phòng:{' '}
+                                <strong className="text-red-600">
+                                  {liveSession.activeClassId}-T{liveSession.activePeriod}
+                                </strong>
                               </span>
                             </div>
 
@@ -1812,13 +2026,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                 <strong className="px-2.5 py-1 rounded-full bg-sky-50 border border-sky-200 text-sky-700 font-bold">
                                   👥 Học cùng: {currentStudent.partnerName}
                                 </strong>
-                              ) : companionMode === 'solo' ? (
+                              ) : (
                                 <strong className="px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold">
                                   👤 Học cá nhân (1 mình)
-                                </strong>
-                              ) : (
-                                <strong className="px-2.5 py-1 rounded-full bg-amber-50 border border-amber-300 text-amber-800 font-bold">
-                                  ⚠️ Chưa xác nhận bạn đồng hành
                                 </strong>
                               )}
                             </div>
@@ -1827,23 +2037,27 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-gradient-to-r from-red-50 via-orange-50/50 to-amber-50 p-6 rounded-2xl border border-red-100">
                             <div className="flex flex-col gap-2">
                               <span className="text-xs uppercase tracking-wider font-bold text-red-600">
-                                Tiết {liveSession.activePeriod} • Chương trình GDPT 2018
+                                Khối {liveSession.activeGrade} • Tiết {liveSession.activePeriod} • Chương trình GDPT 2018
                               </span>
                               <h2 className="text-xl sm:text-2xl font-black text-slate-900">
-                                {gradePeriods.find((p) => p.period === liveSession.activePeriod)
-                                  ?.lessonTitle || 'Thông tin và dữ liệu'}
+                                {getPeriodsForGrade(liveSession.activeGrade).find(
+                                  (p) => p.period === liveSession.activePeriod
+                                )?.lessonTitle || 'Thông tin và dữ liệu'}
                               </h2>
                               <p className="text-xs sm:text-sm text-slate-600">
-                                Giáo viên đang phát <strong>Hoạt động {liveSession.activeStage || 1}</strong>.{' '}
-                                {companionMode === 'unselected' ? (
-                                  <span className="text-amber-700 font-bold">
-                                    (Hãy xác nhận bạn đồng hành hoặc học 1 mình để mở khóa vào Phòng Live)
-                                  </span>
-                                ) : (
-                                  <span className="text-emerald-700 font-bold">
-                                    ✓ Đã xác nhận chế độ đồng hành — Sẵn sàng vào Phòng Live!
-                                  </span>
-                                )}
+                                Giáo viên đang điều khiển trực tiếp:{' '}
+                                <strong className="text-red-700">
+                                  {liveSession.activeLiveView === 'waiting' ||
+                                  liveSession.activeLiveView === 'slide'
+                                    ? 'Bảng Slide Bài Giảng (Phòng Live Chính)'
+                                    : liveSession.activeLiveView === 'hd3-practice'
+                                    ? 'Hoạt động 3: Thực hành máy tính'
+                                    : `Hoạt động ${liveSession.activeStage || 1}`}
+                                </strong>
+                                .{' '}
+                                <span className="text-emerald-700 font-bold">
+                                  ✓ Đã đồng bộ — Bấm nút bên phải để vào thẳng bàn học trên Phòng Live Chính!
+                                </span>
                               </p>
                             </div>
 
@@ -1858,34 +2072,42 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                               className="px-8 py-4 rounded-full bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white font-black text-sm shadow-lg hover:shadow-xl transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0 animate-pulse"
                             >
                               <span className="material-symbols-outlined text-[22px]">
-                                {companionMode === 'unselected' ? 'group_add' : 'play_circle'}
+                                play_circle
                               </span>
-                              <span>
-                                {companionMode === 'unselected'
-                                  ? 'CHỌN BẠN ĐỒNG HÀNH & VÀO PHÒNG LIVE'
-                                  : 'VÀO PHÒNG HỌC LIVE NGAY'}
-                              </span>
+                              <span>KẾT NỐI &amp; VÀO PHÒNG LIVE NGAY</span>
                             </button>
                           </div>
                         </div>
                       ) : (
-                        <div className="py-12 flex flex-col items-center justify-center text-center gap-3">
-                          <div className="w-16 h-16 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center">
-                            <span className="material-symbols-outlined text-[32px]">sensors_off</span>
+                        <div className="py-8 flex flex-col items-center justify-center text-center gap-3 bg-slate-50/70 rounded-2xl border border-dashed border-slate-200 p-6">
+                          <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                            <span className="material-symbols-outlined text-[28px]">meeting_room</span>
                           </div>
                           <h3 className="text-base font-bold text-slate-800">
-                            Chưa có tiết học nào đang phát trực tiếp
+                            Phòng Live Chính Lớp {currentStudent.classId} sẵn sàng kết nối
                           </h3>
-                          <p className="text-xs text-slate-500 max-w-md">
-                            Thầy/Cô sẽ kích hoạt tiết live khi bắt đầu buổi học trên lớp. Em hãy chuẩn bị máy và bạn đồng hành, hoặc chuyển sang <strong>Tab 2: Toàn bộ tiết học</strong> để tự luyện bài tập đã học!
+                          <p className="text-xs text-slate-500 max-w-lg">
+                            Em có thể bấm <strong>&quot;🚀 VÀO NGAY PHÒNG LIVE GIÁO VIÊN&quot;</strong> ở thanh kết nối phía trên để vào thẳng bàn học trong Không gian Lớp học ảo và tự động đồng bộ ngay khi Thầy/Cô chuyển Slide hoặc mở các Hoạt động 1, 2, 3, 4!
                           </p>
-                          <button
-                            type="button"
-                            onClick={() => setHomeTab('toan-bo-tiet-hoc')}
-                            className="mt-2 px-5 py-2.5 rounded-full bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-xs cursor-pointer"
-                          >
-                            Xem toàn bộ 29 tiết học
-                          </button>
+                          <div className="flex flex-wrap items-center justify-center gap-2.5 mt-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleConnectToTeacherLiveRoom(`${currentStudent.classId}-T1`)
+                              }
+                              className="px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-sm cursor-pointer flex items-center gap-1.5"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">sensors</span>
+                              <span>Vào trước Phòng Live Chính ({currentStudent.classId})</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setHomeTab('toan-bo-tiet-hoc')}
+                              className="px-5 py-2.5 rounded-full bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-xs cursor-pointer"
+                            >
+                              Xem toàn bộ 29 tiết học
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>

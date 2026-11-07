@@ -432,13 +432,40 @@ export default function App() {
     };
   }, []);
 
-  // Poll /api/live-session every 2.5s with backoff for static hosts like GitHub Pages
+  // Real-time SSE stream (/api/live-session/stream) + fast fallback polling for instant Teacher <-> Student sync
   useEffect(() => {
     let active = true;
     let consecutiveErrors = 0;
+    let es: EventSource | null = null;
+
+    if (typeof EventSource !== 'undefined') {
+      try {
+        es = new EventSource('/api/live-session/stream');
+        es.onmessage = (ev) => {
+          if (!active) return;
+          if (Date.now() - lastLocalMutationAtRef.current < 450) return;
+          try {
+            const serverState = JSON.parse(ev.data);
+            if (serverState && serverState.updatedAt) {
+              setLiveSession((prev) => {
+                if (new Date(serverState.updatedAt).getTime() >= new Date(prev.updatedAt).getTime()) {
+                  return normalizeLiveSession(serverState, prev);
+                }
+                return prev;
+              });
+            }
+          } catch {
+            // ignore
+          }
+        };
+      } catch {
+        // fallback to polling
+      }
+    }
+
     const poll = async () => {
-      if (consecutiveErrors >= 3) return;
-      if (Date.now() - lastLocalMutationAtRef.current < 2800) return;
+      if (consecutiveErrors >= 5) return;
+      if (Date.now() - lastLocalMutationAtRef.current < 600) return;
       const pollStartAt = Date.now();
       try {
         const res = await fetch('/api/live-session');
@@ -448,8 +475,7 @@ export default function App() {
         }
         consecutiveErrors = 0;
         if (!active) return;
-        // If a local mutation occurred while this poll request was in-flight, discard stale response!
-        if (pollStartAt < lastLocalMutationAtRef.current || Date.now() - lastLocalMutationAtRef.current < 2800) {
+        if (pollStartAt < lastLocalMutationAtRef.current || Date.now() - lastLocalMutationAtRef.current < 600) {
           return;
         }
         const serverState = await res.json();
@@ -465,10 +491,13 @@ export default function App() {
         consecutiveErrors++;
       }
     };
-    const timer = window.setInterval(poll, 2500);
+    const timer = window.setInterval(poll, 1500);
     return () => {
       active = false;
       window.clearInterval(timer);
+      if (es) {
+        es.close();
+      }
     };
   }, []);
 

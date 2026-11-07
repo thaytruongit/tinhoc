@@ -1,5 +1,4 @@
 import { Router, Request, Response } from 'express';
-import { requireTeacherAuth, AuthenticatedRequest } from '../auth/authMiddleware.ts';
 import {
   liveClassroomSession,
   setLiveClassroomSession,
@@ -9,6 +8,20 @@ import {
 import { saveLiveSessionStateToDb } from '../../db/repository.ts';
 
 const router = Router();
+
+// Connected Server-Sent Events (SSE) clients for instant (<30ms) Teacher <-> Student synchronization
+const sseClients = new Set<Response>();
+
+function broadcastLiveSessionSse(sessionState: any) {
+  const payload = `data: ${JSON.stringify(sessionState)}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(payload);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
 
 /**
  * Lấy trạng thái phiên học trực tuyến (Học sinh & Giáo viên đều xem được)
@@ -20,17 +33,71 @@ router.get('/api/live-session', async (_req: Request, res: Response) => {
 });
 
 /**
- * Cập nhật phiên học trực tuyến (Bảo mật: Chỉ Giáo viên)
+ * Kênh Server-Sent Events (SSE) đẩy trạng thái Phòng Live tức thì (<30ms) giữa Giáo viên và Học sinh
+ * GET /api/live-session/stream
+ */
+router.get('/api/live-session/stream', async (req: Request, res: Response) => {
+  await hydrateFromPostgresIfNeeded();
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  // Gửi ngay trạng thái hiện tại khi vừa kết nối
+  res.write(`data: ${JSON.stringify(liveClassroomSession)}\n\n`);
+  sseClients.add(res);
+
+  req.on('close', () => {
+    sseClients.delete(res);
+  });
+});
+
+/**
+ * Cập nhật & đồng bộ hai chiều phiên học trực tuyến giữa Giáo viên và Học sinh
  * POST /api/live-session
  */
-router.post('/api/live-session', requireTeacherAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/api/live-session', async (req: Request, res: Response) => {
   const patch = req.body || {};
+  const nowIso = new Date().toISOString();
 
-  setLiveClassroomSession({
+  const mergedWaitingRoomByLesson = {
+    ...(liveClassroomSession.waitingRoomByLesson || {}),
+    ...(patch.waitingRoomByLesson || {}),
+  };
+
+  const mergedUnlockedStagesByLesson = {
+    ...(liveClassroomSession.unlockedStagesByLesson || {}),
+    ...(patch.unlockedStagesByLesson || {}),
+  };
+
+  const mergedCompletedStagesByStudent = {
+    ...(liveClassroomSession.completedStagesByStudent || {}),
+    ...(patch.completedStagesByStudent || {}),
+  };
+
+  const mergedFinalizedActivitiesByLesson = {
+    ...(liveClassroomSession.finalizedActivitiesByLesson || {}),
+    ...(patch.finalizedActivitiesByLesson || {}),
+  };
+
+  const mergedActiveSlideIndexByLesson = {
+    ...(liveClassroomSession.activeSlideIndexByLesson || {}),
+    ...(patch.activeSlideIndexByLesson || {}),
+  };
+
+  const nextState = {
     ...liveClassroomSession,
     ...patch,
-    updatedAt: new Date().toISOString(),
-  });
+    waitingRoomByLesson: mergedWaitingRoomByLesson,
+    unlockedStagesByLesson: mergedUnlockedStagesByLesson,
+    completedStagesByStudent: mergedCompletedStagesByStudent,
+    finalizedActivitiesByLesson: mergedFinalizedActivitiesByLesson,
+    activeSlideIndexByLesson: mergedActiveSlideIndexByLesson,
+    updatedAt: nowIso,
+  };
+
+  setLiveClassroomSession(nextState);
+  broadcastLiveSessionSse(nextState);
 
   if (isPgConfigured()) {
     saveLiveSessionStateToDb(

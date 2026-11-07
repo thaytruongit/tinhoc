@@ -84,13 +84,17 @@ export function isStudentLiveViewUnlocked(params: {
     unlockedStages,
   } = params;
 
-  // When in standby/waiting state (entering Live room or after ending an activity), all activities stop and remain locked
-  if (teacherActiveView === 'waiting') {
+  // When in standby/waiting/slide state (entering Live room or after ending an activity), all activities stop and remain locked
+  if (teacherActiveView === 'waiting' || teacherActiveView === 'slide') {
     return false;
   }
 
   if (viewId === 'hd3-practice') {
-    return Boolean(isPracticeStage3Unlocked);
+    return Boolean(isPracticeStage3Unlocked || teacherActiveView === 'hd3-practice');
+  }
+
+  if (teacherActiveView === `hd${viewId}`) {
+    return true;
   }
 
   return Boolean(unlockedStages?.[viewId]);
@@ -314,6 +318,18 @@ export function buildBroadcastSingleActivityState<T extends Record<string, any>>
         4: activity === 'hd4',
       },
     },
+    ...(prev.waitingRoomByLesson?.[lessonKey]
+      ? {
+          waitingRoomByLesson: {
+            ...prev.waitingRoomByLesson,
+            [lessonKey]: {
+              ...prev.waitingRoomByLesson[lessonKey],
+              activeBoardMode: activity,
+              updatedAt: nowIso,
+            },
+          },
+        }
+      : {}),
     ...(activity === 'hd3'
       ? {
           arenaCountdownStateByLesson: {
@@ -358,6 +374,18 @@ export function buildStopSingleActivityState<T extends Record<string, any>>(
       ...(prev.unlockedPracticeStage3ByLesson || {}),
       [lessonKey]: false,
     },
+    ...(prev.waitingRoomByLesson?.[lessonKey]
+      ? {
+          waitingRoomByLesson: {
+            ...prev.waitingRoomByLesson,
+            [lessonKey]: {
+              ...prev.waitingRoomByLesson[lessonKey],
+              activeBoardMode: 'slide',
+              updatedAt: nowIso,
+            },
+          },
+        }
+      : {}),
     arenaCountdownStateByLesson: prevArena
       ? {
           ...(prev.arenaCountdownStateByLesson || {}),
@@ -556,6 +584,18 @@ export function normalizeLiveSession<T extends Record<string, any>>(
       raw.whiteboardByLesson && typeof raw.whiteboardByLesson === 'object'
         ? raw.whiteboardByLesson
         : defaultSession.whiteboardByLesson || {},
+    waitingRoomByLesson: {
+      ...(defaultSession.waitingRoomByLesson || {}),
+      ...(raw.waitingRoomByLesson && typeof raw.waitingRoomByLesson === 'object'
+        ? raw.waitingRoomByLesson
+        : {}),
+    },
+    activeSlideIndexByLesson: {
+      ...(defaultSession.activeSlideIndexByLesson || {}),
+      ...(raw.activeSlideIndexByLesson && typeof raw.activeSlideIndexByLesson === 'object'
+        ? raw.activeSlideIndexByLesson
+        : {}),
+    },
     arenaCountdownStateByLesson:
       raw.arenaCountdownStateByLesson &&
       typeof raw.arenaCountdownStateByLesson === 'object'

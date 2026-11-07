@@ -715,9 +715,9 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
 
   useEffect(() => {
     if (role !== 'student' || !currentStudent) return;
-    if (currentStudent.classId !== classId) return;
 
-    const mySeat = allSeats.find((s) => s.studentId === currentStudent.id);
+    const mySeat =
+      allSeats.find((s) => s.studentId === currentStudent.id) || allSeats[0];
     const alreadyIn = waitingState.joinedStudentIds.includes(currentStudent.id);
 
     if (!alreadyIn) {
@@ -725,8 +725,8 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
         const res = registerStudentJoinWaitingRoom(prev, {
           id: currentStudent.id,
           name: currentStudent.name,
-          classId: currentStudent.classId,
-          stationNumber: currentStudent.stationNumber,
+          classId,
+          stationNumber: currentStudent.stationNumber || mySeat?.stationNumber || '01',
           team: mySeat?.team || 1,
         });
         if (res.accepted && !res.alreadyJoined) {
@@ -737,7 +737,7 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
             period,
             studentId: currentStudent.id,
             studentName: currentStudent.name,
-            stationNumber: currentStudent.stationNumber,
+            stationNumber: currentStudent.stationNumber || mySeat?.stationNumber || '01',
             team: mySeat?.team || 1,
             totalCount: allSeats.length,
             waitingRoomState: res.nextState,
@@ -1136,6 +1136,65 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
     );
   };
 
+  const notifyStageCompletionToTeacher = (
+    stageCode: 'stage2' | 'stage3' | 'stage4',
+    scoreEarned: number
+  ) => {
+    const actor =
+      currentStudent ||
+      students.find((s) => s.classId === classId) ||
+      students[0];
+    if (!actor) return;
+
+    const nowIso = new Date().toISOString();
+    const completionEvent = {
+      id: `comp-${actor.id}-${lessonKey}-${stageCode}-${Date.now()}`,
+      studentId: actor.id,
+      studentName: actor.name,
+      classId,
+      grade,
+      period,
+      stage: stageCode,
+      score: scoreEarned,
+      xpAwarded: 30,
+      timestampIso: nowIso,
+    };
+
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('cloudplay_realtime_sync');
+        bc.postMessage({
+          type: 'STUDENT_STAGE_COMPLETED',
+          completionEvent,
+        });
+        bc.close();
+      }
+    } catch {
+      // ignore
+    }
+
+    if (onUpdateLiveSession) {
+      const numericStage: 1 | 2 | 3 | 4 =
+        stageCode === 'stage2' ? 2 : stageCode === 'stage3' ? 3 : 4;
+      onUpdateLiveSession((prev) => {
+        const prevMap = prev.completedStagesByStudent || {};
+        const prevStages = prevMap[actor.id] || [];
+        const nextStages: ('hd3-practice' | 1 | 2 | 3 | 4)[] = prevStages.includes(numericStage)
+          ? prevStages
+          : [...prevStages, numericStage];
+        return {
+          ...prev,
+          lastStudentStageCompletion: completionEvent as any,
+          completedStagesByStudent: {
+            ...prevMap,
+            [actor.id]: nextStages,
+          },
+          updatedAt: nowIso,
+        };
+      });
+    }
+  };
+
   // Stage 2 (Khám phá) Submission on Chalkboard
   const handleSubmitStage2OnBoard = () => {
     const dragItems = blueprint.stage2.dragItems || [];
@@ -1177,6 +1236,7 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
         team: targetSeat.team,
       });
     }
+    notifyStageCompletionToTeacher('stage2', score);
     onAwardXp?.(30);
     onShowToast(`🎉 Đã nộp Phiếu học tập HĐ 2 (${score}/10 điểm) • +3 điểm thi đua cho Tổ ${team}!`);
   };
@@ -1239,6 +1299,7 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
 
     if (isCorrect) {
       activateDeskBurstForStudent(currentStudent.id, myTeam);
+      notifyStageCompletionToTeacher('stage3', 10);
       if (!alreadyAnswered && onAwardXp) {
         onAwardXp(20);
       }
@@ -1310,6 +1371,7 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
         team: targetSeat.team,
       });
     }
+    notifyStageCompletionToTeacher('stage3', 10);
     onAwardXp?.(30);
     onShowToast(`💻 Đã nộp sản phẩm Thực hành lên Bảng lớp (+3đ Tổ ${team})!`);
   };
@@ -1343,6 +1405,7 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
         team: targetSeat.team,
       });
     }
+    notifyStageCompletionToTeacher('stage4', 10);
     onAwardXp?.(25);
     onShowToast(`🚀 Đã gửi bài Vận dụng thực tiễn lên Bảng lớp (+3đ Tổ ${team})!`);
   };
@@ -1590,102 +1653,6 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
         </div>
       )}
 
-      {/* 1. TOP CLASSROOM CONTROL BAR (PHÒNG LIVE CHÍNH LỚP HỌC) */}
-      <div className="px-4 sm:px-6 py-3 bg-gradient-to-r from-[#4A2E16] via-[#5C3A1D] to-[#4A2E16] border-b-2 border-[#8D5B2E] flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2.5 bg-black/35 border border-amber-400/30 rounded-full pl-1.5 pr-3.5 py-1">
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-300 to-orange-500 flex items-center justify-center text-lg font-black text-slate-950 border-2 border-white shadow-sm">
-              👩‍🏫
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-xs sm:text-sm font-extrabold text-white">
-                  Thầy Đỗ Mạnh Trường
-                </span>
-                <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase animate-pulse">
-                  🔴 PHÒNG LIVE CHÍNH LỚP HỌC
-                </span>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black uppercase">
-                  ĐỒNG BỘ GV ↔ HS
-                </span>
-              </div>
-              <div className="text-[11px] text-amber-200/90 font-medium">
-                Lớp trực tiếp: <strong className="text-white">Lớp {classId}</strong> • Sĩ số tại bàn:{' '}
-                <strong className="text-emerald-300 tabular-nums">
-                  {joinedCount}/{allSeats.length} bạn
-                </strong>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Controls */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={handleManualHeartFireworkReaction}
-            className="px-3 py-2 rounded-full bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white font-black text-xs cursor-pointer shadow-md border border-pink-300/50 transition-all flex items-center gap-1"
-            title="Bắn hiệu ứng Thả tim & Pháo hoa tại bàn học"
-          >
-            <span>❤️🎆</span>
-            <span>Thả tim &amp; Pháo hoa</span>
-          </button>
-
-          {role === 'teacher' ? (
-            <>
-              <button
-                type="button"
-                onClick={() => setIsConfigModalOpen(true)}
-                className="px-3.5 py-2 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer shadow-md transition-all flex items-center gap-1.5"
-                title="Cấu hình Slide PDF & Hoạt động Khởi động (Hybrid 3 Tầng)"
-              >
-                <span>📑</span>
-                <span>Cấu hình Slide &amp; HĐ 1 (3 Tầng)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleAdmitSingleWaitingStudent}
-                className="px-3 py-2 rounded-full bg-pink-100 hover:bg-pink-200 text-rose-950 font-black text-xs cursor-pointer shadow-md transition-all flex items-center gap-1"
-              >
-                <span>👋❤️</span>
-                <span>+1 HS vào phòng</span>
-              </button>
-
-              {joinedCount < allSeats.length && (
-                <button
-                  type="button"
-                  onClick={handleAdmitNextBatchOrAll}
-                  className="px-3.5 py-2 rounded-full bg-amber-200 hover:bg-amber-100 text-slate-950 font-black text-xs cursor-pointer shadow-md transition-all flex items-center gap-1"
-                >
-                  <span>⚡</span>
-                  <span>Đón đủ {allSeats.length} HS Lớp {classId} vào bàn</span>
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={handleTeacherMarkReadyForLearning}
-                className="px-4 py-2 rounded-full bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-600 hover:to-teal-700 text-white font-black text-xs cursor-pointer shadow-lg border-2 border-emerald-200 transition-all flex items-center gap-1.5"
-              >
-                <span>🚀</span>
-                <span>
-                  {resolvedBoardMode === 'slide'
-                    ? 'Chuyển sang Hoạt động 1 (Khởi động)'
-                    : 'Quay lại Trình chiếu Slide'}
-                </span>
-              </button>
-            </>
-          ) : (
-            <div className="flex items-center gap-2">
-              <span className="px-3.5 py-1.5 rounded-full bg-emerald-500/25 border border-emerald-300/40 text-emerald-200 text-xs font-bold">
-                ✓ Em đang ngồi tại bàn Lớp {classId} ({currentStudent?.name})
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* NEW STUDENT JOIN BANNER */}
       {joinBannerAlert && (
         <div className="px-5 py-2 bg-gradient-to-r from-rose-600 via-pink-600 to-amber-500 text-white font-black text-xs sm:text-sm flex items-center justify-between gap-3 shadow-lg border-b border-white/30 animate-pulse">
@@ -1701,70 +1668,8 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
         </div>
       )}
 
-      {/* 2. GREEN CHALKBOARD SECTION — BẢNG TRÌNH CHIẾU SLIDE & TOÀN BỘ HOẠT ĐỘNG TRỰC QUAN ĐỒNG BỘ GV - HS */}
-      <div className="relative bg-gradient-to-b from-[#1B4D3E] via-[#174235] to-[#12352A] border-b-[10px] border-[#8C5622] px-4 sm:px-7 pt-3 pb-6 shadow-inner">
-        {/* Top Chalkboard Header: Stage Mode Tabs + Class Plaque + Team Tug-of-War Score Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-          {/* Unified Stage Switcher Tabs on Chalkboard */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {CHALKBOARD_STAGE_TABS.map((tab) => {
-              const isActive = resolvedBoardMode === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => handleSelectBoardMode(tab.id)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-black transition-all cursor-pointer flex items-center gap-1 border ${
-                    isActive
-                      ? 'bg-amber-400 text-slate-950 border-white shadow-md scale-[1.03]'
-                      : 'bg-black/30 hover:bg-black/45 text-emerald-100 border-emerald-400/30'
-                  }`}
-                >
-                  <span>{tab.icon}</span>
-                  <span className="hidden md:inline">{tab.label}</span>
-                  <span className="md:hidden">{tab.shortLabel}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Center Wooden Scroll Plaque */}
-          <div className="px-5 py-1 rounded-full bg-gradient-to-b from-[#FCE7C8] to-[#E5C08D] border-2 border-[#8C5622] shadow-md text-[#4A2C11] font-black text-xs sm:text-sm tracking-tight">
-            Lớp {classId} · Tin Học {grade} (Tiết {period})
-          </div>
-
-          {/* Right Team 1 vs Team 2 Tug-of-War Score Bar + Expand Board Button */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-black/25 px-3 py-1 rounded-full border border-white/15">
-              <span className="text-xs font-black text-amber-300 tabular-nums">
-                TỔ 1 · {waitingState.team1Score}
-              </span>
-              <div className="w-20 sm:w-24 h-2.5 rounded-full bg-sky-500 overflow-hidden relative flex items-center border border-white/30">
-                <div
-                  className="h-full bg-rose-500 transition-all duration-300"
-                  style={{ width: `${team1Percent}%` }}
-                />
-                <div
-                  className="absolute top-0 bottom-0 w-1 bg-white shadow-sm"
-                  style={{ left: `calc(${team1Percent}% - 2px)` }}
-                />
-              </div>
-              <span className="text-xs font-black text-sky-300 tabular-nums">
-                {waitingState.team2Score} · TỔ 2
-              </span>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setIsBoardExpanded((prev) => !prev)}
-              className="px-2.5 py-1 rounded-full bg-white/15 hover:bg-white/25 border border-white/30 text-white text-[11px] font-bold cursor-pointer"
-              title="Phóng to hoặc thu gọn chiều cao Bảng Trình Chiếu"
-            >
-              {isBoardExpanded ? '🗗 Thu gọn Bảng' : '🗖 Mở rộng Bảng'}
-            </button>
-          </div>
-        </div>
-
+      {/* GREEN CHALKBOARD SECTION — BẢNG TRÌNH CHIẾU SLIDE & TOÀN BỘ HOẠT ĐỘNG TRỰC QUAN ĐỒNG BỘ GV - HS */}
+      <div className="relative bg-gradient-to-b from-[#1B4D3E] via-[#174235] to-[#12352A] border-b-[10px] border-[#8C5622] px-4 sm:px-7 pt-4 pb-6 shadow-inner">
         {/* =========================================================================================
             MAIN CHALKBOARD STAGE CONTENT (REPLACES OLD WARMUP QUESTION WITH SLIDES & ALL ACTIVITIES)
            ========================================================================================= */}
