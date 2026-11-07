@@ -84,20 +84,25 @@ export function isStudentLiveViewUnlocked(params: {
     unlockedStages,
   } = params;
 
-  // When in standby/waiting/slide state (entering Live room or after ending an activity), all activities stop and remain locked
+  if (viewId === 'hd3-practice') {
+    if (typeof isPracticeStage3Unlocked === 'boolean') {
+      return isPracticeStage3Unlocked;
+    }
+    if (teacherActiveView === 'waiting' || teacherActiveView === 'slide') {
+      return false;
+    }
+    return teacherActiveView === 'hd3-practice';
+  }
+
+  if (unlockedStages && typeof unlockedStages[viewId] === 'boolean') {
+    return Boolean(unlockedStages[viewId]);
+  }
+
   if (teacherActiveView === 'waiting' || teacherActiveView === 'slide') {
     return false;
   }
 
-  if (viewId === 'hd3-practice') {
-    return Boolean(isPracticeStage3Unlocked || teacherActiveView === 'hd3-practice');
-  }
-
-  if (teacherActiveView === `hd${viewId}`) {
-    return true;
-  }
-
-  return Boolean(unlockedStages?.[viewId]);
+  return teacherActiveView === `hd${viewId}`;
 }
 
 /**
@@ -400,6 +405,116 @@ export function buildStopSingleActivityState<T extends Record<string, any>>(
 }
 
 /**
+ * Builds the updated session state when the Teacher locks or unlocks a specific activity
+ * (1, 2, 3, 'hd3-practice', or 4).
+ * - If locking (`nextUnlocked === false`) the currently broadcasting activity, automatically
+ *   reverts `activeLiveView` to `'waiting'` and `waitingRoom.activeBoardMode` to `'slide'`
+ *   so the Student screen immediately locks that activity and returns smoothly to the Slide Deck.
+ */
+export function buildToggleActivityLockState<T extends Record<string, any>>(
+  prev: T,
+  params: {
+    lessonKey: string;
+    activity: 1 | 2 | 3 | 4 | 'hd3-practice';
+    nextUnlocked: boolean;
+    arenaDurationSec?: number;
+    pushPayload?: any;
+  }
+): T & Record<string, any> {
+  const {
+    lessonKey,
+    activity,
+    nextUnlocked,
+    arenaDurationSec = 300,
+    pushPayload,
+  } = params;
+  const nowIso = new Date().toISOString();
+  const activityViewKey =
+    activity === 'hd3-practice' ? 'hd3-practice' : (`hd${activity}` as const);
+
+  const prevStages = prev.unlockedStagesByLesson?.[lessonKey] || {
+    1: false,
+    2: false,
+    3: false,
+    4: false,
+  };
+
+  const nextStages =
+    activity === 'hd3-practice'
+      ? prevStages
+      : {
+          ...prevStages,
+          [activity]: nextUnlocked,
+        };
+
+  const nextPracticeUnlocked =
+    activity === 'hd3-practice'
+      ? nextUnlocked
+      : Boolean(prev.unlockedPracticeStage3ByLesson?.[lessonKey]);
+
+  const wasBroadcastingThis =
+    prev.activeLiveView === activityViewKey ||
+    prev.waitingRoomByLesson?.[lessonKey]?.activeBoardMode === activityViewKey;
+
+  const nextActiveLiveView =
+    !nextUnlocked && wasBroadcastingThis ? 'waiting' : prev.activeLiveView;
+
+  const prevWaitingRoom = prev.waitingRoomByLesson?.[lessonKey];
+  const nextWaitingRoom = prevWaitingRoom
+    ? {
+        ...prevWaitingRoom,
+        activeBoardMode:
+          !nextUnlocked && prevWaitingRoom.activeBoardMode === activityViewKey
+            ? ('slide' as const)
+            : prevWaitingRoom.activeBoardMode,
+        updatedAt: nowIso,
+      }
+    : undefined;
+
+  const prevArena = prev.arenaCountdownStateByLesson?.[lessonKey];
+
+  return {
+    ...prev,
+    activeLiveView: nextActiveLiveView,
+    unlockedStagesByLesson: {
+      ...(prev.unlockedStagesByLesson || {}),
+      [lessonKey]: nextStages,
+    },
+    unlockedPracticeStage3ByLesson: {
+      ...(prev.unlockedPracticeStage3ByLesson || {}),
+      [lessonKey]: nextPracticeUnlocked,
+    },
+    ...(nextWaitingRoom
+      ? {
+          waitingRoomByLesson: {
+            ...(prev.waitingRoomByLesson || {}),
+            [lessonKey]: nextWaitingRoom,
+          },
+        }
+      : {}),
+    ...(activity === 3
+      ? {
+          arenaCountdownStateByLesson: {
+            ...(prev.arenaCountdownStateByLesson || {}),
+            [lessonKey]: nextUnlocked
+              ? {
+                  isRunning: true,
+                  durationSec: arenaDurationSec,
+                  startedAtIso: nowIso,
+                }
+              : {
+                  ...(prevArena || { durationSec: arenaDurationSec, startedAtIso: nowIso }),
+                  isRunning: false,
+                },
+          },
+        }
+      : {}),
+    ...(pushPayload ? { lastPushNotification: pushPayload } : {}),
+    updatedAt: nowIso,
+  };
+}
+
+/**
  * Normalizes an activity or sub-exercise key for consistency across views.
  */
 export function normalizeActivityKey(activityKey: string | number): string {
@@ -594,6 +709,12 @@ export function normalizeLiveSession<T extends Record<string, any>>(
       ...(defaultSession.activeSlideIndexByLesson || {}),
       ...(raw.activeSlideIndexByLesson && typeof raw.activeSlideIndexByLesson === 'object'
         ? raw.activeSlideIndexByLesson
+        : {}),
+    },
+    slideDeckVersionByLesson: {
+      ...(defaultSession.slideDeckVersionByLesson || {}),
+      ...(raw.slideDeckVersionByLesson && typeof raw.slideDeckVersionByLesson === 'object'
+        ? raw.slideDeckVersionByLesson
         : {}),
     },
     arenaCountdownStateByLesson:

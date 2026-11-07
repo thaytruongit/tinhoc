@@ -152,6 +152,10 @@ export const PreLiveSlideConfigModal: React.FC<PreLiveSlideConfigModalProps> = (
             ...(prev.activeSlideIndexByLesson || {}),
             [savedRes.deck.lessonKey]: 0,
           },
+          slideDeckVersionByLesson: {
+            ...(prev.slideDeckVersionByLesson || {}),
+            [savedRes.deck.lessonKey]: Date.now(),
+          },
           updatedAt: new Date().toISOString(),
         }));
       }
@@ -175,6 +179,16 @@ export const PreLiveSlideConfigModal: React.FC<PreLiveSlideConfigModalProps> = (
     setDeck(res.deck);
     setIsSaving(false);
     setProgressText('');
+    if (onUpdateLiveSession) {
+      onUpdateLiveSession((prev) => ({
+        ...prev,
+        slideDeckVersionByLesson: {
+          ...(prev.slideDeckVersionByLesson || {}),
+          [res.deck.lessonKey]: Date.now(),
+        },
+        updatedAt: new Date().toISOString(),
+      }));
+    }
     onDeckSaved?.(res.deck);
     onShowToast(
       `💾 Đã lưu cấu hình Slide & Hoạt động Khởi động (Khối ${grade} • Tiết ${period}) vào IndexedDB & Server!`
@@ -203,6 +217,20 @@ export const PreLiveSlideConfigModal: React.FC<PreLiveSlideConfigModalProps> = (
     });
     setDeck(def);
     setPreviewSlideIdx(0);
+    if (onUpdateLiveSession) {
+      onUpdateLiveSession((prev) => ({
+        ...prev,
+        activeSlideIndexByLesson: {
+          ...(prev.activeSlideIndexByLesson || {}),
+          [lessonKey]: 0,
+        },
+        slideDeckVersionByLesson: {
+          ...(prev.slideDeckVersionByLesson || {}),
+          [lessonKey]: Date.now(),
+        },
+        updatedAt: new Date().toISOString(),
+      }));
+    }
     onDeckSaved?.(def);
     onShowToast(`🔄 Đã khôi phục bộ Slide Vector HD mặc định cho Khối ${grade} • Tiết ${period}.`);
   };

@@ -897,7 +897,7 @@ export interface StudentWorkDraft {
   clueInputs?: Record<string, string>;
   solvedClueIds?: string[];
   dragSlots?: Record<number, string | null>;
-  fillBlankInputs?: { a: string; b: string; c: string; [key: string]: string };
+  fillBlankInputs?: { a: string; b: string; c: string;[key: string]: string };
   matchingConnections?: Record<string, string>;
   shortAnswers?: Record<string, string>;
   arenaAnswers?: Record<number, 'A' | 'B' | 'C' | 'D'>;
@@ -969,14 +969,14 @@ export interface LiveClassroomSession {
   activePeriod: number;
   activeStage: 1 | 2 | 3 | 4;
   activeLiveView?:
-    | 'waiting'
-    | 'slide'
-    | 'whiteboard'
-    | 'hd1'
-    | 'hd2'
-    | 'hd3'
-    | 'hd3-practice'
-    | 'hd4';
+  | 'waiting'
+  | 'slide'
+  | 'whiteboard'
+  | 'hd1'
+  | 'hd2'
+  | 'hd3'
+  | 'hd3-practice'
+  | 'hd4';
   activeClassId: string;
   activeSlideIndexByLesson?: Record<string, number>;
   unlockedSlideDeckByLesson?: Record<string, boolean>;
@@ -1050,6 +1050,7 @@ export interface LiveClassroomSession {
   lowBandwidthMode?: boolean;
   studentFocusAlerts?: Record<string, StudentFocusAlertItem>;
   waitingRoomByLesson?: Record<string, WaitingRoomState>;
+  slideDeckVersionByLesson?: Record<string, number>;
   googleSheetsCsdlConfig?: {
     spreadsheetId: string;
     spreadsheetUrl: string;
@@ -1364,7 +1365,7 @@ export function createDefaultLiveSession(): LiveClassroomSession {
     practicalSubmissions: INITIAL_PRACTICAL_SUBMISSIONS,
     studentDraftsByKey: {},
     taggedSubmissions: INITIAL_TAGGED_SUBMISSIONS,
-    updatedAt: new Date().toISOString(),
+    updatedAt: '2025-01-01T00:00:00.000Z',
   };
 }
 
@@ -1515,10 +1516,10 @@ export function getPeriodsForGrade(grade: 6 | 7 | 8 | 9): CurriculumPeriodSpec[]
     grade === 6
       ? GRADE_6_RAW
       : grade === 7
-      ? GRADE_7_RAW
-      : grade === 8
-      ? GRADE_8_RAW
-      : GRADE_9_RAW;
+        ? GRADE_7_RAW
+        : grade === 8
+          ? GRADE_8_RAW
+          : GRADE_9_RAW;
 
   const gradeInfo =
     NOTEBOOK_GRADE_SOURCES.find((g) => g.grade === grade) || NOTEBOOK_GRADE_SOURCES[0];
@@ -1534,12 +1535,12 @@ export function getPeriodsForGrade(grade: 6 | 7 | 8 | 9): CurriculumPeriodSpec[]
         period <= 7
           ? 'GK1'
           : period <= 15
-          ? 'CK1'
-          : period <= 22
-          ? 'GK2'
-          : period <= 27
-          ? 'CK2'
-          : 'TONG_KET';
+            ? 'CK1'
+            : period <= 22
+              ? 'GK2'
+              : period <= 27
+                ? 'CK2'
+                : 'TONG_KET';
 
       return {
         id: `k${grade}-tiet-${period}`,
@@ -1666,35 +1667,35 @@ export function buildLessonBlueprintFromPeriod(
         spec.grade === 6 && spec.period === 1
           ? baseDefault.stage1.crosswordClues
           : [
-              {
-                id: `${spec.id}-cw1`,
-                rowNumber: 1,
-                clue: `Khái niệm nền tảng đầu tiên trong ${spec.sgkFile} của bài học này là gì?`,
-                answer: 'DULIEUSO',
-                hintTileLabel: 'Mảnh ghép 1: Kiến thức cốt lõi SGK',
-              },
-              {
-                id: `${spec.id}-cw2`,
-                rowNumber: 2,
-                clue: `Năng lực khai thác và ứng dụng công nghệ hiện đại trong ${spec.nlsAiFile} gọi là gì?`,
-                answer: 'NANGLUCSO',
-                hintTileLabel: 'Mảnh ghép 2: Năng lực số (NLS)',
-              },
-              {
-                id: `${spec.id}-cw3`,
-                rowNumber: 3,
-                clue: `Công nghệ thông minh hỗ trợ con người giải quyết vấn đề tự động là gì?`,
-                answer: 'TRITUENHANTAO',
-                hintTileLabel: 'Mảnh ghép 3: Năng lực AI',
-              },
-              {
-                id: `${spec.id}-cw4`,
-                rowNumber: 4,
-                clue: `Nguyên tắc quan trọng nhất khi hoạt động trên môi trường mạng Internet là gì?`,
-                answer: 'ANTOAN',
-                hintTileLabel: 'Mảnh ghép 4: An toàn & Đạo đức số',
-              },
-            ],
+            {
+              id: `${spec.id}-cw1`,
+              rowNumber: 1,
+              clue: `Khái niệm nền tảng đầu tiên trong ${spec.sgkFile} của bài học này là gì?`,
+              answer: 'DULIEUSO',
+              hintTileLabel: 'Mảnh ghép 1: Kiến thức cốt lõi SGK',
+            },
+            {
+              id: `${spec.id}-cw2`,
+              rowNumber: 2,
+              clue: `Năng lực khai thác và ứng dụng công nghệ hiện đại trong ${spec.nlsAiFile} gọi là gì?`,
+              answer: 'NANGLUCSO',
+              hintTileLabel: 'Mảnh ghép 2: Năng lực số (NLS)',
+            },
+            {
+              id: `${spec.id}-cw3`,
+              rowNumber: 3,
+              clue: `Công nghệ thông minh hỗ trợ con người giải quyết vấn đề tự động là gì?`,
+              answer: 'TRITUENHANTAO',
+              hintTileLabel: 'Mảnh ghép 3: Năng lực AI',
+            },
+            {
+              id: `${spec.id}-cw4`,
+              rowNumber: 4,
+              clue: `Nguyên tắc quan trọng nhất khi hoạt động trên môi trường mạng Internet là gì?`,
+              answer: 'ANTOAN',
+              hintTileLabel: 'Mảnh ghép 4: An toàn & Đạo đức số',
+            },
+          ],
       openScenarioPrompt: `Liên hệ thực tế (${spec.lessonTitle}): Em hãy nêu 1 ví dụ ứng dụng công nghệ số hoặc AI liên quan đến bài học hôm nay?`,
       expectedWordCloud: [
         `Tin học ${spec.grade}`,
@@ -1718,27 +1719,27 @@ export function buildLessonBlueprintFromPeriod(
         spec.grade === 6 && spec.period === 1
           ? baseDefault.stage2.dragItems
           : [
-              {
-                id: `${spec.id}-d1`,
-                text: `Nắm vững khái niệm cốt lõi trong ${spec.sgkFile} (${spec.sgkPages})`,
-                correctBox: 'data',
-              },
-              {
-                id: `${spec.id}-d2`,
-                text: `Vận dụng ${spec.digitalCompetency.split('(')[0].trim()}`,
-                correctBox: 'info',
-              },
-              {
-                id: `${spec.id}-d3`,
-                text: `Tuân thủ quy trình chuẩn mực thao tác trên máy tính`,
-                correctBox: 'data',
-              },
-              {
-                id: `${spec.id}-d4`,
-                text: `Tích hợp ${spec.aiCompetency.split('(')[0].trim()}`,
-                correctBox: 'info',
-              },
-            ],
+            {
+              id: `${spec.id}-d1`,
+              text: `Nắm vững khái niệm cốt lõi trong ${spec.sgkFile} (${spec.sgkPages})`,
+              correctBox: 'data',
+            },
+            {
+              id: `${spec.id}-d2`,
+              text: `Vận dụng ${spec.digitalCompetency.split('(')[0].trim()}`,
+              correctBox: 'info',
+            },
+            {
+              id: `${spec.id}-d3`,
+              text: `Tuân thủ quy trình chuẩn mực thao tác trên máy tính`,
+              correctBox: 'data',
+            },
+            {
+              id: `${spec.id}-d4`,
+              text: `Tích hợp ${spec.aiCompetency.split('(')[0].trim()}`,
+              correctBox: 'info',
+            },
+          ],
       blank1Label: (() => {
         const ext = AUTHENTIC_PDF_EXTRACTS[spec.id] || AUTHENTIC_PDF_EXTRACTS[`k${spec.grade}-tiet-${spec.period}`];
         return ext?.fillBlankQuestions?.[0]?.label ? `Điền khuyết ${ext.fillBlankQuestions[0].label}` : 'Từ khóa 1';
@@ -1759,22 +1760,22 @@ export function buildLessonBlueprintFromPeriod(
         spec.grade === 6 && spec.period === 1
           ? baseDefault.stage2.matchingPairs
           : [
-              {
-                id: `${spec.id}-mp1`,
-                left: `Yêu cầu cần đạt (${spec.sgkFile})`,
-                right: spec.yccd,
-              },
-              {
-                id: `${spec.id}-mp2`,
-                left: `Năng lực số (${spec.nlsAiFile})`,
-                right: spec.digitalCompetency,
-              },
-              {
-                id: `${spec.id}-mp3`,
-                left: `Năng lực AI (${spec.nlsAiFile})`,
-                right: spec.aiCompetency,
-              },
-            ],
+            {
+              id: `${spec.id}-mp1`,
+              left: `Yêu cầu cần đạt (${spec.sgkFile})`,
+              right: spec.yccd,
+            },
+            {
+              id: `${spec.id}-mp2`,
+              left: `Năng lực số (${spec.nlsAiFile})`,
+              right: spec.digitalCompetency,
+            },
+            {
+              id: `${spec.id}-mp3`,
+              left: `Năng lực AI (${spec.nlsAiFile})`,
+              right: spec.aiCompetency,
+            },
+          ],
       textImagePrompt: (() => {
         const ext = AUTHENTIC_PDF_EXTRACTS[spec.id] || AUTHENTIC_PDF_EXTRACTS[`k${spec.grade}-tiet-${spec.period}`];
         return ext?.shortAnswerPrompt || `Dựa vào nội dung ${spec.lessonTitle} (${spec.sgkPages}), hãy trả lời câu hỏi thực tế.`;
@@ -1790,211 +1791,211 @@ export function buildLessonBlueprintFromPeriod(
         spec.grade === 6 && spec.period === 1
           ? INITIAL_MINIGAME_QUESTIONS.slice(0, 6).map((q) => ({ ...q, points: 0.5 }))
           : [
-              {
-                id: `${spec.id}-q1`,
-                order: 1,
-                question: `Câu 1 [Nhận biết - ${spec.lessonTitle}]: Trọng tâm kiến thức "${spec.knowledgeSection}" giúp em nắm vững điều gì?`,
-                timeLimitSec: 25,
-                points: 0.5,
-                status: 'Đã duyệt',
-                options: [
-                  {
-                    letter: 'A',
-                    text: spec.yccd,
-                    explanation: `Đúng chuẩn Yêu cầu cần đạt của ${spec.lessonTitle} (${spec.sgkFile}).`,
-                    isCorrect: true,
-                  },
-                  {
-                    letter: 'B',
-                    text: 'Bỏ qua việc kiểm tra dữ liệu đầu vào và quy tắc an toàn thông tin.',
-                    explanation: 'Sai nguyên tắc chuẩn Tin học GDPT 2018.',
-                    isCorrect: false,
-                  },
-                  {
-                    letter: 'C',
-                    text: 'Chỉ ghi nhớ lý thuyết mà không cần thực hành hay vận dụng.',
-                    explanation: 'Sai định hướng phát triển năng lực.',
-                    isCorrect: false,
-                  },
-                  {
-                    letter: 'D',
-                    text: 'Sử dụng phần mềm tùy ý không theo hướng dẫn.',
-                    explanation: 'Sai quy trình kỹ thuật.',
-                    isCorrect: false,
-                  },
-                ],
-              },
-              {
-                id: `${spec.id}-q2`,
-                order: 2,
-                question: `Câu 2 [Nhận biết - Chủ đề ${spec.topic}]: Khi thực hiện nhiệm vụ trong ${spec.lessonTitle}, thao tác nào sau đây là chuẩn xác nhất?`,
-                timeLimitSec: 25,
-                points: 0.5,
-                status: 'Đã duyệt',
-                options: [
-                  {
-                    letter: 'A',
-                    text: 'Làm ngẫu nhiên không cần xác định dữ liệu đầu vào.',
-                    explanation: 'Sai quy trình xử lý thông tin.',
-                    isCorrect: false,
-                  },
-                  {
-                    letter: 'B',
-                    text: `Xác định rõ mục tiêu "${spec.knowledgeSection}" và thực hiện tuần tự các bước hướng dẫn trong ${spec.sgkPages}.`,
-                    explanation: 'Chính xác theo quy trình bài học.',
-                    isCorrect: true,
-                  },
-                  {
-                    letter: 'C',
-                    text: 'Tắt máy tính ngay khi chưa lưu kết quả làm việc.',
-                    explanation: 'Sai: gây mất dữ liệu.',
-                    isCorrect: false,
-                  },
-                  {
-                    letter: 'D',
-                    text: 'Chia sẻ mật khẩu cá nhân cho người lạ trên mạng.',
-                    explanation: 'Sai quy tắc an toàn thông tin.',
-                    isCorrect: false,
-                  },
-                ],
-              },
-              {
-                id: `${spec.id}-q3`,
-                order: 3,
-                question: `Câu 3 [Thông hiểu - Năng lực số]: Trong ${spec.lessonTitle}, chỉ báo Năng lực số nào được phát triển trọng tâm?`,
-                timeLimitSec: 25,
-                points: 0.5,
-                status: 'Đã duyệt',
-                options: [
-                  {
-                    letter: 'A',
-                    text: 'Không sử dụng bất kỳ công cụ kỹ thuật số nào.',
-                    explanation: 'Sai.',
-                    isCorrect: false,
-                  },
-                  {
-                    letter: 'B',
-                    text: 'Sao chép trái phép nội dung không rõ nguồn gốc.',
-                    explanation: 'Vi phạm đạo đức và bản quyền số.',
-                    isCorrect: false,
-                  },
-                  {
-                    letter: 'C',
-                    text: spec.digitalCompetency,
-                    explanation: `Chính xác theo bảng ánh xạ ${spec.nlsAiFile}.`,
-                    isCorrect: true,
-                  },
-                  {
-                    letter: 'D',
-                    text: 'Xóa toàn bộ thư mục hệ thống của máy tính.',
-                    explanation: 'Sai.',
-                    isCorrect: false,
-                  },
-                ],
-              },
-              {
-                id: `${spec.id}-q4`,
-                order: 4,
-                question: `Câu 4 [Thông hiểu - Năng lực AI]: Theo định hướng ${spec.nlsAiFile}, ứng dụng Trí tuệ nhân tạo (AI) trong bài học này là gì?`,
-                timeLimitSec: 25,
-                points: 0.5,
-                status: 'Đã duyệt',
-                options: [
-                  {
-                    letter: 'A',
-                    text: 'Phụ thuộc hoàn toàn vào AI mà không cần suy nghĩ hay kiểm chứng.',
-                    explanation: 'Sai nguyên tắc sử dụng AI có trách nhiệm.',
-                    isCorrect: false,
-                  },
-                  {
-                    letter: 'B',
-                    text: 'Cung cấp thông tin cá nhân nhạy cảm lên công cụ AI công cộng.',
-                    explanation: 'Sai quy tắc bảo mật dữ liệu cá nhân.',
-                    isCorrect: false,
-                  },
-                  {
-                    letter: 'C',
-                    text: 'Dùng AI để tạo thông tin sai sự thật.',
-                    explanation: 'Vi phạm đạo đức AI.',
-                    isCorrect: false,
-                  },
-                  {
-                    letter: 'D',
-                    text: spec.aiCompetency,
-                    explanation: `Đúng chuẩn khung Năng lực AI (${spec.nlsAiFile}).`,
-                    isCorrect: true,
-                  },
-                ],
-              },
-              {
-                id: `${spec.id}-q5`,
-                order: 5,
-                question: `Câu 5 [Vận dụng - Thực tiễn]: Em vận dụng kiến thức "${spec.lessonTitle}" vào học tập và đời sống như thế nào để đạt hiệu quả cao nhất?`,
-                timeLimitSec: 25,
-                points: 0.5,
-                status: 'Đã duyệt',
-                options: [
-                  {
-                    letter: 'A',
-                    text: `Kết hợp kiến thức "${spec.knowledgeSection}" với công cụ số để giải quyết bài toán thực tế nhanh chóng, chính xác và an toàn.`,
-                    explanation: 'Chính xác: Thể hiện năng lực vận dụng thực tiễn.',
-                    isCorrect: true,
-                  },
-                  {
-                    letter: 'B',
-                    text: 'Lưu trữ dữ liệu lộn xộn không đặt tên tệp và thư mục.',
-                    explanation: 'Sai nguyên tắc tổ chức dữ liệu.',
-                    isCorrect: false,
-                  },
-                  {
-                    letter: 'C',
-                    text: 'Không kiểm tra lại kết quả sau khi thực hiện.',
-                    explanation: 'Sai quy trình giải quyết vấn đề.',
-                    isCorrect: false,
-                  },
-                  {
-                    letter: 'D',
-                    text: 'Bỏ qua các cảnh báo lỗi của phần mềm.',
-                    explanation: 'Sai.',
-                    isCorrect: false,
-                  },
-                ],
-              },
-              {
-                id: `${spec.id}-q6`,
-                order: 6,
-                question: `Câu 6 [Vận dụng cao - Tổng hợp]: Để hoàn thành tốt sản phẩm của ${spec.lessonTitle} (Khối ${spec.grade}), em cần đảm bảo các tiêu chí nào?`,
-                timeLimitSec: 25,
-                points: 0.5,
-                status: 'Đã duyệt',
-                options: [
-                  {
-                    letter: 'A',
-                    text: 'Chỉ cần hình thức đẹp, không cần đúng nội dung.',
-                    explanation: 'Chưa đủ yêu cầu cần đạt.',
-                    isCorrect: false,
-                  },
-                  {
-                    letter: 'B',
-                    text: `Đạt chuẩn yêu cầu cần đạt (${spec.sgkFile}), tổ chức dữ liệu khoa học và ứng dụng công nghệ/AI có trách nhiệm.`,
-                    explanation: 'Chính xác! Đạt trọn vẹn 3 tiêu chí đánh giá của tiết học.',
-                    isCorrect: true,
-                  },
-                  {
-                    letter: 'C',
-                    text: 'Nộp tệp trống không có dữ liệu.',
-                    explanation: 'Sai.',
-                    isCorrect: false,
-                  },
-                  {
-                    letter: 'D',
-                    text: 'Không tuân thủ quy tắc an toàn phòng máy.',
-                    explanation: 'Sai.',
-                    isCorrect: false,
-                  },
-                ],
-              },
-            ],
+            {
+              id: `${spec.id}-q1`,
+              order: 1,
+              question: `Câu 1 [Nhận biết - ${spec.lessonTitle}]: Trọng tâm kiến thức "${spec.knowledgeSection}" giúp em nắm vững điều gì?`,
+              timeLimitSec: 25,
+              points: 0.5,
+              status: 'Đã duyệt',
+              options: [
+                {
+                  letter: 'A',
+                  text: spec.yccd,
+                  explanation: `Đúng chuẩn Yêu cầu cần đạt của ${spec.lessonTitle} (${spec.sgkFile}).`,
+                  isCorrect: true,
+                },
+                {
+                  letter: 'B',
+                  text: 'Bỏ qua việc kiểm tra dữ liệu đầu vào và quy tắc an toàn thông tin.',
+                  explanation: 'Sai nguyên tắc chuẩn Tin học GDPT 2018.',
+                  isCorrect: false,
+                },
+                {
+                  letter: 'C',
+                  text: 'Chỉ ghi nhớ lý thuyết mà không cần thực hành hay vận dụng.',
+                  explanation: 'Sai định hướng phát triển năng lực.',
+                  isCorrect: false,
+                },
+                {
+                  letter: 'D',
+                  text: 'Sử dụng phần mềm tùy ý không theo hướng dẫn.',
+                  explanation: 'Sai quy trình kỹ thuật.',
+                  isCorrect: false,
+                },
+              ],
+            },
+            {
+              id: `${spec.id}-q2`,
+              order: 2,
+              question: `Câu 2 [Nhận biết - Chủ đề ${spec.topic}]: Khi thực hiện nhiệm vụ trong ${spec.lessonTitle}, thao tác nào sau đây là chuẩn xác nhất?`,
+              timeLimitSec: 25,
+              points: 0.5,
+              status: 'Đã duyệt',
+              options: [
+                {
+                  letter: 'A',
+                  text: 'Làm ngẫu nhiên không cần xác định dữ liệu đầu vào.',
+                  explanation: 'Sai quy trình xử lý thông tin.',
+                  isCorrect: false,
+                },
+                {
+                  letter: 'B',
+                  text: `Xác định rõ mục tiêu "${spec.knowledgeSection}" và thực hiện tuần tự các bước hướng dẫn trong ${spec.sgkPages}.`,
+                  explanation: 'Chính xác theo quy trình bài học.',
+                  isCorrect: true,
+                },
+                {
+                  letter: 'C',
+                  text: 'Tắt máy tính ngay khi chưa lưu kết quả làm việc.',
+                  explanation: 'Sai: gây mất dữ liệu.',
+                  isCorrect: false,
+                },
+                {
+                  letter: 'D',
+                  text: 'Chia sẻ mật khẩu cá nhân cho người lạ trên mạng.',
+                  explanation: 'Sai quy tắc an toàn thông tin.',
+                  isCorrect: false,
+                },
+              ],
+            },
+            {
+              id: `${spec.id}-q3`,
+              order: 3,
+              question: `Câu 3 [Thông hiểu - Năng lực số]: Trong ${spec.lessonTitle}, chỉ báo Năng lực số nào được phát triển trọng tâm?`,
+              timeLimitSec: 25,
+              points: 0.5,
+              status: 'Đã duyệt',
+              options: [
+                {
+                  letter: 'A',
+                  text: 'Không sử dụng bất kỳ công cụ kỹ thuật số nào.',
+                  explanation: 'Sai.',
+                  isCorrect: false,
+                },
+                {
+                  letter: 'B',
+                  text: 'Sao chép trái phép nội dung không rõ nguồn gốc.',
+                  explanation: 'Vi phạm đạo đức và bản quyền số.',
+                  isCorrect: false,
+                },
+                {
+                  letter: 'C',
+                  text: spec.digitalCompetency,
+                  explanation: `Chính xác theo bảng ánh xạ ${spec.nlsAiFile}.`,
+                  isCorrect: true,
+                },
+                {
+                  letter: 'D',
+                  text: 'Xóa toàn bộ thư mục hệ thống của máy tính.',
+                  explanation: 'Sai.',
+                  isCorrect: false,
+                },
+              ],
+            },
+            {
+              id: `${spec.id}-q4`,
+              order: 4,
+              question: `Câu 4 [Thông hiểu - Năng lực AI]: Theo định hướng ${spec.nlsAiFile}, ứng dụng Trí tuệ nhân tạo (AI) trong bài học này là gì?`,
+              timeLimitSec: 25,
+              points: 0.5,
+              status: 'Đã duyệt',
+              options: [
+                {
+                  letter: 'A',
+                  text: 'Phụ thuộc hoàn toàn vào AI mà không cần suy nghĩ hay kiểm chứng.',
+                  explanation: 'Sai nguyên tắc sử dụng AI có trách nhiệm.',
+                  isCorrect: false,
+                },
+                {
+                  letter: 'B',
+                  text: 'Cung cấp thông tin cá nhân nhạy cảm lên công cụ AI công cộng.',
+                  explanation: 'Sai quy tắc bảo mật dữ liệu cá nhân.',
+                  isCorrect: false,
+                },
+                {
+                  letter: 'C',
+                  text: 'Dùng AI để tạo thông tin sai sự thật.',
+                  explanation: 'Vi phạm đạo đức AI.',
+                  isCorrect: false,
+                },
+                {
+                  letter: 'D',
+                  text: spec.aiCompetency,
+                  explanation: `Đúng chuẩn khung Năng lực AI (${spec.nlsAiFile}).`,
+                  isCorrect: true,
+                },
+              ],
+            },
+            {
+              id: `${spec.id}-q5`,
+              order: 5,
+              question: `Câu 5 [Vận dụng - Thực tiễn]: Em vận dụng kiến thức "${spec.lessonTitle}" vào học tập và đời sống như thế nào để đạt hiệu quả cao nhất?`,
+              timeLimitSec: 25,
+              points: 0.5,
+              status: 'Đã duyệt',
+              options: [
+                {
+                  letter: 'A',
+                  text: `Kết hợp kiến thức "${spec.knowledgeSection}" với công cụ số để giải quyết bài toán thực tế nhanh chóng, chính xác và an toàn.`,
+                  explanation: 'Chính xác: Thể hiện năng lực vận dụng thực tiễn.',
+                  isCorrect: true,
+                },
+                {
+                  letter: 'B',
+                  text: 'Lưu trữ dữ liệu lộn xộn không đặt tên tệp và thư mục.',
+                  explanation: 'Sai nguyên tắc tổ chức dữ liệu.',
+                  isCorrect: false,
+                },
+                {
+                  letter: 'C',
+                  text: 'Không kiểm tra lại kết quả sau khi thực hiện.',
+                  explanation: 'Sai quy trình giải quyết vấn đề.',
+                  isCorrect: false,
+                },
+                {
+                  letter: 'D',
+                  text: 'Bỏ qua các cảnh báo lỗi của phần mềm.',
+                  explanation: 'Sai.',
+                  isCorrect: false,
+                },
+              ],
+            },
+            {
+              id: `${spec.id}-q6`,
+              order: 6,
+              question: `Câu 6 [Vận dụng cao - Tổng hợp]: Để hoàn thành tốt sản phẩm của ${spec.lessonTitle} (Khối ${spec.grade}), em cần đảm bảo các tiêu chí nào?`,
+              timeLimitSec: 25,
+              points: 0.5,
+              status: 'Đã duyệt',
+              options: [
+                {
+                  letter: 'A',
+                  text: 'Chỉ cần hình thức đẹp, không cần đúng nội dung.',
+                  explanation: 'Chưa đủ yêu cầu cần đạt.',
+                  isCorrect: false,
+                },
+                {
+                  letter: 'B',
+                  text: `Đạt chuẩn yêu cầu cần đạt (${spec.sgkFile}), tổ chức dữ liệu khoa học và ứng dụng công nghệ/AI có trách nhiệm.`,
+                  explanation: 'Chính xác! Đạt trọn vẹn 3 tiêu chí đánh giá của tiết học.',
+                  isCorrect: true,
+                },
+                {
+                  letter: 'C',
+                  text: 'Nộp tệp trống không có dữ liệu.',
+                  explanation: 'Sai.',
+                  isCorrect: false,
+                },
+                {
+                  letter: 'D',
+                  text: 'Không tuân thủ quy tắc an toàn phòng máy.',
+                  explanation: 'Sai.',
+                  isCorrect: false,
+                },
+              ],
+            },
+          ],
       practicalTaskTitle: `Phiếu Bài Thực Hành Điện Tử Tiết ${spec.period} (Khối ${spec.grade}): ${spec.lessonTitle}`,
       practicalTaskSteps: [
         `Bước 1: Mở phần mềm thực hành theo hướng dẫn tại ${spec.sgkPages} (${spec.knowledgeSection}) và thực hiện nhiệm vụ trọng tâm.`,

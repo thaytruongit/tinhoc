@@ -10,6 +10,7 @@ import {
   buildStartLiveSessionStandbyState,
   buildBroadcastSingleActivityState,
   buildStopSingleActivityState,
+  buildToggleActivityLockState,
   isActivityFinalized,
   buildToggleFinalizeActivityState,
   normalizeActivityKey,
@@ -92,6 +93,24 @@ test('isStudentLiveViewUnlocked and isolated activity builders enforce standby o
     3: false,
     4: false,
   });
+
+  // 4. Locking a currently broadcasting activity via buildToggleActivityLockState locks it and reverts student view to 'waiting'/'slide'
+  const lockedHd2 = buildToggleActivityLockState(hd2Session, {
+    lessonKey: 'k6-tiet-1',
+    activity: 2,
+    nextUnlocked: false,
+  });
+  assert.equal(lockedHd2.activeLiveView, 'waiting');
+  assert.equal(lockedHd2.unlockedStagesByLesson['k6-tiet-1'][2], false);
+  assert.equal(
+    isStudentLiveViewUnlocked({
+      viewId: 2,
+      teacherActiveView: lockedHd2.activeLiveView,
+      unlockedStages: lockedHd2.unlockedStagesByLesson['k6-tiet-1'],
+      teacherCurrentStage: 2,
+    }),
+    false
+  );
 });
 
 test('computeArenaRemainingSeconds and formatCountdownMmSs calculate accurate countdown', () => {

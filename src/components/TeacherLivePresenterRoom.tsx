@@ -14,6 +14,7 @@ import {
   formatCountdownMmSs,
   buildBroadcastSingleActivityState,
   buildStopSingleActivityState,
+  buildToggleActivityLockState,
   isActivityFinalized,
   buildToggleFinalizeActivityState,
 } from '../utils/slideAndArenaController';
@@ -254,10 +255,9 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
         });
         triggerSynchronizedCelebration();
         onShowToast(
-          `👑 TOP 1 BỨT PHÁ DẪN ĐẦU: ${currentLeader.name}${
-            currentLeader.partnerName && currentLeader.partnerName !== 'Học cá nhân (1 mình)'
-              ? ` & ${currentLeader.partnerName}`
-              : ''
+          `👑 TOP 1 BỨT PHÁ DẪN ĐẦU: ${currentLeader.name}${currentLeader.partnerName && currentLeader.partnerName !== 'Học cá nhân (1 mình)'
+            ? ` & ${currentLeader.partnerName}`
+            : ''
           } vừa vươn lên dẫn đầu bảng xếp hạng (${currentLeader.xp.toLocaleString()} XP)!`
         );
         const timer = setTimeout(() => {
@@ -288,10 +288,9 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     });
     triggerSynchronizedCelebration();
     onShowToast(
-      `👑 TOP 1 BỨT PHÁ DẪN ĐẦU: ${secondStudent.name}${
-        secondStudent.partnerName && secondStudent.partnerName !== 'Học cá nhân (1 mình)'
-          ? ` & ${secondStudent.partnerName}`
-          : ''
+      `👑 TOP 1 BỨT PHÁ DẪN ĐẦU: ${secondStudent.name}${secondStudent.partnerName && secondStudent.partnerName !== 'Học cá nhân (1 mình)'
+        ? ` & ${secondStudent.partnerName}`
+        : ''
       } vừa vươn lên dẫn đầu bảng xếp hạng (${secondStudent.xp.toLocaleString()} XP)!`
     );
 
@@ -366,16 +365,16 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
         ...(prev.arenaCountdownStateByLesson || {}),
         [lessonKey]: currentlyRunning
           ? {
-              isRunning: false,
-              durationSec: currentArena?.durationSec || arenaDurationSec,
-              startedAtIso: new Date().toISOString(),
-              remainingSecOnPause: currentRem,
-            }
+            isRunning: false,
+            durationSec: currentArena?.durationSec || arenaDurationSec,
+            startedAtIso: new Date().toISOString(),
+            remainingSecOnPause: currentRem,
+          }
           : {
-              isRunning: true,
-              durationSec: currentRem > 0 ? currentRem : arenaDurationSec,
-              startedAtIso: new Date().toISOString(),
-            },
+            isRunning: true,
+            durationSec: currentRem > 0 ? currentRem : arenaDurationSec,
+            startedAtIso: new Date().toISOString(),
+          },
       },
       updatedAt: new Date().toISOString(),
     }));
@@ -424,46 +423,46 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     const nextState = !isPracticeStage3Unlocked;
     const pushPayload = nextState
       ? {
-          id: `push-${Date.now()}`,
-          title: `🔔 PUSH NOTIFICATION: MỞ KHÓA THỰC HÀNH PHÒNG MÁY!`,
-          body: `Thầy Đỗ Mạnh Trường vừa MỞ KHÓA Hoạt động 3 (Thực hành máy tính & Nộp bài Drive) cho Lớp ${classId}!`,
-          stage: 'hd3-practice' as const,
-          stageLabel: 'Thực hành máy tính',
-          lessonTitle: periodSpec.lessonTitle,
-          classId,
-          grade,
-          period,
-          timestampIso: new Date().toISOString(),
-        }
-      : null;
+        id: `push-${Date.now()}`,
+        title: `🔔 PUSH NOTIFICATION: MỞ KHÓA THỰC HÀNH PHÒNG MÁY!`,
+        body: `Thầy Đỗ Mạnh Trường vừa MỞ KHÓA Hoạt động 3 (Thực hành máy tính & Nộp bài Drive) cho Lớp ${classId}!`,
+        stage: 'hd3-practice' as const,
+        stageLabel: 'Thực hành máy tính',
+        lessonTitle: periodSpec.lessonTitle,
+        classId,
+        grade,
+        period,
+        timestampIso: new Date().toISOString(),
+      }
+      : {
+        id: `push-${Date.now()}`,
+        title: `🔒 ĐÃ KHÓA HOẠT ĐỘNG 3 (THỰC HÀNH)`,
+        body: `Thầy Đỗ Mạnh Trường đã khóa Hoạt động 3 (Thực hành máy tính) trên màn hình Lớp ${classId}.`,
+        stage: 'slide' as const,
+        stageLabel: 'Slide Bài Giảng',
+        lessonTitle: periodSpec.lessonTitle,
+        classId,
+        grade,
+        period,
+        timestampIso: new Date().toISOString(),
+      };
 
-    onUpdateLiveSession((prev) => ({
-      ...prev,
-      unlockedPracticeStage3ByLesson: {
-        ...(prev.unlockedPracticeStage3ByLesson || {}),
-        [lessonKey]: nextState,
-      },
-      unlockedStagesByLesson: nextState
-        ? {
-            ...prev.unlockedStagesByLesson,
-            [lessonKey]: {
-              ...(prev.unlockedStagesByLesson?.[lessonKey] || {
-                1: true,
-                2: false,
-                3: false,
-                4: false,
-              }),
-              3: true,
-            },
-          }
-        : prev.unlockedStagesByLesson,
-      ...(pushPayload ? { lastPushNotification: pushPayload } : {}),
-      updatedAt: new Date().toISOString(),
-    }));
+    onUpdateLiveSession((prev) =>
+      buildToggleActivityLockState(prev, {
+        lessonKey,
+        activity: 'hd3-practice',
+        nextUnlocked: nextState,
+        arenaDurationSec,
+        pushPayload,
+      })
+    );
+    if (!nextState && activeTab === 'hd3-practice') {
+      setActiveTab('waiting');
+    }
     onShowToast(
       nextState
         ? `🔓 Đã MỞ KHÓA & phát Push Notification Hoạt động Thực hành cho Lớp ${classId}!`
-        : `🔒 Đã KHÓA Hoạt động Thực hành với học sinh Lớp ${classId}!`
+        : `🔒 Đã KHÓA Hoạt động Thực hành bên màn hình Học sinh Lớp ${classId}!`
     );
   };
 
@@ -509,53 +508,48 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     };
     const pushPayload = nextState
       ? {
-          id: `push-${Date.now()}`,
-          title: `🔔 PUSH NOTIFICATION: MỞ KHÓA HOẠT ĐỘNG ${stage} (${stageLabels[stage]})!`,
-          body: `Thầy Đỗ Mạnh Trường vừa MỞ KHÓA Hoạt động ${stage} - ${stageLabels[stage]} bài "${periodSpec.lessonTitle}" cho Lớp ${classId}!`,
-          stage: stage,
-          stageLabel: `Hoạt động ${stage}: ${stageLabels[stage]}`,
-          lessonTitle: periodSpec.lessonTitle,
-          classId,
-          grade,
-          period,
-          timestampIso: new Date().toISOString(),
-        }
-      : null;
+        id: `push-${Date.now()}`,
+        title: `🔔 PUSH NOTIFICATION: MỞ KHÓA HOẠT ĐỘNG ${stage} (${stageLabels[stage]})!`,
+        body: `Thầy Đỗ Mạnh Trường vừa MỞ KHÓA Hoạt động ${stage} - ${stageLabels[stage]} bài "${periodSpec.lessonTitle}" cho Lớp ${classId}!`,
+        stage: stage,
+        stageLabel: `Hoạt động ${stage}: ${stageLabels[stage]}`,
+        lessonTitle: periodSpec.lessonTitle,
+        classId,
+        grade,
+        period,
+        timestampIso: new Date().toISOString(),
+      }
+      : {
+        id: `push-${Date.now()}`,
+        title: `🔒 ĐÃ KHÓA HOẠT ĐỘNG ${stage} (${stageLabels[stage]})`,
+        body: `Thầy Đỗ Mạnh Trường đã khóa Hoạt động ${stage} - ${stageLabels[stage]} trên màn hình Lớp ${classId}.`,
+        stage: 'slide' as const,
+        stageLabel: 'Slide Bài Giảng',
+        lessonTitle: periodSpec.lessonTitle,
+        classId,
+        grade,
+        period,
+        timestampIso: new Date().toISOString(),
+      };
 
-    onUpdateLiveSession((prev) => ({
-      ...prev,
-      unlockedStagesByLesson: {
-        ...prev.unlockedStagesByLesson,
-        [lessonKey]: {
-          ...(prev.unlockedStagesByLesson?.[lessonKey] || {
-            1: false,
-            2: false,
-            3: false,
-            4: false,
-          }),
-          [stage]: nextState,
-        },
-      },
-      ...(stage === 3 && nextState
-        ? {
-            arenaCountdownStateByLesson: {
-              ...(prev.arenaCountdownStateByLesson || {}),
-              [lessonKey]: {
-                isRunning: true,
-                durationSec: arenaDurationSec,
-                startedAtIso: new Date().toISOString(),
-              },
-            },
-          }
-        : {}),
-      ...(pushPayload ? { lastPushNotification: pushPayload } : {}),
-      updatedAt: new Date().toISOString(),
-    }));
+    onUpdateLiveSession((prev) =>
+      buildToggleActivityLockState(prev, {
+        lessonKey,
+        activity: stage,
+        nextUnlocked: nextState,
+        arenaDurationSec,
+        pushPayload,
+      })
+    );
+
+    if (!nextState && activeTab === `hd${stage}`) {
+      setActiveTab('waiting');
+    }
 
     onShowToast(
       nextState
-        ? `🔓 Đã MỞ KHÓA & phát Push Notification Hoạt động ${stage} cho Lớp ${classId}!`
-        : `🔒 Đã KHÓA Hoạt động ${stage} với học sinh!`
+        ? `🔓 Đã MỞ KHÓA Hoạt động ${stage} (${stageLabels[stage]}) bên Học sinh Lớp ${classId}!`
+        : `🔒 Đã KHÓA Hoạt động ${stage} (${stageLabels[stage]}) bên Học sinh Lớp ${classId}!`
     );
   };
 
@@ -596,8 +590,8 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
     onShowToast(
       stage === 3
         ? `📢 Đang phát Live riêng biệt Đấu trường Luyện tập (HĐ 3) & Đồng hồ đếm ngược ${formatCountdownMmSs(
-            arenaDurationSec
-          )} sang Lớp ${classId}!`
+          arenaDurationSec
+        )} sang Lớp ${classId}!`
         : `📢 Đang phát Live riêng biệt Hoạt động ${stage} (${stageLabels[stage]}) sang Lớp ${classId} — Không liên đới đến các hoạt động khác!`
     );
   };
@@ -608,7 +602,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
       id: `push-${Date.now()}`,
       title: messageTitle || `🔔 THÔNG BÁO TỪ GIÁO VIÊN (LỚP ${classId})`,
       body: messageBody || `Thầy Đỗ Mạnh Trường vừa phát tín hiệu nhắc nhở học sinh tập trung vào bài học "${periodSpec.lessonTitle}"!`,
-      stage: activeTab === 'hd3-practice' ? ('hd3-practice' as const) : (activeStage as 1|2|3|4),
+      stage: activeTab === 'hd3-practice' ? ('hd3-practice' as const) : (activeStage as 1 | 2 | 3 | 4),
       stageLabel: activeTab === 'hd3-practice' ? 'Thực hành máy tính' : `Hoạt động ${activeStage}`,
       lessonTitle: periodSpec.lessonTitle,
       classId,
@@ -729,7 +723,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
         learnedPeriodsByStudent: updatedLearned,
         unlockedStagesByLesson: updatedStages,
       }),
-    }).catch(() => {});
+    }).catch(() => { });
 
     // Broadcast LIVE_SESSION_ENDED to all student browsers via BroadcastChannel
     try {
@@ -794,22 +788,20 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
               <button
                 type="button"
                 onClick={() => setRankingScope('class')}
-                className={`px-3.5 py-1.5 rounded-full text-xs font-bold cursor-pointer transition-all ${
-                  rankingScope === 'class'
-                    ? 'bg-sky-600 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold cursor-pointer transition-all ${rankingScope === 'class'
+                  ? 'bg-sky-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+                  }`}
               >
                 Lớp {classId} ({effectiveClassStudents.length} HS)
               </button>
               <button
                 type="button"
                 onClick={() => setRankingScope('grade')}
-                className={`px-3.5 py-1.5 rounded-full text-xs font-bold cursor-pointer transition-all ${
-                  rankingScope === 'grade'
-                    ? 'bg-sky-600 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold cursor-pointer transition-all ${rankingScope === 'grade'
+                  ? 'bg-sky-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+                  }`}
               >
                 Toàn Khối {grade} ({gradeStudents.length} HS)
               </button>
@@ -837,7 +829,7 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     <span className="text-sm sm:text-base text-white">
                       {topPerformerAlert.name}
                       {topPerformerAlert.partnerName &&
-                      topPerformerAlert.partnerName !== 'Học cá nhân (1 mình)'
+                        topPerformerAlert.partnerName !== 'Học cá nhân (1 mình)'
                         ? ` & ${topPerformerAlert.partnerName}`
                         : ''}{' '}
                       — {topPerformerAlert.xp.toLocaleString()} XP
@@ -878,32 +870,30 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                   idx === 0
                     ? 'from-amber-400 via-orange-500 to-red-500'
                     : idx === 1
-                    ? 'from-sky-400 to-blue-600'
-                    : idx === 2
-                    ? 'from-emerald-400 to-teal-600'
-                    : 'from-slate-400 to-slate-500';
+                      ? 'from-sky-400 to-blue-600'
+                      : idx === 2
+                        ? 'from-emerald-400 to-teal-600'
+                        : 'from-slate-400 to-slate-500';
 
                 return (
                   <div
                     key={st.id}
-                    className={`flex flex-col gap-1 transition-all rounded-xl p-1.5 ${
-                      idx === 0
-                        ? 'bg-gradient-to-r from-amber-100/90 via-yellow-50/90 to-amber-100/90 border-2 border-amber-400 shadow-md ring-2 ring-amber-300/80 animate-pulse'
-                        : ''
-                    }`}
+                    className={`flex flex-col gap-1 transition-all rounded-xl p-1.5 ${idx === 0
+                      ? 'bg-gradient-to-r from-amber-100/90 via-yellow-50/90 to-amber-100/90 border-2 border-amber-400 shadow-md ring-2 ring-amber-300/80 animate-pulse'
+                      : ''
+                      }`}
                   >
                     <div className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2 min-w-0 flex-wrap">
                         <span
-                          className={`px-2 py-0.5 rounded-md font-black text-[11px] shrink-0 ${
-                            idx === 0
-                              ? 'bg-amber-500 text-white shadow-xs'
-                              : idx === 1
+                          className={`px-2 py-0.5 rounded-md font-black text-[11px] shrink-0 ${idx === 0
+                            ? 'bg-amber-500 text-white shadow-xs'
+                            : idx === 1
                               ? 'bg-sky-100 text-sky-800 border border-sky-300'
                               : idx === 2
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                              : 'bg-slate-200 text-slate-700'
-                          }`}
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                : 'bg-slate-200 text-slate-700'
+                            }`}
                         >
                           {rankBadge}
                         </span>
@@ -944,13 +934,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
               {rankedStudents.slice(0, 3).map((st, idx) => (
                 <div
                   key={st.id}
-                  className={`p-3.5 rounded-2xl border text-center flex flex-col items-center gap-1.5 transition-all ${
-                    idx === 0
-                      ? 'bg-gradient-to-b from-amber-100/90 to-yellow-50 border-2 border-amber-400 shadow-md ring-2 ring-amber-300/80 animate-pulse'
-                      : idx === 1
+                  className={`p-3.5 rounded-2xl border text-center flex flex-col items-center gap-1.5 transition-all ${idx === 0
+                    ? 'bg-gradient-to-b from-amber-100/90 to-yellow-50 border-2 border-amber-400 shadow-md ring-2 ring-amber-300/80 animate-pulse'
+                    : idx === 1
                       ? 'bg-sky-50/90 border-sky-200'
                       : 'bg-emerald-50/90 border-emerald-200'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center gap-1">
                     <span className="text-xl">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</span>
@@ -987,11 +976,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          st.submissionStatus === 'Đã nộp'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-amber-100 text-amber-700'
-                        }`}
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${st.submissionStatus === 'Đã nộp'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-amber-100 text-amber-700'
+                          }`}
                       >
                         {st.submissionStatus || 'Đang làm'}
                       </span>
@@ -1031,11 +1019,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
             <nav className="flex flex-col gap-2">
               {/* -1. PHÒNG CHỜ LỚP HỌC LIVE (ĐÓN HỌC SINH LỚP CHỈ ĐỊNH VÀO BÀN) */}
               <div
-                className={`p-3 rounded-2xl border transition-all flex flex-col gap-2 ${
-                  activeTab === 'waiting'
-                    ? 'bg-amber-50/95 border-2 border-amber-400 shadow-xs'
-                    : 'bg-white border-slate-200 hover:bg-slate-50'
-                }`}
+                className={`p-3 rounded-2xl border transition-all flex flex-col gap-2 ${activeTab === 'waiting'
+                  ? 'bg-amber-50/95 border-2 border-amber-400 shadow-xs'
+                  : 'bg-white border-slate-200 hover:bg-slate-50'
+                  }`}
               >
                 <div
                   onClick={() => handleOpenWaitingRoomLobby()}
@@ -1043,13 +1030,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span
-                      className={`material-symbols-outlined text-[22px] ${
-                        liveSession?.activeLiveView === 'waiting'
-                          ? 'text-amber-600'
-                          : activeTab === 'waiting'
+                      className={`material-symbols-outlined text-[22px] ${liveSession?.activeLiveView === 'waiting'
+                        ? 'text-amber-600'
+                        : activeTab === 'waiting'
                           ? 'text-amber-600'
                           : 'text-slate-500'
-                      }`}
+                        }`}
                     >
                       meeting_room
                     </span>
@@ -1077,11 +1063,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       e.stopPropagation();
                       handleOpenWaitingRoomLobby();
                     }}
-                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${
-                      liveSession?.activeLiveView === 'waiting'
-                        ? 'bg-amber-500 text-slate-950 shadow-2xs'
-                        : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
-                    }`}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${liveSession?.activeLiveView === 'waiting'
+                      ? 'bg-amber-500 text-slate-950 shadow-2xs'
+                      : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
+                      }`}
                   >
                     🏫 Đón HS Lớp {classId}
                   </button>
@@ -1099,16 +1084,15 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 </div>
               </div>
 
-              
+
 
               {/* THEO DÕI TIẾN ĐỘ HỌC SINH TRỰC TIẾP (MÔ TẢ CHI TIẾT 4 HOẠT ĐỘNG) */}
               <div
                 onClick={() => setActiveTab('theo-doi-tien-do')}
-                className={`p-3 rounded-2xl border transition-all flex items-center justify-between cursor-pointer ${
-                  activeTab === 'theo-doi-tien-do'
-                    ? 'bg-indigo-50/90 border-2 border-indigo-400 shadow-xs'
-                    : 'bg-white border-slate-200 hover:bg-slate-50'
-                }`}
+                className={`p-3 rounded-2xl border transition-all flex items-center justify-between cursor-pointer ${activeTab === 'theo-doi-tien-do'
+                  ? 'bg-indigo-50/90 border-2 border-indigo-400 shadow-xs'
+                  : 'bg-white border-slate-200 hover:bg-slate-50'
+                  }`}
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <span className="material-symbols-outlined text-[22px] text-indigo-600">
@@ -1160,11 +1144,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 return (
                   <div
                     key={item.id}
-                    className={`p-3 rounded-2xl border transition-all flex flex-col gap-2 ${
-                      isSelected
-                        ? 'bg-orange-50/90 border-2 border-orange-300 shadow-xs'
-                        : 'bg-white border-slate-200 hover:bg-slate-50'
-                    }`}
+                    className={`p-3 rounded-2xl border transition-all flex flex-col gap-2 ${isSelected
+                      ? 'bg-orange-50/90 border-2 border-orange-300 shadow-xs'
+                      : 'bg-white border-slate-200 hover:bg-slate-50'
+                      }`}
                   >
                     <div
                       onClick={() => handleBroadcastStage(item.stage)}
@@ -1172,13 +1155,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <span
-                          className={`material-symbols-outlined text-[22px] ${
-                            isBroadcastingThis
-                              ? 'text-orange-600'
-                              : isSelected
+                          className={`material-symbols-outlined text-[22px] ${isBroadcastingThis
+                            ? 'text-orange-600'
+                            : isSelected
                               ? 'text-sky-600'
                               : 'text-slate-500'
-                          }`}
+                            }`}
                         >
                           {item.icon}
                         </span>
@@ -1211,11 +1193,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                           e.stopPropagation();
                           handleBroadcastStage(item.stage);
                         }}
-                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${
-                          isBroadcastingThis
-                            ? 'bg-orange-600 text-white shadow-2xs'
-                            : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
-                        }`}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${isBroadcastingThis
+                          ? 'bg-orange-600 text-white shadow-2xs'
+                          : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
+                          }`}
                       >
                         📢 Phát Live HĐ {item.stage}
                       </button>
@@ -1240,11 +1221,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                             e.stopPropagation();
                             handleToggleStageLock(item.stage);
                           }}
-                          className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
-                            isUnlocked
-                              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                          }`}
+                          className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${isUnlocked
+                            ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            }`}
                         >
                           {isUnlocked ? '🔓 Đang mở' : '🔒 Đang khóa'}
                         </button>
@@ -1256,11 +1236,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
 
               {/* HOẠT ĐỘNG 3 (TIẾT THỰC HÀNH) — HOẠT ĐỘNG ĐỘC LẬP */}
               <div
-                className={`p-3 rounded-2xl border transition-all flex flex-col gap-2 ${
-                  activeTab === 'hd3-practice'
-                    ? 'bg-orange-50/90 border-2 border-orange-300 shadow-xs'
-                    : 'bg-white border-slate-200 hover:bg-slate-50'
-                }`}
+                className={`p-3 rounded-2xl border transition-all flex flex-col gap-2 ${activeTab === 'hd3-practice'
+                  ? 'bg-orange-50/90 border-2 border-orange-300 shadow-xs'
+                  : 'bg-white border-slate-200 hover:bg-slate-50'
+                  }`}
               >
                 <div
                   onClick={() => handleBroadcastPracticeStage3()}
@@ -1268,13 +1247,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span
-                      className={`material-symbols-outlined text-[22px] ${
-                        liveSession?.activeLiveView === 'hd3-practice'
-                          ? 'text-orange-600'
-                          : activeTab === 'hd3-practice'
+                      className={`material-symbols-outlined text-[22px] ${liveSession?.activeLiveView === 'hd3-practice'
+                        ? 'text-orange-600'
+                        : activeTab === 'hd3-practice'
                           ? 'text-sky-600'
                           : 'text-slate-500'
-                      }`}
+                        }`}
                     >
                       computer
                     </span>
@@ -1307,11 +1285,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       e.stopPropagation();
                       handleBroadcastPracticeStage3();
                     }}
-                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${
-                      liveSession?.activeLiveView === 'hd3-practice'
-                        ? 'bg-orange-600 text-white shadow-2xs'
-                        : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
-                    }`}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${liveSession?.activeLiveView === 'hd3-practice'
+                      ? 'bg-orange-600 text-white shadow-2xs'
+                      : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
+                      }`}
                   >
                     📢 Phát Live Thực hành
                   </button>
@@ -1334,11 +1311,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                         e.stopPropagation();
                         handleTogglePracticeStage3Lock();
                       }}
-                      className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
-                        isPracticeStage3Unlocked
-                          ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
+                      className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${isPracticeStage3Unlocked
+                        ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
                     >
                       {isPracticeStage3Unlocked ? '🔓 Đang mở' : '🔒 Đang khóa'}
                     </button>
@@ -1366,19 +1342,18 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                 const isSelected = activeTab === item.id;
                 const isBroadcastingThis = Boolean(
                   item.stage &&
-                    liveSession?.isBroadcasting &&
-                    liveSession?.activeLiveView === item.id
+                  liveSession?.isBroadcasting &&
+                  liveSession?.activeLiveView === item.id
                 );
                 const isUnlocked = item.stage ? Boolean(currentUnlockedMap[item.stage]) : true;
 
                 return (
                   <div
                     key={item.id}
-                    className={`p-3 rounded-2xl border transition-all flex flex-col gap-2 ${
-                      isSelected
-                        ? 'bg-orange-50/90 border-2 border-orange-300 shadow-xs'
-                        : 'bg-white border-slate-200 hover:bg-slate-50'
-                    }`}
+                    className={`p-3 rounded-2xl border transition-all flex flex-col gap-2 ${isSelected
+                      ? 'bg-orange-50/90 border-2 border-orange-300 shadow-xs'
+                      : 'bg-white border-slate-200 hover:bg-slate-50'
+                      }`}
                   >
                     <div
                       onClick={() => {
@@ -1392,13 +1367,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <span
-                          className={`material-symbols-outlined text-[22px] ${
-                            isBroadcastingThis
-                              ? 'text-orange-600'
-                              : isSelected
+                          className={`material-symbols-outlined text-[22px] ${isBroadcastingThis
+                            ? 'text-orange-600'
+                            : isSelected
                               ? 'text-sky-600'
                               : 'text-slate-500'
-                          }`}
+                            }`}
                         >
                           {item.icon}
                         </span>
@@ -1432,11 +1406,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                             e.stopPropagation();
                             handleBroadcastStage(item.stage!);
                           }}
-                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${
-                            isBroadcastingThis
-                              ? 'bg-orange-600 text-white shadow-2xs'
-                              : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
-                          }`}
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${isBroadcastingThis
+                            ? 'bg-orange-600 text-white shadow-2xs'
+                            : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
+                            }`}
                         >
                           📢 Phát Live HĐ {item.stage}
                         </button>
@@ -1460,11 +1433,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                               e.stopPropagation();
                               handleToggleStageLock(item.stage!);
                             }}
-                            className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
-                              isUnlocked
-                                ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                            }`}
+                            className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${isUnlocked
+                              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                              }`}
                           >
                             {isUnlocked ? '🔓 Đang mở' : '🔒 Đang khóa'}
                           </button>
@@ -1508,11 +1480,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
             type="button"
             disabled={spinning}
             onClick={handleSpinRandomStudent}
-            className={`w-full py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-all ${
-              spinning
-                ? 'bg-purple-200 text-purple-600 cursor-not-allowed'
-                : 'bg-purple-600 hover:bg-purple-700 text-white'
-            }`}
+            className={`w-full py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-all ${spinning
+              ? 'bg-purple-200 text-purple-600 cursor-not-allowed'
+              : 'bg-purple-600 hover:bg-purple-700 text-white'
+              }`}
           >
             <span className={`material-symbols-outlined text-[16px] ${spinning ? 'animate-spin' : ''}`}>
               refresh
@@ -1544,55 +1515,133 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
           </div>
 
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            {/* Quick Broadcaster (Individual isolated activity broadcasters) */}
-            <div className="flex items-center gap-1 p-1 rounded-full bg-slate-100 border border-slate-200 flex-wrap">
+            {/* Quick Broadcaster + Direct Lock/Unlock Controls per Activity */}
+            <div className="flex items-center gap-1 p-1 rounded-2xl bg-slate-100 border border-slate-200 flex-wrap">
               <button
                 type="button"
                 onClick={handleOpenWaitingRoomLobby}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                  activeTab === 'waiting' || liveSession?.activeLiveView === 'waiting' || liveSession?.activeLiveView === 'slide'
-                    ? 'bg-amber-500 text-slate-950 shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                🏫 Phòng Live Chính (Slide)
-              </button>
-              {([1, 2, 3] as const).map((st) => (
-                <button
-                  key={st}
-                  type="button"
-                  onClick={() => handleBroadcastStage(st)}
-                  className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                    liveSession?.activeLiveView === `hd${st}`
-                      ? 'bg-orange-500 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${activeTab === 'waiting' || liveSession?.activeLiveView === 'waiting' || liveSession?.activeLiveView === 'slide'
+                  ? 'bg-amber-500 text-slate-950 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
                   }`}
-                >
-                  📢 Phát HĐ {st}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={handleBroadcastPracticeStage3}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+              >
+                🏫 Phát Slide Bài Giảng
+              </button>
+              {([1, 2, 3] as const).map((st) => {
+                const isBroadcastingSt = liveSession?.activeLiveView === `hd${st}`;
+                const isStUnlocked = Boolean(currentUnlockedMap[st]);
+                return (
+                  <div
+                    key={st}
+                    className={`inline-flex items-center rounded-full border transition-all ${
+                      isBroadcastingSt
+                        ? 'bg-orange-500 text-white border-orange-600 shadow-2xs'
+                        : isStUnlocked
+                        ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                        : 'bg-white text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleBroadcastStage(st)}
+                      className="pl-2.5 pr-1.5 py-1 text-xs font-bold cursor-pointer"
+                      title={`Phát Live & mở khóa HĐ ${st} sang màn hình học sinh`}
+                    >
+                      📢 Phát HĐ {st}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleStageLock(st)}
+                      className={`px-2 py-0.5 mr-0.5 rounded-full text-[11px] font-black cursor-pointer transition-colors ${
+                        isBroadcastingSt
+                          ? 'bg-black/20 hover:bg-black/30 text-white'
+                          : isStUnlocked
+                          ? 'bg-emerald-200/80 hover:bg-rose-200 text-emerald-950'
+                          : 'bg-slate-200 hover:bg-emerald-200 text-slate-700'
+                      }`}
+                      title={
+                        isStUnlocked
+                          ? `Bấm để KHÓA HĐ ${st} bên học sinh`
+                          : `Bấm để MỞ KHÓA HĐ ${st} bên học sinh`
+                      }
+                    >
+                      {isStUnlocked ? '🔓' : '🔒'}
+                    </button>
+                  </div>
+                );
+              })}
+              <div
+                className={`inline-flex items-center rounded-full border transition-all ${
                   liveSession?.activeLiveView === 'hd3-practice'
-                    ? 'bg-orange-500 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-orange-500 text-white border-orange-600 shadow-2xs'
+                    : isPracticeStage3Unlocked
+                    ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                    : 'bg-white text-slate-700 border-slate-200'
                 }`}
               >
-                📢 Phát HĐ 3 (TH)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleBroadcastStage(4)}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                <button
+                  type="button"
+                  onClick={handleBroadcastPracticeStage3}
+                  className="pl-2.5 pr-1.5 py-1 text-xs font-bold cursor-pointer"
+                  title="Phát Live & mở khóa HĐ 3 (Thực hành) sang màn hình học sinh"
+                >
+                  📢 Phát HĐ 3 (TH)
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTogglePracticeStage3Lock}
+                  className={`px-2 py-0.5 mr-0.5 rounded-full text-[11px] font-black cursor-pointer transition-colors ${
+                    liveSession?.activeLiveView === 'hd3-practice'
+                      ? 'bg-black/20 hover:bg-black/30 text-white'
+                      : isPracticeStage3Unlocked
+                      ? 'bg-emerald-200/80 hover:bg-rose-200 text-emerald-950'
+                      : 'bg-slate-200 hover:bg-emerald-200 text-slate-700'
+                  }`}
+                  title={
+                    isPracticeStage3Unlocked
+                      ? 'Bấm để KHÓA HĐ 3 (Thực hành) bên học sinh'
+                      : 'Bấm để MỞ KHÓA HĐ 3 (Thực hành) bên học sinh'
+                  }
+                >
+                  {isPracticeStage3Unlocked ? '🔓' : '🔒'}
+                </button>
+              </div>
+              <div
+                className={`inline-flex items-center rounded-full border transition-all ${
                   liveSession?.activeLiveView === 'hd4'
-                    ? 'bg-orange-500 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-orange-500 text-white border-orange-600 shadow-2xs'
+                    : currentUnlockedMap[4]
+                    ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                    : 'bg-white text-slate-700 border-slate-200'
                 }`}
               >
-                📢 Phát HĐ 4
-              </button>
+                <button
+                  type="button"
+                  onClick={() => handleBroadcastStage(4)}
+                  className="pl-2.5 pr-1.5 py-1 text-xs font-bold cursor-pointer"
+                  title="Phát Live & mở khóa HĐ 4 sang màn hình học sinh"
+                >
+                  📢 Phát HĐ 4
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleStageLock(4)}
+                  className={`px-2 py-0.5 mr-0.5 rounded-full text-[11px] font-black cursor-pointer transition-colors ${
+                    liveSession?.activeLiveView === 'hd4'
+                      ? 'bg-black/20 hover:bg-black/30 text-white'
+                      : currentUnlockedMap[4]
+                      ? 'bg-emerald-200/80 hover:bg-rose-200 text-emerald-950'
+                      : 'bg-slate-200 hover:bg-emerald-200 text-slate-700'
+                  }`}
+                  title={
+                    currentUnlockedMap[4]
+                      ? 'Bấm để KHÓA HĐ 4 bên học sinh'
+                      : 'Bấm để MỞ KHÓA HĐ 4 bên học sinh'
+                  }
+                >
+                  {currentUnlockedMap[4] ? '🔓' : '🔒'}
+                </button>
+              </div>
               {liveSession?.activeLiveView && liveSession.activeLiveView !== 'waiting' && (
                 <button
                   type="button"
@@ -1608,11 +1657,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
               <button
                 type="button"
                 onClick={() => setActiveTab('theo-doi-tien-do')}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                  activeTab === 'theo-doi-tien-do'
-                    ? 'bg-indigo-600 text-white shadow-2xs'
-                    : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200'
-                }`}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${activeTab === 'theo-doi-tien-do'
+                  ? 'bg-indigo-600 text-white shadow-2xs'
+                  : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200'
+                  }`}
                 title="Theo dõi & mô tả tiến độ trực tiếp của học sinh trong 4 hoạt động"
               >
                 <span className="material-symbols-outlined text-[15px]">monitoring</span>
@@ -1620,49 +1668,47 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
               </button>
             </div>
 
-              <button
-                type="button"
-                onClick={() => handleManualTriggerPushNotification()}
-                className="px-3.5 py-1.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-xs font-bold transition-all cursor-pointer shadow-xs flex items-center gap-1.5 animate-pulse"
-                title="Gửi Push Notification nhắc nhở tập trung tức thì sang màn hình học sinh"
-              >
-                <span>🔔</span>
-                <span>Push Nhắc HS</span>
-              </button>
+            <button
+              type="button"
+              onClick={() => handleManualTriggerPushNotification()}
+              className="px-3.5 py-1.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-xs font-bold transition-all cursor-pointer shadow-xs flex items-center gap-1.5 animate-pulse"
+              title="Gửi Push Notification nhắc nhở tập trung tức thì sang màn hình học sinh"
+            >
+              <span>🔔</span>
+              <span>Push Nhắc HS</span>
+            </button>
 
-              {/* Real-time Focus Monitor Chip */}
-              <button
-                type="button"
-                onClick={() => setShowFocusMonitorModal(true)}
-                className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs border ${
-                  blurredStudentsList.length > 0
-                    ? 'bg-rose-50 text-rose-700 border-rose-300 animate-pulse'
-                    : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+            {/* Real-time Focus Monitor Chip */}
+            <button
+              type="button"
+              onClick={() => setShowFocusMonitorModal(true)}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs border ${blurredStudentsList.length > 0
+                ? 'bg-rose-50 text-rose-700 border-rose-300 animate-pulse'
+                : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
                 }`}
-                title="Xem giám sát tập trung học sinh thời gian thực (phát hiện rời tab/chơi game)"
-              >
-                <span>{blurredStudentsList.length > 0 ? '⚠️' : '👁️'}</span>
-                <span>
-                  {blurredStudentsList.length > 0
-                    ? `${blurredStudentsList.length} HS rời tab!`
-                    : '100% HS tập trung'}
-                </span>
-              </button>
+              title="Xem giám sát tập trung học sinh thời gian thực (phát hiện rời tab/chơi game)"
+            >
+              <span>{blurredStudentsList.length > 0 ? '⚠️' : '👁️'}</span>
+              <span>
+                {blurredStudentsList.length > 0
+                  ? `${blurredStudentsList.length} HS rời tab!`
+                  : '100% HS tập trung'}
+              </span>
+            </button>
 
-              {/* Low-Bandwidth Mode Toggle Button */}
-              <button
-                type="button"
-                onClick={handleToggleLowBandwidthMode}
-                className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs border ${
-                  isLowBandwidthMode
-                    ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-300'
+            {/* Low-Bandwidth Mode Toggle Button */}
+            <button
+              type="button"
+              onClick={handleToggleLowBandwidthMode}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs border ${isLowBandwidthMode
+                ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-300'
                 }`}
-                title="Bật/Tắt Chế độ Tiết kiệm Băng thông Phòng máy khi mạng yếu hoặc 40+ HS cùng kết nối"
-              >
-                <span>🌐</span>
-                <span>{isLowBandwidthMode ? 'Băng thông: Tiết kiệm' : 'Tiết kiệm mạng'}</span>
-              </button>
+              title="Bật/Tắt Chế độ Tiết kiệm Băng thông Phòng máy khi mạng yếu hoặc 40+ HS cùng kết nối"
+            >
+              <span>🌐</span>
+              <span>{isLowBandwidthMode ? 'Băng thông: Tiết kiệm' : 'Tiết kiệm mạng'}</span>
+            </button>
 
             <button
               type="button"
@@ -1760,11 +1806,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     <button
                       type="button"
                       onClick={() => handleToggleStageLock(1)}
-                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer ${
-                        currentUnlockedMap[1]
-                          ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
-                          : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                      }`}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer ${currentUnlockedMap[1]
+                        ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                        }`}
                     >
                       {currentUnlockedMap[1] ? '🔒 Khóa HĐ 1' : '🔓 Mở khóa HĐ 1'}
                     </button>
@@ -1774,11 +1819,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       type="button"
                       data-testid="finalize-stage-1-btn"
                       onClick={() => handleToggleFinalizeActivity(1, 'Hoạt động 1: Khởi động')}
-                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${
-                        isActivityFinalized(liveSession, lessonKey, 1)
-                          ? 'bg-rose-700 hover:bg-rose-800 text-white'
-                          : 'bg-slate-900 hover:bg-slate-800 text-white'
-                      }`}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${isActivityFinalized(liveSession, lessonKey, 1)
+                        ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                        : 'bg-slate-900 hover:bg-slate-800 text-white'
+                        }`}
                       title="Chốt kết quả Hoạt động 1 để khóa toàn bộ cổng nộp bài phía học sinh"
                     >
                       <span className="material-symbols-outlined text-[16px]">
@@ -1881,11 +1925,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     <button
                       type="button"
                       onClick={() => handleToggleStageLock(2)}
-                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer ${
-                        currentUnlockedMap[2]
-                          ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
-                          : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                      }`}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer ${currentUnlockedMap[2]
+                        ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                        }`}
                     >
                       {currentUnlockedMap[2] ? '🔒 Khóa HĐ 2' : '🔓 Mở khóa HĐ 2'}
                     </button>
@@ -1895,11 +1938,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       type="button"
                       data-testid="finalize-stage-2-btn"
                       onClick={() => handleToggleFinalizeActivity(2, 'Hoạt động 2: Khám phá')}
-                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${
-                        isActivityFinalized(liveSession, lessonKey, 2)
-                          ? 'bg-rose-700 hover:bg-rose-800 text-white'
-                          : 'bg-slate-900 hover:bg-slate-800 text-white'
-                      }`}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${isActivityFinalized(liveSession, lessonKey, 2)
+                        ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                        : 'bg-slate-900 hover:bg-slate-800 text-white'
+                        }`}
                       title="Chốt toàn bộ Phiếu Khám phá và khóa cổng nộp bài phía học sinh"
                     >
                       <span className="material-symbols-outlined text-[16px]">
@@ -1972,11 +2014,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       return (
                         <div
                           key={ex.key}
-                          className={`p-3 rounded-xl border flex flex-col justify-between gap-2 transition-all ${
-                            isExFinalized
-                              ? 'bg-rose-50 border-rose-300'
-                              : 'bg-white border-sky-200/80 shadow-2xs'
-                          }`}
+                          className={`p-3 rounded-xl border flex flex-col justify-between gap-2 transition-all ${isExFinalized
+                            ? 'bg-rose-50 border-rose-300'
+                            : 'bg-white border-sky-200/80 shadow-2xs'
+                            }`}
                         >
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-bold text-slate-800 truncate">
@@ -1990,11 +2031,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                             type="button"
                             data-testid={`finalize-exercise-${ex.key}-btn`}
                             onClick={() => handleToggleFinalizeActivity(ex.key, ex.title)}
-                            className={`w-full py-1.5 px-2.5 rounded-lg text-[11px] font-bold cursor-pointer transition-colors flex items-center justify-center gap-1 shadow-2xs ${
-                              isExFinalized
-                                ? 'bg-rose-700 hover:bg-rose-800 text-white'
-                                : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
-                            }`}
+                            className={`w-full py-1.5 px-2.5 rounded-lg text-[11px] font-bold cursor-pointer transition-colors flex items-center justify-center gap-1 shadow-2xs ${isExFinalized
+                              ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+                              }`}
                           >
                             <span className="material-symbols-outlined text-[14px]">
                               {isExFinalized ? 'lock' : 'lock_clock'}
@@ -2048,11 +2088,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     <button
                       type="button"
                       onClick={() => handleToggleStageLock(3)}
-                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer ${
-                        currentUnlockedMap[3]
-                          ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
-                          : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                      }`}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer ${currentUnlockedMap[3]
+                        ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                        }`}
                     >
                       {currentUnlockedMap[3] ? '🔒 Khóa HĐ 3' : '🔓 Mở khóa HĐ 3'}
                     </button>
@@ -2062,11 +2101,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       type="button"
                       data-testid="finalize-stage-3-btn"
                       onClick={() => handleToggleFinalizeActivity(3, 'Hoạt động 3: Luyện tập')}
-                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${
-                        isActivityFinalized(liveSession, lessonKey, 3)
-                          ? 'bg-rose-700 hover:bg-rose-800 text-white'
-                          : 'bg-slate-900 hover:bg-slate-800 text-white'
-                      }`}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${isActivityFinalized(liveSession, lessonKey, 3)
+                        ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                        : 'bg-slate-900 hover:bg-slate-800 text-white'
+                        }`}
                       title="Chốt kết quả Hoạt động 3 và khóa nộp bài phía học sinh"
                     >
                       <span className="material-symbols-outlined text-[16px]">
@@ -2151,11 +2189,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                         type="button"
                         data-testid="finalize-arena-part1-btn"
                         onClick={() => handleToggleFinalizeActivity(3, 'Đấu trường Trắc nghiệm 25s')}
-                        className={`px-3 py-2 rounded-full text-xs font-bold cursor-pointer transition-colors flex items-center gap-1 shadow-2xs ${
-                          isActivityFinalized(liveSession, lessonKey, 3)
-                            ? 'bg-rose-700 hover:bg-rose-800 text-white'
-                            : 'bg-slate-900 hover:bg-slate-800 text-white'
-                        }`}
+                        className={`px-3 py-2 rounded-full text-xs font-bold cursor-pointer transition-colors flex items-center gap-1 shadow-2xs ${isActivityFinalized(liveSession, lessonKey, 3)
+                          ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                          : 'bg-slate-900 hover:bg-slate-800 text-white'
+                          }`}
                       >
                         <span className="material-symbols-outlined text-[15px]">
                           {isActivityFinalized(liveSession, lessonKey, 3) ? 'lock' : 'lock_clock'}
@@ -2167,11 +2204,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                           key={sec}
                           type="button"
                           onClick={() => handleStartOrResetArenaCountdown(sec)}
-                          className={`px-2.5 py-1.5 rounded-full text-[11px] font-bold cursor-pointer ${
-                            arenaDurationSec === sec
-                              ? 'bg-purple-800 text-white'
-                              : 'bg-white border border-purple-200 text-purple-700'
-                          }`}
+                          className={`px-2.5 py-1.5 rounded-full text-[11px] font-bold cursor-pointer ${arenaDurationSec === sec
+                            ? 'bg-purple-800 text-white'
+                            : 'bg-white border border-purple-200 text-purple-700'
+                            }`}
                         >
                           {sec / 60} phút
                         </button>
@@ -2186,11 +2222,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                           💻 Phần 2: Hoạt động 3 (Tiết Thực hành)
                         </span>
                         <span
-                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-                            isPracticeStage3Unlocked
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-rose-100 text-rose-800'
-                          }`}
+                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${isPracticeStage3Unlocked
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-rose-100 text-rose-800'
+                            }`}
                         >
                           {isPracticeStage3Unlocked ? '🔓 Đã mở cho HS' : '🔒 Đang khóa'}
                         </span>
@@ -2204,11 +2239,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       <button
                         type="button"
                         onClick={handleTogglePracticeStage3Lock}
-                        className={`px-3.5 py-2 rounded-full text-xs font-bold cursor-pointer ${
-                          isPracticeStage3Unlocked
-                            ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
-                            : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                        }`}
+                        className={`px-3.5 py-2 rounded-full text-xs font-bold cursor-pointer ${isPracticeStage3Unlocked
+                          ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                          : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                          }`}
                       >
                         {isPracticeStage3Unlocked
                           ? '🔒 Khóa Thực hành HĐ 3'
@@ -2219,11 +2253,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                         type="button"
                         data-testid="finalize-practice-part2-btn"
                         onClick={() => handleToggleFinalizeActivity('hd3-practice', 'HĐ 3: Thực hành máy tính')}
-                        className={`px-3.5 py-2 rounded-full text-xs font-bold cursor-pointer transition-colors flex items-center gap-1 shadow-2xs ${
-                          isActivityFinalized(liveSession, lessonKey, 'hd3-practice')
-                            ? 'bg-rose-700 hover:bg-rose-800 text-white'
-                            : 'bg-slate-900 hover:bg-slate-800 text-white'
-                        }`}
+                        className={`px-3.5 py-2 rounded-full text-xs font-bold cursor-pointer transition-colors flex items-center gap-1 shadow-2xs ${isActivityFinalized(liveSession, lessonKey, 'hd3-practice')
+                          ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                          : 'bg-slate-900 hover:bg-slate-800 text-white'
+                          }`}
                       >
                         <span className="material-symbols-outlined text-[15px]">
                           {isActivityFinalized(liveSession, lessonKey, 'hd3-practice') ? 'lock' : 'lock_clock'}
@@ -2285,11 +2318,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     <button
                       type="button"
                       onClick={handleTogglePracticeStage3Lock}
-                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer ${
-                        isPracticeStage3Unlocked
-                          ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
-                          : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                      }`}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer ${isPracticeStage3Unlocked
+                        ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                        }`}
                     >
                       {isPracticeStage3Unlocked
                         ? '🔒 Khóa Hoạt động Thực hành'
@@ -2301,11 +2333,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       type="button"
                       data-testid="finalize-stage-3-practice-btn"
                       onClick={() => handleToggleFinalizeActivity('hd3-practice', 'HĐ 3: Thực hành máy tính')}
-                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${
-                        isActivityFinalized(liveSession, lessonKey, 'hd3-practice')
-                          ? 'bg-rose-700 hover:bg-rose-800 text-white'
-                          : 'bg-slate-900 hover:bg-slate-800 text-white'
-                      }`}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${isActivityFinalized(liveSession, lessonKey, 'hd3-practice')
+                        ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                        : 'bg-slate-900 hover:bg-slate-800 text-white'
+                        }`}
                       title="Chốt kết quả Thực hành máy tính và khóa nộp sản phẩm Google Drive phía học sinh"
                     >
                       <span className="material-symbols-outlined text-[16px]">
@@ -2361,11 +2392,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       Trạng thái đồng bộ Phòng Live Học sinh:
                     </span>
                     <span
-                      className={`px-3 py-1 rounded-full text-xs font-bold ${
-                        isPracticeStage3Unlocked
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-rose-100 text-rose-800'
-                      }`}
+                      className={`px-3 py-1 rounded-full text-xs font-bold ${isPracticeStage3Unlocked
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-rose-100 text-rose-800'
+                        }`}
                     >
                       {isPracticeStage3Unlocked
                         ? '🔓 Đang MỞ cho Học sinh làm bài & nộp tệp thực hành'
@@ -2418,11 +2448,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                     <button
                       type="button"
                       onClick={() => handleToggleStageLock(4)}
-                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer ${
-                        currentUnlockedMap[4]
-                          ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
-                          : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                      }`}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer ${currentUnlockedMap[4]
+                        ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                        }`}
                     >
                       {currentUnlockedMap[4] ? '🔒 Khóa HĐ 4' : '🔓 Mở khóa HĐ 4'}
                     </button>
@@ -2432,11 +2461,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                       type="button"
                       data-testid="finalize-stage-4-btn"
                       onClick={() => handleToggleFinalizeActivity(4, 'Hoạt động 4: Vận dụng')}
-                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${
-                        isActivityFinalized(liveSession, lessonKey, 4)
-                          ? 'bg-rose-700 hover:bg-rose-800 text-white'
-                          : 'bg-slate-900 hover:bg-slate-800 text-white'
-                      }`}
+                      className={`px-3.5 py-2 rounded-full font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-xs transition-all ${isActivityFinalized(liveSession, lessonKey, 4)
+                        ? 'bg-rose-700 hover:bg-rose-800 text-white'
+                        : 'bg-slate-900 hover:bg-slate-800 text-white'
+                        }`}
                       title="Chốt kết quả Hoạt động 4 và khóa nộp bài phía học sinh"
                     >
                       <span className="material-symbols-outlined text-[16px]">
@@ -2568,11 +2596,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                           </td>
                           <td className="p-3.5 text-center">
                             <span
-                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                                st.submissionStatus === 'Đã nộp'
-                                  ? 'bg-emerald-100 text-emerald-800'
-                                  : 'bg-amber-100 text-amber-800'
-                              }`}
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${st.submissionStatus === 'Đã nộp'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-amber-100 text-amber-800'
+                                }`}
                             >
                               {st.submissionStatus || 'Đang làm'}
                             </span>
@@ -2711,8 +2738,8 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                           isBlurred
                             ? 'bg-rose-50/70'
                             : switchCount > 0
-                            ? 'bg-amber-50/40'
-                            : 'hover:bg-slate-50'
+                              ? 'bg-amber-50/40'
+                              : 'hover:bg-slate-50'
                         }
                       >
                         <td className="p-3 font-bold text-slate-700">
@@ -2721,13 +2748,12 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                         <td className="p-3 font-bold text-slate-900">{st.name}</td>
                         <td className="p-3 text-center">
                           <span
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black ${
-                              isBlurred
-                                ? 'bg-rose-600 text-white animate-pulse'
-                                : switchCount > 0
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black ${isBlurred
+                              ? 'bg-rose-600 text-white animate-pulse'
+                              : switchCount > 0
                                 ? 'bg-amber-100 text-amber-800'
                                 : 'bg-emerald-100 text-emerald-800'
-                            }`}
+                              }`}
                           >
                             {isBlurred ? '⚠️ Đang rời tab' : switchCount > 0 ? 'Đã quay lại' : '✓ Tập trung'}
                           </span>
@@ -2742,10 +2768,10 @@ export const TeacherLivePresenterRoom: React.FC<TeacherLivePresenterRoomProps> =
                         <td className="p-3 text-right text-slate-500 font-mono text-[11px]">
                           {alert?.lastBlurAtIso
                             ? new Date(alert.lastBlurAtIso).toLocaleTimeString('vi-VN', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit',
-                              })
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                            })
                             : '—'}
                         </td>
                       </tr>

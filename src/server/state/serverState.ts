@@ -69,7 +69,7 @@ export let liveClassroomSession: Record<string, any> = {
   verifiedLessonsMap: defaultVerifiedLessonsMap,
   studentDraftsByKey: {},
   taggedSubmissions: [],
-  updatedAt: new Date().toISOString(),
+  updatedAt: '2025-01-01T00:00:00.000Z',
 };
 
 export function updateLiveClassroomSession(updater: (prev: Record<string, any>) => Record<string, any>) {

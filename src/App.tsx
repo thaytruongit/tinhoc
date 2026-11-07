@@ -237,8 +237,19 @@ export default function App() {
 
         if (liveRes && typeof liveRes === 'object') {
           setLiveSession((prev) => {
-            const normalized = normalizeLiveSession(liveRes, prev);
-            return mergeGitHubPublicSnapshotIntoLiveSession(normalized, githubSnap);
+            const serverTs = new Date(liveRes.updatedAt || '2025-01-01T00:00:00.000Z').getTime();
+            const prevTs = new Date(prev.updatedAt || '2025-01-01T00:00:00.000Z').getTime();
+            if (serverTs >= prevTs) {
+              const normalized = normalizeLiveSession(liveRes, prev);
+              return mergeGitHubPublicSnapshotIntoLiveSession(normalized, githubSnap);
+            }
+            // Local state is newer than server (e.g., server just restarted) -> push local state to server
+            fetch('/api/live-session', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(prev),
+            }).catch(() => {});
+            return mergeGitHubPublicSnapshotIntoLiveSession(prev, githubSnap);
           });
         } else if (supabase && isSupabaseRealtimeConfigured) {
           const { data: sbLiveRow } = await supabase
@@ -251,12 +262,17 @@ export default function App() {
               typeof sbLiveRow.state_json === 'string'
                 ? JSON.parse(sbLiveRow.state_json)
                 : sbLiveRow.state_json;
-            setLiveSession((prev) =>
-              mergeGitHubPublicSnapshotIntoLiveSession(
-                normalizeLiveSession(parsed, prev),
-                githubSnap
-              )
-            );
+            setLiveSession((prev) => {
+              const sbTs = new Date(parsed?.updatedAt || '2025-01-01T00:00:00.000Z').getTime();
+              const prevTs = new Date(prev.updatedAt || '2025-01-01T00:00:00.000Z').getTime();
+              if (sbTs >= prevTs) {
+                return mergeGitHubPublicSnapshotIntoLiveSession(
+                  normalizeLiveSession(parsed, prev),
+                  githubSnap
+                );
+              }
+              return mergeGitHubPublicSnapshotIntoLiveSession(prev, githubSnap);
+            });
           }
         } else if (githubSnap) {
           setLiveSession((prev) => mergeGitHubPublicSnapshotIntoLiveSession(prev, githubSnap));

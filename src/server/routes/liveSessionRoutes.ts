@@ -85,6 +85,11 @@ router.post('/api/live-session', async (req: Request, res: Response) => {
     ...(patch.activeSlideIndexByLesson || {}),
   };
 
+  const mergedSlideDeckVersionByLesson = {
+    ...(liveClassroomSession.slideDeckVersionByLesson || {}),
+    ...(patch.slideDeckVersionByLesson || {}),
+  };
+
   const nextState = {
     ...liveClassroomSession,
     ...patch,
@@ -93,6 +98,7 @@ router.post('/api/live-session', async (req: Request, res: Response) => {
     completedStagesByStudent: mergedCompletedStagesByStudent,
     finalizedActivitiesByLesson: mergedFinalizedActivitiesByLesson,
     activeSlideIndexByLesson: mergedActiveSlideIndexByLesson,
+    slideDeckVersionByLesson: mergedSlideDeckVersionByLesson,
     updatedAt: nowIso,
   };
 

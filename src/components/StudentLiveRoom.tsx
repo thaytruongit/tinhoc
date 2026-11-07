@@ -6,6 +6,7 @@ import {
   type StudentWorkDraft,
   type TaggedLessonSubmission,
   INITIAL_MINIGAME_QUESTIONS,
+  getPeriodsForGrade,
 } from '../data/mockCurriculumData';
 import {
   WarmupEssayActivity,
@@ -57,7 +58,7 @@ type StudentLiveViewId = 'waiting' | 1 | 2 | 3 | 'hd3-practice' | 4;
 export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
   currentStudent,
   students,
-  periodSpec,
+  periodSpec: propPeriodSpec,
   liveSession,
   unlockedStages,
   companionMode = 'paired',
@@ -66,6 +67,21 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
   onShowToast,
   onUpdateLiveSession,
 }) => {
+  // Always synchronize to the exact Grade & Period the Teacher is broadcasting
+  const periodSpec: CurriculumPeriodSpec = React.useMemo(() => {
+    if (liveSession?.isBroadcasting && liveSession.activeGrade && liveSession.activePeriod) {
+      const gPeriods = getPeriodsForGrade(liveSession.activeGrade);
+      const found = gPeriods.find((p) => p.period === liveSession.activePeriod);
+      if (found) return found;
+    }
+    return propPeriodSpec;
+  }, [
+    liveSession?.isBroadcasting,
+    liveSession?.activeGrade,
+    liveSession?.activePeriod,
+    propPeriodSpec,
+  ]);
+
   const lessonKey = `k${periodSpec.grade}-tiet-${periodSpec.period}`;
   const teacherCurrentStage = (liveSession?.activeStage as 1 | 2 | 3 | 4) || 1;
   const teacherActiveView = liveSession?.activeLiveView;
@@ -78,15 +94,23 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
     };
 
   const resolveInitialView = (): StudentLiveViewId => {
-    if (!teacherActiveView || teacherActiveView === 'waiting') return 'waiting';
-    if (teacherActiveView === 'hd3-practice') return 'hd3-practice';
-    if (teacherActiveView === 'hd1') return 1;
-    if (teacherActiveView === 'hd2') return 2;
-    if (teacherActiveView === 'hd3') return 3;
-    if (teacherActiveView === 'hd4') return 4;
-    if (effectiveUnlockedStages[teacherCurrentStage]) return teacherCurrentStage;
-    const firstUnlocked = ([1, 2, 3, 4] as const).find((s) => Boolean(effectiveUnlockedStages[s]));
-    return firstUnlocked || 'waiting';
+    const wrMode = liveSession?.waitingRoomByLesson?.[lessonKey]?.activeBoardMode;
+    const mode =
+      teacherActiveView && teacherActiveView !== 'waiting'
+        ? teacherActiveView
+        : wrMode || teacherActiveView;
+    if (!mode || mode === 'waiting' || mode === 'slide') return 'waiting';
+    if (
+      mode === 'hd3-practice' &&
+      Boolean(liveSession?.unlockedPracticeStage3ByLesson?.[lessonKey])
+    ) {
+      return 'hd3-practice';
+    }
+    if (mode === 'hd1' && effectiveUnlockedStages[1]) return 1;
+    if (mode === 'hd2' && effectiveUnlockedStages[2]) return 2;
+    if (mode === 'hd3' && effectiveUnlockedStages[3]) return 3;
+    if (mode === 'hd4' && effectiveUnlockedStages[4]) return 4;
+    return 'waiting';
   };
 
   const [activeView, setActiveView] = useState<StudentLiveViewId>(resolveInitialView);
@@ -392,26 +416,27 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
   // Track last teacher broadcast view and waitingRoom board mode so whenever Teacher switches to an activity, Student follows cleanly in real time
   const waitingRoomBoardMode = liveSession?.waitingRoomByLesson?.[lessonKey]?.activeBoardMode;
   const effectiveTeacherBroadcastMode =
-    waitingRoomBoardMode && waitingRoomBoardMode !== 'slide'
-      ? waitingRoomBoardMode
-      : teacherActiveView;
-  const lastTeacherViewRef = useRef<string | undefined>(effectiveTeacherBroadcastMode);
+    teacherActiveView === 'waiting' || teacherActiveView === 'slide'
+      ? 'slide'
+      : teacherActiveView || waitingRoomBoardMode || 'slide';
+  const broadcastTriggerKey = `${lessonKey}_${effectiveTeacherBroadcastMode}_${liveSession?.lastPushNotification?.id || ''}`;
+  const lastTeacherViewRef = useRef<string | undefined>(broadcastTriggerKey);
 
   useEffect(() => {
     if (
       effectiveTeacherBroadcastMode &&
-      effectiveTeacherBroadcastMode !== lastTeacherViewRef.current
+      broadcastTriggerKey !== lastTeacherViewRef.current
     ) {
-      lastTeacherViewRef.current = effectiveTeacherBroadcastMode;
+      lastTeacherViewRef.current = broadcastTriggerKey;
       if (effectiveTeacherBroadcastMode === 'waiting' || effectiveTeacherBroadcastMode === 'slide') {
         setActiveView('waiting');
         playStageBroadcastSound();
         onShowToast(
-          '🏫 Giáo viên đã chuyển về Bảng Slide Bài Giảng trên Phòng Live Chính!'
+          `🏫 Đang trình chiếu Slide Bài Giảng: Tiết ${periodSpec.period} - ${periodSpec.lessonTitle}!`
         );
         return;
       }
-      if (effectiveTeacherBroadcastMode === 'hd3-practice') {
+      if (effectiveTeacherBroadcastMode === 'hd3-practice' && isPracticeStage3Unlocked) {
         setActiveView('hd3-practice');
         playStageBroadcastSound();
         onShowToast(
@@ -426,7 +451,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
         hd4: 4,
       };
       const mapped = stageMap[effectiveTeacherBroadcastMode];
-      if (mapped) {
+      if (mapped && effectiveUnlockedStages[mapped]) {
         setActiveView(mapped);
         playStageBroadcastSound();
         onShowToast(
@@ -434,7 +459,15 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
         );
       }
     }
-  }, [effectiveTeacherBroadcastMode, onShowToast]);
+  }, [
+    broadcastTriggerKey,
+    effectiveTeacherBroadcastMode,
+    isPracticeStage3Unlocked,
+    effectiveUnlockedStages,
+    periodSpec.period,
+    periodSpec.lessonTitle,
+    onShowToast,
+  ]);
 
   // When Teacher exits the live room or ends broadcast, automatically close student live room
   useEffect(() => {
@@ -483,6 +516,24 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
       teacherCurrentStage,
     });
   };
+
+  // Whenever Teacher locks the activity the Student is currently viewing, immediately return to Slide view
+  useEffect(() => {
+    if (activeView !== 'waiting' && !isViewUnlocked(activeView)) {
+      setActiveView('waiting');
+      onShowToast(
+        '🔒 Giáo viên vừa khóa hoạt động này — Màn hình của em đã tự động chuyển về Bảng Slide Bài Giảng!'
+      );
+    }
+  }, [
+    activeView,
+    teacherActiveView,
+    isPracticeStage3Unlocked,
+    effectiveUnlockedStages[1],
+    effectiveUnlockedStages[2],
+    effectiveUnlockedStages[3],
+    effectiveUnlockedStages[4],
+  ]);
 
   const navItems: {
     id: StudentLiveViewId;
@@ -1123,7 +1174,7 @@ export const StudentLiveRoom: React.FC<StudentLiveRoomProps> = ({
             onShowToast={onShowToast}
           />
 
-          {activeView !== 'waiting' && activeView !== 1 && !isViewUnlocked(activeView) ? (
+          {activeView !== 'waiting' && !isViewUnlocked(activeView) ? (
             /* LOCKED ITEM NOTICE — STRICT TEACHER LOCK ENFORCEMENT */
             <div className="p-12 rounded-3xl bg-white border-2 border-dashed border-slate-200 text-center flex flex-col items-center gap-4 shadow-xs">
               <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">

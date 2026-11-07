@@ -243,43 +243,91 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
       : fallbackWaitingState;
 
   // Resolve current unified chalkboard mode ('slide' | 'hd1' | 'hd2' | 'hd3' | 'hd3-practice' | 'hd4')
+  // On Student screens, if the target activity is locked by the Teacher, automatically fall back to 'slide'
   const resolvedBoardMode: ChalkboardStageMode = useMemo(() => {
-    if (externalBoardMode) return externalBoardMode;
-    if (waitingState.activeBoardMode) return waitingState.activeBoardMode;
-    const lv = liveSession?.activeLiveView;
-    if (
-      lv === 'slide' ||
-      lv === 'hd1' ||
-      lv === 'hd2' ||
-      lv === 'hd3' ||
-      lv === 'hd3-practice' ||
-      lv === 'hd4'
-    ) {
-      return lv;
-    }
-    return 'slide';
-  }, [externalBoardMode, waitingState.activeBoardMode, liveSession?.activeLiveView]);
+    const rawMode: ChalkboardStageMode = (() => {
+      if (externalBoardMode) return externalBoardMode;
+      const lv = liveSession?.activeLiveView;
+      if (lv === 'waiting' || lv === 'slide') return 'slide';
+      if (
+        lv === 'hd1' ||
+        lv === 'hd2' ||
+        lv === 'hd3' ||
+        lv === 'hd3-practice' ||
+        lv === 'hd4'
+      ) {
+        return lv;
+      }
+      if (waitingState.activeBoardMode) return waitingState.activeBoardMode;
+      return 'slide';
+    })();
 
-  // Hybrid 3-Tier Slide Deck & Warmup Configuration State
-  const [hybridDeck, setHybridDeck] = useState<HybridSlideDeckRecord>(() =>
-    buildDefaultHighResSlideDeck({
+    if (role === 'student' && rawMode !== 'slide') {
+      const unlockedMap = liveSession?.unlockedStagesByLesson?.[lessonKey] || {
+        1: false,
+        2: false,
+        3: false,
+        4: false,
+      };
+      if (
+        rawMode === 'hd3-practice' &&
+        !liveSession?.unlockedPracticeStage3ByLesson?.[lessonKey]
+      ) {
+        return 'slide';
+      }
+      if (rawMode === 'hd1' && !unlockedMap[1]) return 'slide';
+      if (rawMode === 'hd2' && !unlockedMap[2]) return 'slide';
+      if (rawMode === 'hd3' && !unlockedMap[3]) return 'slide';
+      if (rawMode === 'hd4' && !unlockedMap[4]) return 'slide';
+    }
+    return rawMode;
+  }, [
+    role,
+    lessonKey,
+    externalBoardMode,
+    waitingState.activeBoardMode,
+    liveSession?.activeLiveView,
+    liveSession?.unlockedStagesByLesson,
+    liveSession?.unlockedPracticeStage3ByLesson,
+  ]);
+
+  // Default High-Res Slide Deck for the current lesson (used synchronously if lessonKey changes before async 3-tier fetch finishes)
+  const defaultLessonDeck = useMemo(
+    () =>
+      buildDefaultHighResSlideDeck({
+        grade,
+        period,
+        lessonTitle: periodSpec.lessonTitle,
+        topic: periodSpec.topic,
+        yccd: periodSpec.yccd,
+        nlsCode: periodSpec.nlsCode,
+        nlsAction: periodSpec.nlsAction,
+        aiCompetency: periodSpec.aiCompetency,
+      }),
+    [
       grade,
       period,
-      lessonTitle: periodSpec.lessonTitle,
-      topic: periodSpec.topic,
-      yccd: periodSpec.yccd,
-      nlsCode: periodSpec.nlsCode,
-      nlsAction: periodSpec.nlsAction,
-      aiCompetency: periodSpec.aiCompetency,
-    })
+      periodSpec.lessonTitle,
+      periodSpec.topic,
+      periodSpec.yccd,
+      periodSpec.nlsCode,
+      periodSpec.nlsAction,
+      periodSpec.aiCompetency,
+    ]
   );
+
+  // Hybrid 3-Tier Slide Deck & Warmup Configuration State
+  const [hybridDeck, setHybridDeck] = useState<HybridSlideDeckRecord>(() => defaultLessonDeck);
   const [isConfigModalOpen, setIsConfigModalOpen] = useState<boolean>(false);
   const [isBoardExpanded, setIsBoardExpanded] = useState<boolean>(false);
   const [slideZoomPercent, setSlideZoomPercent] = useState<number>(100);
 
-  // Load 3-Tier Hybrid Slide Deck (IndexedDB Cache + Server Permanent Storage) whenever grade/period changes
+  const deckVersionTrigger = liveSession?.slideDeckVersionByLesson?.[lessonKey] || 0;
+
+  // Load 3-Tier Hybrid Slide Deck (IndexedDB Cache + Server Permanent Storage) whenever grade/period or deckVersion changes
   useEffect(() => {
     let cancelled = false;
+    setHybridDeck((prev) => (prev.lessonKey === lessonKey ? prev : defaultLessonDeck));
     loadHybridSlideDeck3Tier({
       grade,
       period,
@@ -299,9 +347,11 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
     return () => {
       cancelled = true;
     };
-  }, [grade, period, periodSpec.lessonTitle]);
+  }, [grade, period, lessonKey, periodSpec.lessonTitle, deckVersionTrigger, defaultLessonDeck]);
 
-  const slides = hybridDeck.slides || [];
+  const effectiveHybridDeck =
+    hybridDeck.lessonKey === lessonKey ? hybridDeck : defaultLessonDeck;
+  const slides = effectiveHybridDeck.slides || [];
   const rawSlideIndex =
     waitingState.activeSlideIndex ??
     liveSession?.activeSlideIndexByLesson?.[lessonKey] ??
@@ -311,7 +361,7 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
   const activeSlide = slides[safeSlideIndex] || slides[0];
 
   const activeWarmupTab: 'html-sim' | 'video' | 'image' =
-    waitingState.activeWarmupTab || hybridDeck.warmupConfig?.activeMediaType || 'html-sim';
+    waitingState.activeWarmupTab || effectiveHybridDeck.warmupConfig?.activeMediaType || 'html-sim';
 
   // Interactive Stage 2 (Khám phá) state on Chalkboard
   const [hd2SubTab, setHd2SubTab] = useState<'drag' | 'fill' | 'match' | 'short'>('drag');
@@ -895,18 +945,21 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
                   [lessonKey]: true,
                 }
               : liveSession?.unlockedPracticeStage3ByLesson,
-          unlockedStagesByLesson: {
-            ...(liveSession?.unlockedStagesByLesson || {}),
-            [lessonKey]: {
-              ...(liveSession?.unlockedStagesByLesson?.[lessonKey] || {
-                1: true,
-                2: true,
-                3: true,
-                4: true,
-              }),
-              [stageNum]: true,
-            },
-          },
+          unlockedStagesByLesson:
+            mode === 'slide'
+              ? liveSession?.unlockedStagesByLesson
+              : {
+                  ...(liveSession?.unlockedStagesByLesson || {}),
+                  [lessonKey]: {
+                    ...(liveSession?.unlockedStagesByLesson?.[lessonKey] || {
+                      1: false,
+                      2: false,
+                      3: false,
+                      4: false,
+                    }),
+                    [stageNum]: true,
+                  },
+                },
         }
       );
       if (mode === 'hd1' || mode === 'hd2' || mode === 'hd3' || mode === 'hd4') {
@@ -1841,11 +1894,11 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
                 }`}
               >
                 {activeWarmupTab === 'video' ? (
-                  hybridDeck.warmupConfig.videoUrl.includes('youtube.com') ||
-                  hybridDeck.warmupConfig.videoUrl.includes('youtu.be') ? (
+                  effectiveHybridDeck.warmupConfig.videoUrl.includes('youtube.com') ||
+                  effectiveHybridDeck.warmupConfig.videoUrl.includes('youtu.be') ? (
                     <iframe
                       title="Warmup Video"
-                      src={hybridDeck.warmupConfig.videoUrl
+                      src={effectiveHybridDeck.warmupConfig.videoUrl
                         .replace('watch?v=', 'embed/')
                         .replace('youtu.be/', 'www.youtube.com/embed/')}
                       className="w-full h-full border-0"
@@ -1853,21 +1906,21 @@ export const LiveClassroomWaitingRoom: React.FC<LiveClassroomWaitingRoomProps> =
                     />
                   ) : (
                     <video
-                      src={hybridDeck.warmupConfig.videoUrl}
+                      src={effectiveHybridDeck.warmupConfig.videoUrl}
                       controls
                       className="w-full h-full object-contain"
                     />
                   )
                 ) : activeWarmupTab === 'image' ? (
                   <img
-                    src={hybridDeck.warmupConfig.imageUrl}
-                    alt={hybridDeck.warmupConfig.imageCaption}
+                    src={effectiveHybridDeck.warmupConfig.imageUrl}
+                    alt={effectiveHybridDeck.warmupConfig.imageCaption}
                     className="w-full h-full object-contain select-none"
                   />
                 ) : (
                   <iframe
                     title="Interactive HTML5 Motion Simulation"
-                    srcDoc={hybridDeck.warmupConfig.htmlSimulationCode}
+                    srcDoc={effectiveHybridDeck.warmupConfig.htmlSimulationCode}
                     sandbox="allow-scripts"
                     className="w-full h-full border-0"
                   />

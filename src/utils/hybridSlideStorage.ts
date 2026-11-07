@@ -1203,8 +1203,8 @@ export async function loadHybridSlideDeck3Tier(params: {
   }
 
   if (localDeck && localDeck.slides && localDeck.slides.length > 0) {
-    // Nếu có ở IndexedDB nhưng chưa có trên Server, tự động đồng bộ ngầm lên Server
-    if (!serverDeck) {
+    // Nếu có ở IndexedDB nhưng chưa có trên Server (hoặc bản ở IndexedDB mới hơn), tự động đồng bộ ngầm lên Server
+    if (!serverDeck || (localDeck.version || 1) > (serverDeck.version || 0)) {
       pushHybridDeckToServer(localDeck).catch(() => {});
     }
     return {

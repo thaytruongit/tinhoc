@@ -543,17 +543,6 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     period: number
   ): Record<1 | 2 | 3 | 4, boolean> => {
     const key = `k${grade}-tiet-${period}`;
-    const isActiveLiveLesson =
-      liveSession?.activeGrade === grade && liveSession?.activePeriod === period;
-
-    // When Teacher is in standby mode ('waiting'), all 4 activities are strictly locked
-    if (
-      isActiveLiveLesson &&
-      liveSession?.activeLiveView === 'waiting'
-    ) {
-      return { 1: false, 2: false, 3: false, 4: false };
-    }
-
     const fromSession = liveSession?.unlockedStagesByLesson?.[key];
     if (fromSession && typeof fromSession === 'object') {
       return {
@@ -1300,7 +1289,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   };
 
   // DEDICATED STUDENT LIVE ROOM (BRIGHT WHITE THEME, AUTO-FOLLOWS TEACHER BROADCAST STAGE)
-  if ((isInLiveRoom || (isLiveForStudentClass && !studentManuallyExitedLive)) && openedPeriodNumber !== null) {
+  if (
+    (isInLiveRoom || (isLiveForStudentClass && !studentManuallyExitedLive)) &&
+    (openedPeriodNumber !== null || Boolean(liveSession?.activePeriod))
+  ) {
     const activeLiveGrade =
       liveSession?.isBroadcasting && liveSession.activeGrade
         ? liveSession.activeGrade
@@ -1308,7 +1300,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     const activeLivePeriodNum =
       liveSession?.isBroadcasting && liveSession.activePeriod
         ? liveSession.activePeriod
-        : openedPeriodNumber;
+        : openedPeriodNumber || 1;
     const liveGradePeriods = getPeriodsForGrade(activeLiveGrade);
     const effectiveLivePeriodSpec =
       liveGradePeriods.find((p) => p.period === activeLivePeriodNum) || currentPeriodSpec;
