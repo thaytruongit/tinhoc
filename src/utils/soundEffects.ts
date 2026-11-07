@@ -1,4 +1,5 @@
 import confetti from 'canvas-confetti';
+import { getStationDesk25DCoordinates } from './waitingRoomLogic';
 
 export interface AchievementBadgeSpec {
   id: string;
@@ -252,3 +253,69 @@ export function triggerSynchronizedCelebration(mode: 'badge' | 'xp' = 'badge'): 
     });
   }
 }
+
+/**
+ * Kích hoạt pháo hoa bùng nổ & hiệu ứng thả tim ngay tại tọa độ bàn học / bảng tên của học sinh vừa kết nối
+ */
+export function triggerStudentDeskFireworkCelebration(
+  seatElement?: HTMLElement | null,
+  stationMeta?: {
+    stationNumber?: string | number;
+    team?: 1 | 2;
+    deskIndexInTeam?: number;
+    totalDesks?: number;
+  }
+): void {
+  playBadgeUnlockSound();
+
+  const stationCoord = getStationDesk25DCoordinates(
+    stationMeta?.stationNumber ?? '01',
+    {
+      totalDesks: stationMeta?.totalDesks ?? 42,
+      teamOverride: stationMeta?.team,
+      deskIndexInTeamOverride: stationMeta?.deskIndexInTeam,
+    }
+  );
+
+  let originX = stationCoord.normalizedX;
+  let originY = stationCoord.normalizedY;
+
+  if (seatElement && typeof window !== 'undefined') {
+    const rect = seatElement.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0 && window.innerWidth > 0 && window.innerHeight > 0) {
+      originX = Math.min(0.92, Math.max(0.08, (rect.left + rect.width / 2) / window.innerWidth));
+      originY = Math.min(0.92, Math.max(0.08, (rect.top + rect.height / 3) / window.innerHeight));
+    }
+  }
+
+  try {
+    // Đợt 1: Pháo hoa bùng nổ trực tiếp tại bảng tên & bàn học sinh
+    confetti({
+      particleCount: 65,
+      spread: 70,
+      startVelocity: 32,
+      origin: { x: originX, y: originY },
+      colors: ['#f43f5e', '#ec4899', '#fbbf24', '#38bdf8', '#10b981', '#a855f7'],
+    });
+
+    // Đợt 2: Pháo hoa ngôi sao & sắc hồng thả tim nối tiếp sau 220ms
+    setTimeout(() => {
+      try {
+        confetti({
+          particleCount: 45,
+          spread: 95,
+          startVelocity: 24,
+          decay: 0.92,
+          scalar: 1.15,
+          origin: { x: originX, y: Math.max(0.08, originY - 0.04) },
+          colors: ['#fb7185', '#f43f5e', '#fde047', '#f9a8d4', '#ffffff'],
+        });
+      } catch {
+        // ignore
+      }
+    }, 220);
+  } catch {
+    // ignore confetti error in headless environments
+  }
+}
+

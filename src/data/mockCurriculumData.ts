@@ -1103,7 +1103,61 @@ export interface LiveClassroomSession {
     timestampIso: string;
   }[];
   completedStagesByStudent?: Record<string, (1 | 2 | 3 | 4 | 'hd3-practice')[]>;
+  lowBandwidthMode?: boolean;
+  studentFocusAlerts?: Record<string, StudentFocusAlertItem>;
+  webEmbedSlideUrl?: string;
+  slideDisplayMode?: 'pdf-canvas' | 'web-embed';
+  waitingRoomByLesson?: Record<string, WaitingRoomState>;
   updatedAt: string;
+}
+
+export type ClassroomHonorRole = 'lop-truong' | 'lop-pho' | 'sao-do' | 'tuyen-duong';
+
+export interface WaitingRoomChatItem {
+  id: string;
+  studentId: string;
+  studentName: string;
+  stationNumber?: string;
+  type: 'join' | 'chat' | 'answer' | 'honor';
+  text: string;
+  answerChoice?: 'A' | 'B' | 'C';
+  timestampIso: string;
+}
+
+export interface WaitingRoomState {
+  isOpen: boolean;
+  isReadyForLearning?: boolean;
+  classId: string;
+  grade: 6 | 7 | 8 | 9;
+  period: number;
+  joinedStudentIds: string[];
+  studentRoles: Record<string, ClassroomHonorRole>;
+  studentQuickAnswers: Record<string, 'A' | 'B' | 'C'>;
+  currentQuizIndex: number;
+  isQuizLocked: boolean;
+  showQuizAnswer: boolean;
+  team1Score: number;
+  team2Score: number;
+  feedMessages: WaitingRoomChatItem[];
+  lastJoinedStudent?: {
+    id: string;
+    name: string;
+    stationNumber: string;
+    team: 1 | 2;
+    timestampIso: string;
+  };
+  reactionBurstCount?: number;
+  updatedAt: string;
+}
+
+export interface StudentFocusAlertItem {
+  studentId: string;
+  studentName: string;
+  stationNumber: string;
+  classId: string;
+  tabSwitchCount: number;
+  lastBlurAtIso: string;
+  isCurrentlyBlurred: boolean;
 }
 
 export function createDefaultUnlockedMap(): Record<string, Record<1 | 2 | 3 | 4, boolean>> {

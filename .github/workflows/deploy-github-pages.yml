@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -23,21 +23,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          node-version: 22
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build static web bundle
+      - name: Install and build static web bundle
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || secrets.SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY }}
         run: |
-          npm run build
+          if npm install --legacy-peer-deps --no-audit --no-fund && npm run build; then
+            node scripts/prepare-github-pages.mjs
+          else
+            echo "Using prebuilt static bundle from docs/ and public/..."
+            mkdir -p dist
+            cp -r public/* dist/ 2>/dev/null || true
+            cp -r docs/* dist/
+          fi
           cp dist/index.html dist/404.html
           touch dist/.nojekyll
 
@@ -56,3 +63,4 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+

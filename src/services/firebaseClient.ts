@@ -8,8 +8,37 @@ import {
   type User,
 } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
 import { sanitizeId, sanitizeString } from '../utils/pedagogyEngine';
+
+const optionalFirebaseConfigModules =
+  typeof import.meta !== 'undefined' && typeof (import.meta as any).glob === 'function'
+    ? (import.meta as any).glob('../../firebase-applet-config.json', { eager: true })
+    : {};
+
+const loadedAppletConfig: Record<string, any> =
+  (Object.values(optionalFirebaseConfigModules)[0] as any)?.default ||
+  (Object.values(optionalFirebaseConfigModules)[0] as any) ||
+  {};
+
+const getViteEnv = (key: string): string => {
+  try {
+    return (typeof import.meta !== 'undefined' && (import.meta as any).env?.[key]) || '';
+  } catch {
+    return '';
+  }
+};
+
+const firebaseConfig: Record<string, any> = {
+  projectId: getViteEnv('VITE_FIREBASE_PROJECT_ID') || loadedAppletConfig.projectId || '',
+  appId: getViteEnv('VITE_FIREBASE_APP_ID') || loadedAppletConfig.appId || '',
+  apiKey: getViteEnv('VITE_FIREBASE_API_KEY') || loadedAppletConfig.apiKey || '',
+  authDomain: getViteEnv('VITE_FIREBASE_AUTH_DOMAIN') || loadedAppletConfig.authDomain || '',
+  firestoreDatabaseId:
+    getViteEnv('VITE_FIREBASE_DATABASE_ID') || loadedAppletConfig.firestoreDatabaseId || '',
+  storageBucket: getViteEnv('VITE_FIREBASE_STORAGE_BUCKET') || loadedAppletConfig.storageBucket || '',
+  messagingSenderId:
+    getViteEnv('VITE_FIREBASE_MESSAGING_SENDER_ID') || loadedAppletConfig.messagingSenderId || '',
+};
 
 let app: any = null;
 let authInstance: any = null;
@@ -17,12 +46,12 @@ let firestoreDbInstance: any = null;
 let googleAuthProviderInstance: any = null;
 
 try {
-  if (firebaseConfig && (firebaseConfig as any).apiKey) {
+  if (firebaseConfig && firebaseConfig.apiKey) {
     app = initializeApp(firebaseConfig);
     authInstance = getAuth(app);
     try {
-      firestoreDbInstance = (firebaseConfig as any).firestoreDatabaseId
-        ? getFirestore(app, (firebaseConfig as any).firestoreDatabaseId)
+      firestoreDbInstance = firebaseConfig.firestoreDatabaseId
+        ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
         : getFirestore(app);
     } catch {
       try {
@@ -32,17 +61,32 @@ try {
       }
     }
     googleAuthProviderInstance = new GoogleAuthProvider();
+    googleAuthProviderInstance.addScope('https://www.googleapis.com/auth/spreadsheets');
   }
 } catch (fbInitErr) {
   console.warn('[CloudPlay Notice] Firebase initialization safely bypassed or using fallback:', fbInitErr);
 }
 
+export const firebaseApp = app;
 export const auth = authInstance;
 export const firestoreDb = firestoreDbInstance;
 export const googleAuthProvider = googleAuthProviderInstance;
 
-// Keep Firebase Auth ID token strictly in memory (never in localStorage)
+// Keep Firebase Auth ID token and Google OAuth Access Token strictly in memory (never in localStorage/sessionStorage)
 let inMemoryIdToken: string | null = null;
+let cachedGoogleAccessToken: string | null = null;
+const authListeners = new Set<(user: User | null, hasSheetsToken: boolean) => void>();
+
+function notifyAuthListeners(user: User | null) {
+  const hasToken = Boolean(cachedGoogleAccessToken);
+  authListeners.forEach((cb) => {
+    try {
+      cb(user, hasToken);
+    } catch {
+      // ignore listener error
+    }
+  });
+}
 
 if (auth) {
   try {
@@ -55,11 +99,32 @@ if (auth) {
         }
       } else {
         inMemoryIdToken = null;
+        cachedGoogleAccessToken = null;
       }
+      notifyAuthListeners(user);
     });
   } catch (err) {
     console.warn('onAuthStateChanged notice:', err);
   }
+}
+
+export function getGoogleSheetsAccessToken(): string | null {
+  return cachedGoogleAccessToken;
+}
+
+export function setGoogleSheetsAccessTokenInMemory(token: string | null): void {
+  cachedGoogleAccessToken = token ? token.trim() : null;
+  notifyAuthListeners(auth?.currentUser || null);
+}
+
+export function subscribeGoogleSheetsAuth(
+  callback: (user: User | null, hasSheetsToken: boolean) => void
+): () => void {
+  authListeners.add(callback);
+  callback(auth?.currentUser || null, Boolean(cachedGoogleAccessToken));
+  return () => {
+    authListeners.delete(callback);
+  };
 }
 
 export async function getAuthBearerHeaders(): Promise<Record<string, string>> {
@@ -80,15 +145,22 @@ export async function getAuthBearerHeaders(): Promise<Record<string, string>> {
 }
 
 export async function signInWithGooglePopup(): Promise<User | null> {
-  if (!auth || !googleAuthProvider) {
+  if (!auth) {
     console.warn('Firebase Auth/Provider is not configured on this environment.');
     return null;
   }
   try {
-    const result = await signInWithPopup(auth, googleAuthProvider);
+    const provider = new GoogleAuthProvider();
+    provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (credential?.accessToken) {
+      cachedGoogleAccessToken = credential.accessToken;
+    }
     if (result.user) {
       inMemoryIdToken = await result.user.getIdToken();
     }
+    notifyAuthListeners(result.user);
     return result.user;
   } catch (err) {
     console.warn('Google Popup sign-in notice:', err);
@@ -96,8 +168,46 @@ export async function signInWithGooglePopup(): Promise<User | null> {
   }
 }
 
+export async function signInWithGoogleForSheets(): Promise<{
+  user: User | null;
+  accessToken: string | null;
+  errorMessage?: string;
+}> {
+  if (!auth) {
+    return {
+      user: null,
+      accessToken: null,
+      errorMessage: 'Firebase Auth chưa sẵn sàng trên môi trường này.',
+    };
+  }
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+    provider.setCustomParameters({ prompt: 'consent' });
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    cachedGoogleAccessToken = credential?.accessToken ?? null;
+    if (result.user) {
+      inMemoryIdToken = await result.user.getIdToken();
+    }
+    notifyAuthListeners(result.user);
+    return {
+      user: result.user,
+      accessToken: cachedGoogleAccessToken,
+    };
+  } catch (err: any) {
+    console.warn('Google Sheets sign-in error:', err);
+    return {
+      user: auth?.currentUser || null,
+      accessToken: null,
+      errorMessage: err?.message || 'Đăng nhập Google bị hủy hoặc không thành công.',
+    };
+  }
+}
+
 export async function signOutFirebase(): Promise<void> {
   inMemoryIdToken = null;
+  cachedGoogleAccessToken = null;
   if (auth) {
     try {
       await fbSignOut(auth);
@@ -105,6 +215,7 @@ export async function signOutFirebase(): Promise<void> {
       // ignore
     }
   }
+  notifyAuthListeners(null);
 }
 
 export { onAuthStateChanged, type User };

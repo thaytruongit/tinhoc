@@ -1,12 +1,11 @@
 {
-  "projectId": "enhanced-parser-kh7nb",
-  "appId": "1:933631830253:web:7bb52314e54fe1406f44e4",
-  "apiKey": "AIzaSyCy7L9iP9rgvDOjQ3Q2sWN6UG5BBRJg8-c",
-  "authDomain": "enhanced-parser-kh7nb.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-cloudplaylearnin-61d60610-4bf4-46ab-b23d-57119496dbba",
-  "storageBucket": "enhanced-parser-kh7nb.firebasestorage.app",
-  "messagingSenderId": "933631830253",
+  "projectId": "gen-lang-client-0119099129",
+  "appId": "1:723101564063:web:42bb4b5a32a53bc40b76aa",
+  "apiKey": "AIzaSyBSv_K-PMxGkXRhGyPwe3u7geKjn0abk_g",
+  "authDomain": "gen-lang-client-0119099129.firebaseapp.com",
+  "storageBucket": "gen-lang-client-0119099129.firebasestorage.app",
+  "messagingSenderId": "723101564063",
   "measurementId": "",
-  "oAuthClientId": "933631830253-9gnn4b6u1nr8lsshlinlqe5dvhspg9ca.apps.googleusercontent.com",
+  "oAuthClientId": "723101564063-pof8mf2be2bg6l7f27odcoc9d7abdnpp.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

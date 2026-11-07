@@ -41,17 +41,38 @@ import { SlidePresenterManager } from './SlidePresenterManager';
 import { TeacherLivePresenterRoom } from './TeacherLivePresenterRoom';
 import {
   getDefaultLectureSlides,
-  LectureSlideManagerModal,
+  convertSlideFileToPages,
 } from './LectureSlideManagerModal';
 import {
   resolvePresenterKeyAction,
   buildEndSlidePresentationState,
   buildStartLiveSessionStandbyState,
+  filterTeacherPortalStudents,
+  computeStudentFilterSummary,
+  getEffectiveStudentSubmissionStatus,
+  type StudentSubmissionFilterMode,
+  type StudentGroupFilterMode,
 } from '../utils/slideAndArenaController';
+import {
+  buildFixedSlideFolderMapping,
+  buildFixedFolderPdfSlideCacheDeck,
+  normalizeFixedSlideRootFolder,
+  matchFileToGradeAndPeriod,
+  isRealRenderedPdfSlideDeck,
+  DEFAULT_FIXED_SLIDE_ROOT_FOLDER,
+} from '../utils/slideDeckManager';
+import {
+  saveSlideDeckToIndexedDb,
+  getSlideDeckFromIndexedDb,
+  deleteSlideDeckFromIndexedDb,
+} from '../utils/indexedDbSlideStorage';
 import { LiveStudentProgressTracker } from './LiveStudentProgressTracker';
+import { GoogleSheetsSlideDbPanel } from './GoogleSheetsSlideDbPanel';
+import { type GoogleSheetSlideIndexRecord } from '../utils/googleSheetsConnector';
 
 export type TeacherTab =
   | 'trang-chu'
+  | 'csdl-google-sheets'
   | 'bien-soan-stage-1'
   | 'bien-soan-stage-2'
   | 'bien-soan-stage-3'
@@ -130,11 +151,13 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     'ALL' | 'GK1' | 'CK1' | 'GK2' | 'CK2'
   >('ALL');
   const [isLivePresenterOpen, setIsLivePresenterOpen] = useState(false);
-  const [showLectureSlideModal, setShowLectureSlideModal] = useState(false);
   const [showLiveProgressModal, setShowLiveProgressModal] = useState(false);
   const [showResetAcademicYearModal, setShowResetAcademicYearModal] = useState(false);
   const [isResettingAcademicYear, setIsResettingAcademicYear] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showCsdlGoogleSheetsModal, setShowCsdlGoogleSheetsModal] = useState(false);
+  const [sheetIndexRecords, setSheetIndexRecords] = useState<GoogleSheetSlideIndexRecord[]>([]);
+  const csdlHomeSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -368,7 +391,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   useEffect(() => {
     if (
       isLivePresenterOpen ||
-      showLectureSlideModal ||
       showLiveProgressModal ||
       !liveSession?.isBroadcasting ||
       liveSession?.activeLiveView !== 'slide' ||
@@ -388,6 +410,15 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       );
       if (!action) return;
 
+      if (action === 'fullscreen') {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsLivePresenterOpen(true);
+        return;
+      }
+
+      if (action !== 'next' && action !== 'prev') return;
+
       if (target && target.tagName === 'BUTTON') {
         target.blur();
       }
@@ -400,7 +431,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
   }, [
     isLivePresenterOpen,
-    showLectureSlideModal,
     showLiveProgressModal,
     liveSession?.isBroadcasting,
     liveSession?.activeLiveView,
@@ -417,6 +447,80 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
   // Home search query matching image
   const [homeSearchQuery, setHomeSearchQuery] = useState('');
+
+  // Student filter states (by Submission status: Đã nộp / Chưa nộp & by Learning Group: Nhóm 1..4)
+  const [studentSubmissionFilter, setStudentSubmissionFilter] =
+    useState<StudentSubmissionFilterMode>('ALL');
+  const [studentGroupFilter, setStudentGroupFilter] =
+    useState<StudentGroupFilterMode>('ALL');
+  const [studentSearchKeyword, setStudentSearchKeyword] = useState('');
+  const [showHomeStudentQuickFilter, setShowHomeStudentQuickFilter] = useState(true);
+
+  // Fixed root folder for automatic PDF slide image extraction & caching (Tin 6..9 / Tiết 1..29)
+  const [fixedSlideRootFolder, setFixedSlideRootFolder] = useState<string>(() => {
+    try {
+      const saved =
+        localStorage.getItem('cloudplay_fixed_slide_folder_v1') || DEFAULT_FIXED_SLIDE_ROOT_FOLDER;
+      return normalizeFixedSlideRootFolder(saved);
+    } catch {
+      return DEFAULT_FIXED_SLIDE_ROOT_FOLDER;
+    }
+  });
+  const homePdfFolderInputRef = useRef<HTMLInputElement | null>(null);
+  const [isCachingPdfFolder, setIsCachingPdfFolder] = useState(false);
+
+  const handleUpdateFixedSlideRootFolder = (nextRoot: string) => {
+    const cleaned = normalizeFixedSlideRootFolder(nextRoot);
+    setFixedSlideRootFolder(cleaned);
+    try {
+      localStorage.setItem('cloudplay_fixed_slide_folder_v1', cleaned);
+    } catch {
+      // ignore storage errors
+    }
+    const sampleMap = buildFixedSlideFolderMapping(
+      selectedNotebookGrade,
+      selectedNotebookPeriod,
+      cleaned
+    );
+    onShowToast(
+      `📂 Đã cố định đường dẫn thư mục PDF: "${cleaned}" → Tự động trích xuất Ảnh Slide từ "${sampleMap.primaryFilePath}" lên bộ nhớ đệm khi mở Live!`
+    );
+  };
+
+  // Link local PDF directory: store File handles by lessonKey so mapping & extraction ONLY run when a period is selected
+  const handleLinkLocalPdfDirectoryOnHome = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    setIsCachingPdfFolder(true);
+    let matchedPdfCount = 0;
+    try {
+      const files = Array.from(fileList);
+      if (typeof window !== 'undefined') {
+        if (!(window as any).__cloudplayLinkedPdfFilesByLesson) {
+          (window as any).__cloudplayLinkedPdfFilesByLesson = {};
+        }
+      }
+      for (const file of files) {
+        const relPath = (file as any).webkitRelativePath || file.name;
+        const matched = matchFileToGradeAndPeriod(relPath, selectedNotebookGrade);
+        if (!matched || matched.inferredFileType !== 'pdf') continue;
+        if (typeof window !== 'undefined') {
+          (window as any).__cloudplayLinkedPdfFilesByLesson[matched.lessonKey] = file;
+        }
+        matchedPdfCount++;
+      }
+      if (matchedPdfCount > 0) {
+        onShowToast(
+          `✅ Đã liên kết ${matchedPdfCount} tệp PDF bản gốc trong thư mục! Khi thầy/cô chọn tiết học sẽ bắt đầu ánh xạ và nạp đúng tệp PDF của tiết đó.`
+        );
+      } else {
+        onShowToast(
+          `⚠️ Không tìm thấy tệp .PDF nào khớp cấu trúc Tin 6–9 / Tiết 1–29 trong thư mục đã chọn (khi mở tiết không có tệp sẽ hiển thị trang Slide trắng).`
+        );
+      }
+    } finally {
+      setIsCachingPdfFolder(false);
+    }
+  };
 
   // Gradebook & Reports filters
   const [gradebookGradeFilter, setGradebookGradeFilter] = useState<6 | 7 | 8 | 9 | 'ALL'>('ALL');
@@ -1416,18 +1520,67 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     targetClassOverride?: string
   ) => {
     const targetClass = targetClassOverride || selectedClass;
+    const normalizedRoot = normalizeFixedSlideRootFolder(fixedSlideRootFolder);
+    const mapping = buildFixedSlideFolderMapping(grade, periodNum, normalizedRoot);
+    const targetLessonKey = mapping.lessonKey;
+    const targetPeriodSpec =
+      getPeriodsForGrade(grade).find((p) => p.period === periodNum) || selectedPeriodSpec;
+
+    // Default to a Blank White Slide ("trang slide trắng") until on-demand PDF mapping resolves a real PDF file
+    const blankFallbackDeck = buildFixedFolderPdfSlideCacheDeck({
+      grade,
+      period: periodNum,
+      rootFolder: normalizedRoot,
+      lessonTitle: targetPeriodSpec?.lessonTitle,
+      topic: targetPeriodSpec?.topic,
+      yccd: targetPeriodSpec?.yccd,
+    });
+
     if (onUpdateLiveSession) {
-      onUpdateLiveSession((prev) =>
-        buildStartLiveSessionStandbyState(prev, {
+      onUpdateLiveSession((prev) => {
+        const standbyState = buildStartLiveSessionStandbyState(prev, {
           grade,
           period: periodNum,
           classId: targetClass,
-        })
-      );
+        });
+        const existingDeck = standbyState.lectureSlidesByLesson?.[targetLessonKey];
+        const keepExistingRealPdf = isRealRenderedPdfSlideDeck(existingDeck);
+
+        return {
+          ...standbyState,
+          activeLiveView: 'waiting',
+          lectureSlidesByLesson: {
+            ...(standbyState.lectureSlidesByLesson || {}),
+            [targetLessonKey]:
+              keepExistingRealPdf && existingDeck ? existingDeck : blankFallbackDeck,
+          },
+          activeSlideIndexByLesson: {
+            ...(standbyState.activeSlideIndexByLesson || {}),
+            [targetLessonKey]: 0,
+          },
+          unlockedSlideDeckByLesson: {
+            ...(standbyState.unlockedSlideDeckByLesson || {}),
+            [targetLessonKey]: false,
+          },
+        };
+      });
     }
+
+    // Purge any stale synthetic SVG deck from IndexedDB if it is not a real rendered PDF
+    (async () => {
+      try {
+        const cachedDeck = await getSlideDeckFromIndexedDb(targetLessonKey);
+        if (cachedDeck && !isRealRenderedPdfSlideDeck(cachedDeck)) {
+          await deleteSlideDeckFromIndexedDb(targetLessonKey).catch(() => {});
+        }
+      } catch {
+        // Ignore background cache errors
+      }
+    })();
+
     setIsLivePresenterOpen(true);
     onShowToast(
-      `🔴 Đã mở Phòng Live Khối ${grade} • Tiết ${periodNum} (Lớp ${targetClass}) ở trạng thái chờ — Bấm "📢 Phát Live" ở hoạt động nào để kích hoạt riêng hoạt động đó!`
+      `🔴 Đã mở Phòng Live Khối ${grade} • Tiết ${periodNum} (Lớp ${targetClass}) — Đang đồng bộ Slide từ Google Sheet "CSDL" (${targetLessonKey})!`
     );
   };
 
@@ -1682,6 +1835,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
   const navItems: { id: TeacherTab; icon: string; label: string }[] = [
     { id: 'trang-chu', icon: 'dashboard', label: 'Trang chủ' },
+    { id: 'csdl-google-sheets', icon: 'table_chart', label: 'CSDL Slide (Sheet)' },
     { id: 'bien-soan-stage-1', icon: 'psychology_alt', label: 'Khởi động' },
     { id: 'bien-soan-stage-2', icon: 'menu_book', label: 'Khám phá' },
     { id: 'bien-soan-stage-3', icon: 'extension', label: 'Luyện tập' },
@@ -1698,12 +1852,18 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   );
 
   if (isLivePresenterOpen) {
+    const activeLiveGrade = (liveSession?.activeGrade || selectedNotebookGrade) as 6 | 7 | 8 | 9;
+    const activeLivePeriod = liveSession?.activePeriod || selectedNotebookPeriod;
+    const activeLivePeriodSpec =
+      getPeriodsForGrade(activeLiveGrade).find((p) => p.period === activeLivePeriod) ||
+      selectedPeriodSpec;
+
     return (
       <TeacherLivePresenterRoom
-        grade={liveSession?.activeGrade || selectedNotebookGrade}
-        period={liveSession?.activePeriod || selectedNotebookPeriod}
+        grade={activeLiveGrade}
+        period={activeLivePeriod}
         classId={liveSession?.activeClassId || selectedClass}
-        periodSpec={selectedPeriodSpec}
+        periodSpec={activeLivePeriodSpec}
         liveSession={liveSession}
         students={students}
         onExit={() => setIsLivePresenterOpen(false)}
@@ -1767,11 +1927,12 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
               <button
                 type="button"
-                onClick={() => setShowLectureSlideModal(true)}
-                className="w-full text-left flex items-center gap-space-sm px-space-md py-2.5 rounded-lg font-label-md text-label-md bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/20 font-bold transition-all cursor-pointer border border-indigo-500/25"
+                data-testid="sidebar-open-csdl-sheet-btn"
+                onClick={() => setShowCsdlGoogleSheetsModal(true)}
+                className="w-full text-left flex items-center gap-space-sm px-space-md py-2.5 rounded-lg font-label-md text-label-md bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/25 font-bold transition-all cursor-pointer border border-emerald-500/35"
               >
-                <span className="material-symbols-outlined text-[20px]">slideshow</span>
-                <span className="truncate">Nạp bài giảng (PDF, PPTX, HTML)</span>
+                <span className="material-symbols-outlined text-[20px]">table_chart</span>
+                <span className="truncate">📊 Nạp PDF → Sheet &quot;CSDL&quot;</span>
               </button>
 
               <button
@@ -1831,6 +1992,17 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           </div>
 
           <div className="flex items-center gap-space-sm">
+            <button
+              type="button"
+              data-testid="header-open-csdl-modal-btn"
+              onClick={() => setShowCsdlGoogleSheetsModal(true)}
+              className="px-3.5 py-1.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-label-sm text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer border border-emerald-300"
+              title="Mở cửa sổ Nạp bài giảng PDF (pdf.js -> WebP) và đẩy lên Google Sheets CSDL"
+            >
+              <span className="material-symbols-outlined text-[16px]">table_chart</span>
+              <span>CSDL Slide (&quot;CSDL&quot;)</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setShowLiveProgressModal(true)}
@@ -2118,7 +2290,107 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     </div>
                   </div>
 
-                  {/* SECTION 5: GRID OF 29-PERIOD CARDS MATCHING SCREENSHOT EXACTLY */}
+                  {/* SECTION 4B: CHỨC NĂNG RIÊNG TRANG CHỦ GIÁO VIÊN — QUẢN TRỊ CSDL SLIDE BÀI GIẢNG TRÊN GOOGLE SHEETS (FILE "CSDL") */}
+                  <div ref={csdlHomeSectionRef} id="teacher-home-csdl-google-sheets">
+                    <GoogleSheetsSlideDbPanel
+                      grade={selectedNotebookGrade}
+                      period={selectedNotebookPeriod}
+                      classId={selectedClass}
+                      lessonTitle={
+                        gradePeriods.find((p) => p.period === selectedNotebookPeriod)
+                          ?.lessonTitle ||
+                        `Bài giảng Tin học Khối ${selectedNotebookGrade} • Tiết ${selectedNotebookPeriod}`
+                      }
+                      currentDeck={
+                        liveSession?.lectureSlidesByLesson?.[
+                          `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`
+                        ]
+                      }
+                      periodList={gradePeriods.map((p) => ({
+                        period: p.period,
+                        lessonTitle: p.lessonTitle,
+                      }))}
+                      onChangeGradeAndPeriod={(nextGrade, nextPeriod) => {
+                        handleSelectGradeAndPeriod(nextGrade, nextPeriod);
+                      }}
+                      onOpenLiveRoomForLesson={(targetGrade, targetPeriod) => {
+                        handleSelectGradeAndPeriod(targetGrade, targetPeriod);
+                        handleBroadcastLivePeriod(
+                          targetGrade,
+                          targetPeriod,
+                          true,
+                          selectedClass
+                        );
+                      }}
+                      onSheetIndexChange={(records) => {
+                        setSheetIndexRecords(records);
+                      }}
+                      onApplyLoadedDeck={async (
+                        nextDeck,
+                        toastMsg,
+                        autoBroadcast,
+                        explicitLessonKey
+                      ) => {
+                        const targetKey =
+                          explicitLessonKey ||
+                          `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`;
+                        const syncVer = Date.now();
+                        if (isRealRenderedPdfSlideDeck(nextDeck)) {
+                          await saveSlideDeckToIndexedDb(targetKey, nextDeck).catch(() => {});
+                          fetch('/api/db/slides', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              lessonKey: targetKey,
+                              deck: nextDeck,
+                              activeSlideIndex: 0,
+                            }),
+                          }).catch(() => {});
+                        } else {
+                          await deleteSlideDeckFromIndexedDb(targetKey).catch(() => {});
+                        }
+
+                        if (onUpdateLiveSession) {
+                          onUpdateLiveSession((prev) => ({
+                            ...prev,
+                            ...(autoBroadcast
+                              ? {
+                                  isBroadcasting: true,
+                                  activeGrade: selectedNotebookGrade,
+                                  activePeriod: selectedNotebookPeriod,
+                                  activeClassId: selectedClass,
+                                  activeLiveView: 'slide' as const,
+                                }
+                              : {}),
+                            lectureSlidesByLesson: {
+                              ...(prev.lectureSlidesByLesson || {}),
+                              [targetKey]: nextDeck,
+                            },
+                            activeSlideIndexByLesson: {
+                              ...(prev.activeSlideIndexByLesson || {}),
+                              [targetKey]: 0,
+                            },
+                            slideSyncVersionByLesson: {
+                              ...(prev.slideSyncVersionByLesson || {}),
+                              [targetKey]: syncVer,
+                            },
+                            unlockedSlideDeckByLesson: {
+                              ...(prev.unlockedSlideDeckByLesson || {}),
+                              [targetKey]: true,
+                            },
+                            updatedAt: new Date().toISOString(),
+                          }));
+                        }
+
+                        if (toastMsg) {
+                          onShowToast(toastMsg);
+                        }
+                      }}
+                      onShowToast={onShowToast}
+                    />
+                  </div>
+
+                  {/* SECTION 5: GRID OF 29-PERIOD CARDS — CLICKING ANY PERIOD IMMEDIATELY ENTERS LIVE ROOM */}
                   {(() => {
                     const filteredGradePeriods = gradePeriods.filter((spec) => {
                       // Filter by exam milestone
@@ -2164,38 +2436,75 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                                 : `${spec.period * 3 - 2}–${spec.period * 3}`;
                               const bookName = spec.sgkFile || `SGK Tin${selectedNotebookGrade}.pdf`;
                               const typeText = spec.lessonType === 'practice' ? 'Thực hành' : 'Lý thuyết';
+                              const slideMapping = buildFixedSlideFolderMapping(
+                                spec.grade,
+                                spec.period,
+                                fixedSlideRootFolder
+                              );
+
+                              const enterLiveRoomForPeriod = () => {
+                                handleSelectGradeAndPeriod(spec.grade, spec.period);
+                                handleBroadcastLivePeriod(
+                                  spec.grade,
+                                  spec.period,
+                                  true,
+                                  selectedClass
+                                );
+                              };
 
                               return (
                                 <div
                                   key={spec.id}
-                                  className={`rounded-3xl bg-white border p-5 shadow-2xs flex flex-col justify-between gap-4 transition-all ${
+                                  onClick={enterLiveRoomForPeriod}
+                                  role="button"
+                                  tabIndex={0}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault();
+                                      enterLiveRoomForPeriod();
+                                    }
+                                  }}
+                                  aria-label={`Vào ngay Phòng Live Tiết ${spec.period} Khối ${spec.grade}`}
+                                  className={`rounded-3xl bg-white border p-5 shadow-2xs flex flex-col justify-between gap-4 transition-all cursor-pointer group ${
                                     isLiveActive
                                       ? 'border-red-500 ring-2 ring-red-400/30'
-                                      : 'border-slate-200/90 hover:border-slate-300'
+                                      : 'border-slate-200/90 hover:border-[#8a4b16] hover:shadow-md'
                                   }`}
                                 >
-                                  {/* Card Header & Content */}
-                                  <div
-                                    onClick={() => {
-                                      handleSelectGradeAndPeriod(spec.grade, spec.period);
-                                      applyNotebookBlueprintToAllStages(
-                                        buildLessonBlueprintFromPeriod(spec)
-                                      );
-                                      onChangeTab('bien-soan-stage-1');
-                                    }}
-                                    className="flex items-start justify-between gap-3 cursor-pointer"
-                                  >
+                                  {/* Card Header & Content — Clickable to immediately open Live Room */}
+                                  <div className="flex items-start justify-between gap-3">
                                     <div className="flex items-start gap-3">
-                                      <div className="w-10 h-10 rounded-full bg-[#e8eef6] text-slate-800 font-bold flex items-center justify-center text-sm shrink-0 mt-0.5">
+                                      <div className="w-10 h-10 rounded-full bg-[#e8eef6] group-hover:bg-[#8a4b16] group-hover:text-white text-slate-800 font-bold flex items-center justify-center text-sm shrink-0 mt-0.5 transition-colors">
                                         {spec.period}
                                       </div>
                                       <div className="flex flex-col">
-                                        <h4 className="font-bold text-sm text-slate-900 line-clamp-2 leading-snug">
+                                        <h4 className="font-bold text-sm text-slate-900 group-hover:text-[#8a4b16] line-clamp-2 leading-snug transition-colors">
                                           Tiết {spec.period}: {spec.lessonTitle.startsWith('Tiết') ? spec.lessonTitle : `Tiết ${spec.period}: ${spec.lessonTitle}`}
                                         </h4>
                                         <p className="text-xs text-slate-500 mt-1">
                                           Trang {pageRange} ({bookName}) • {typeText}
                                         </p>
+                                        {(() => {
+                                          const cardLessonKey = `k${spec.grade}-tiet-${spec.period}`;
+                                          const sheetRec = sheetIndexRecords.find(
+                                            (r) => r.lessonKey === cardLessonKey
+                                          );
+                                          return sheetRec ? (
+                                            <span className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded-lg w-fit">
+                                              <span className="material-symbols-outlined text-[13px]">table_chart</span>
+                                              <span>
+                                                CSDL Google Sheet: ✓ {sheetRec.slideCount} Slide Ảnh ({cardLessonKey})
+                                              </span>
+                                            </span>
+                                          ) : (
+                                            <span className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-teal-800 bg-teal-50/80 border border-teal-200 px-2 py-0.5 rounded-lg w-fit">
+                                              <span className="material-symbols-outlined text-[13px]">table_chart</span>
+                                              <span>
+                                                CSDL Google Sheet: {cardLessonKey}
+                                              </span>
+                                            </span>
+                                          );
+                                        })()}
                                       </div>
                                     </div>
 
@@ -2218,39 +2527,55 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                                     </div>
                                   </div>
 
-                                  {/* Card Action Buttons: Đánh dấu Đã Dạy & Live Tiết {spec.period} */}
-                                  <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                                  {/* Card Action Buttons: Đánh dấu Đã Dạy, Biên soạn & Live Tiết {spec.period} */}
+                                  <div
+                                    className="flex items-center gap-2 pt-2 border-t border-slate-100"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
                                     <button
                                       type="button"
-                                      onClick={() =>
+                                      onClick={(e) => {
+                                        e.stopPropagation();
                                         handleToggleTaughtPeriodForClass(
                                           spec.grade,
                                           spec.period,
                                           selectedClass
-                                        )
-                                      }
-                                      className={`flex-1 py-2.5 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs transition-colors ${
+                                        );
+                                      }}
+                                      className={`flex-1 py-2.5 px-2.5 rounded-full text-xs font-bold flex items-center justify-center gap-1 cursor-pointer shadow-2xs transition-colors ${
                                         isTaught
                                           ? 'bg-emerald-700 hover:bg-emerald-800 text-white'
                                           : 'bg-[#1e6b52] hover:bg-[#165541] text-white'
                                       }`}
                                     >
-                                      <span className="material-symbols-outlined text-[17px]">
+                                      <span className="material-symbols-outlined text-[16px]">
                                         {isTaught ? 'task_alt' : 'radio_button_unchecked'}
                                       </span>
-                                      <span>{isTaught ? '✓ Đã dạy' : 'Đánh dấu Đã Dạy'}</span>
+                                      <span>{isTaught ? '✓ Đã dạy' : 'Đã Dạy'}</span>
                                     </button>
 
                                     <button
                                       type="button"
-                                      onClick={() => {
+                                      onClick={(e) => {
+                                        e.stopPropagation();
                                         handleSelectGradeAndPeriod(spec.grade, spec.period);
-                                        handleBroadcastLivePeriod(
-                                          spec.grade,
-                                          spec.period,
-                                          true,
-                                          selectedClass
+                                        applyNotebookBlueprintToAllStages(
+                                          buildLessonBlueprintFromPeriod(spec)
                                         );
+                                        onChangeTab('bien-soan-stage-1');
+                                      }}
+                                      title={`Biên soạn giáo án Tiết ${spec.period}`}
+                                      className="py-2.5 px-3 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                                    >
+                                      <span className="material-symbols-outlined text-[15px]">edit_note</span>
+                                      <span>Soạn</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        enterLiveRoomForPeriod();
                                       }}
                                       className="flex-1 py-2.5 px-3 rounded-full bg-[#8a4b16] hover:bg-[#723d11] text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
                                     >
@@ -2268,6 +2593,265 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       </DataBoundary>
                     );
                   })()}
+              </div>
+            </div>
+          )}
+
+          {/* TAB RIÊNG: QUẢN TRỊ CSDL SLIDE BÀI GIẢNG TRÊN GOOGLE SHEETS (FILE "CSDL" • PDF.JS -> WEBP) */}
+          {activeTab === 'csdl-google-sheets' && (
+            <div className="flex flex-col gap-6" data-testid="teacher-csdl-google-sheets-tab">
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-5 rounded-3xl border border-emerald-200 shadow-2xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
+                    <span className="material-symbols-outlined text-[26px]">cloud_upload</span>
+                  </div>
+                  <div>
+                    <h1 className="text-lg font-black text-slate-900">
+                      Quản Trị CSDL Slide Bài Giảng Trên Google Sheets (File Google Drive: &quot;CSDL&quot;)
+                    </h1>
+                    <p className="text-xs text-slate-600">
+                      Module <code>src/utils/googleSheetsConnector.ts</code> • Chuyển đổi mỗi trang PDF thành ảnh WebP độ nét cao bằng <code>pdf.js</code> và phân mảnh tối đa 6 chunk Base64 lưu vào 2 bảng <code>Slides_Index</code> &amp; <code>Slides_Pages</code>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onChangeTab('trang-chu')}
+                  className="px-4 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold cursor-pointer flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                  <span>Quay lại Trang chủ 29 Tiết</span>
+                </button>
+              </div>
+
+              <GoogleSheetsSlideDbPanel
+                grade={selectedNotebookGrade}
+                period={selectedNotebookPeriod}
+                classId={selectedClass}
+                lessonTitle={
+                  gradePeriods.find((p) => p.period === selectedNotebookPeriod)
+                    ?.lessonTitle ||
+                  `Bài giảng Tin học Khối ${selectedNotebookGrade} • Tiết ${selectedNotebookPeriod}`
+                }
+                currentDeck={
+                  liveSession?.lectureSlidesByLesson?.[
+                    `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`
+                  ]
+                }
+                periodList={gradePeriods.map((p) => ({
+                  period: p.period,
+                  lessonTitle: p.lessonTitle,
+                }))}
+                onChangeGradeAndPeriod={(nextGrade, nextPeriod) => {
+                  handleSelectGradeAndPeriod(nextGrade, nextPeriod);
+                }}
+                onOpenLiveRoomForLesson={(targetGrade, targetPeriod) => {
+                  handleSelectGradeAndPeriod(targetGrade, targetPeriod);
+                  handleBroadcastLivePeriod(
+                    targetGrade,
+                    targetPeriod,
+                    true,
+                    selectedClass
+                  );
+                }}
+                onSheetIndexChange={(records) => {
+                  setSheetIndexRecords(records);
+                }}
+                onApplyLoadedDeck={async (
+                  nextDeck,
+                  toastMsg,
+                  autoBroadcast,
+                  explicitLessonKey
+                ) => {
+                  const targetKey =
+                    explicitLessonKey ||
+                    `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`;
+                  const syncVer = Date.now();
+                  if (isRealRenderedPdfSlideDeck(nextDeck)) {
+                    await saveSlideDeckToIndexedDb(targetKey, nextDeck).catch(() => {});
+                    fetch('/api/db/slides', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        lessonKey: targetKey,
+                        deck: nextDeck,
+                        activeSlideIndex: 0,
+                      }),
+                    }).catch(() => {});
+                  } else {
+                    await deleteSlideDeckFromIndexedDb(targetKey).catch(() => {});
+                  }
+
+                  if (onUpdateLiveSession) {
+                    onUpdateLiveSession((prev) => ({
+                      ...prev,
+                      ...(autoBroadcast
+                        ? {
+                            isBroadcasting: true,
+                            activeGrade: selectedNotebookGrade,
+                            activePeriod: selectedNotebookPeriod,
+                            activeClassId: selectedClass,
+                            activeLiveView: 'slide' as const,
+                          }
+                        : {}),
+                      lectureSlidesByLesson: {
+                        ...(prev.lectureSlidesByLesson || {}),
+                        [targetKey]: nextDeck,
+                      },
+                      activeSlideIndexByLesson: {
+                        ...(prev.activeSlideIndexByLesson || {}),
+                        [targetKey]: 0,
+                      },
+                      slideSyncVersionByLesson: {
+                        ...(prev.slideSyncVersionByLesson || {}),
+                        [targetKey]: syncVer,
+                      },
+                      unlockedSlideDeckByLesson: {
+                        ...(prev.unlockedSlideDeckByLesson || {}),
+                        [targetKey]: true,
+                      },
+                      updatedAt: new Date().toISOString(),
+                    }));
+                  }
+
+                  if (toastMsg) {
+                    onShowToast(toastMsg);
+                  }
+                }}
+                onShowToast={onShowToast}
+              />
+            </div>
+          )}
+
+          {/* MODAL RIÊNG: QUẢN TRỊ CSDL SLIDE GOOGLE SHEETS ("CSDL") */}
+          {showCsdlGoogleSheetsModal && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Cửa sổ quản trị CSDL Slide trên Google Sheets"
+              className="fixed inset-0 z-[110] bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+            >
+              <div className="bg-white rounded-3xl max-w-5xl w-full p-5 sm:p-6 border-2 border-emerald-500 shadow-2xl flex flex-col gap-4 my-auto max-h-[92vh] overflow-y-auto">
+                <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-200">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center">
+                      <span className="material-symbols-outlined text-[22px]">table_chart</span>
+                    </span>
+                    <div>
+                      <h3 className="text-base font-black text-slate-900">
+                        Nạp PDF Bài Giảng (pdf.js → WebP) &amp; Đẩy Lên Google Sheets &quot;CSDL&quot;
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Connector: <code>src/utils/googleSheetsConnector.ts</code> • 2 bảng chuẩn hóa <code>Slides_Index</code> &amp; <code>Slides_Pages</code>
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowCsdlGoogleSheetsModal(false)}
+                    className="px-3.5 py-1.5 rounded-full bg-slate-100 hover:bg-rose-100 text-slate-700 hover:text-rose-700 text-xs font-bold cursor-pointer"
+                  >
+                    ✕ Đóng cửa sổ
+                  </button>
+                </div>
+
+                <GoogleSheetsSlideDbPanel
+                  grade={selectedNotebookGrade}
+                  period={selectedNotebookPeriod}
+                  classId={selectedClass}
+                  lessonTitle={
+                    gradePeriods.find((p) => p.period === selectedNotebookPeriod)
+                      ?.lessonTitle ||
+                    `Bài giảng Tin học Khối ${selectedNotebookGrade} • Tiết ${selectedNotebookPeriod}`
+                  }
+                  currentDeck={
+                    liveSession?.lectureSlidesByLesson?.[
+                      `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`
+                    ]
+                  }
+                  periodList={gradePeriods.map((p) => ({
+                    period: p.period,
+                    lessonTitle: p.lessonTitle,
+                  }))}
+                  onChangeGradeAndPeriod={(nextGrade, nextPeriod) => {
+                    handleSelectGradeAndPeriod(nextGrade, nextPeriod);
+                  }}
+                  onOpenLiveRoomForLesson={(targetGrade, targetPeriod) => {
+                    setShowCsdlGoogleSheetsModal(false);
+                    handleSelectGradeAndPeriod(targetGrade, targetPeriod);
+                    handleBroadcastLivePeriod(
+                      targetGrade,
+                      targetPeriod,
+                      true,
+                      selectedClass
+                    );
+                  }}
+                  onSheetIndexChange={(records) => {
+                    setSheetIndexRecords(records);
+                  }}
+                  onApplyLoadedDeck={async (
+                    nextDeck,
+                    toastMsg,
+                    autoBroadcast,
+                    explicitLessonKey
+                  ) => {
+                    const targetKey =
+                      explicitLessonKey ||
+                      `k${selectedNotebookGrade}-tiet-${selectedNotebookPeriod}`;
+                    const syncVer = Date.now();
+                    if (isRealRenderedPdfSlideDeck(nextDeck)) {
+                      await saveSlideDeckToIndexedDb(targetKey, nextDeck).catch(() => {});
+                      fetch('/api/db/slides', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          lessonKey: targetKey,
+                          deck: nextDeck,
+                          activeSlideIndex: 0,
+                        }),
+                      }).catch(() => {});
+                    } else {
+                      await deleteSlideDeckFromIndexedDb(targetKey).catch(() => {});
+                    }
+
+                    if (onUpdateLiveSession) {
+                      onUpdateLiveSession((prev) => ({
+                        ...prev,
+                        ...(autoBroadcast
+                          ? {
+                              isBroadcasting: true,
+                              activeGrade: selectedNotebookGrade,
+                              activePeriod: selectedNotebookPeriod,
+                              activeClassId: selectedClass,
+                              activeLiveView: 'slide' as const,
+                            }
+                          : {}),
+                        lectureSlidesByLesson: {
+                          ...(prev.lectureSlidesByLesson || {}),
+                          [targetKey]: nextDeck,
+                        },
+                        activeSlideIndexByLesson: {
+                          ...(prev.activeSlideIndexByLesson || {}),
+                          [targetKey]: 0,
+                        },
+                        slideSyncVersionByLesson: {
+                          ...(prev.slideSyncVersionByLesson || {}),
+                          [targetKey]: syncVer,
+                        },
+                        unlockedSlideDeckByLesson: {
+                          ...(prev.unlockedSlideDeckByLesson || {}),
+                          [targetKey]: true,
+                        },
+                        updatedAt: new Date().toISOString(),
+                      }));
+                    }
+
+                    if (toastMsg) {
+                      onShowToast(toastMsg);
+                    }
+                  }}
+                  onShowToast={onShowToast}
+                />
               </div>
             </div>
           )}
@@ -4557,89 +5141,160 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     )}
                   </div>
 
-                  {/* Filter Bar by Khối & Lớp */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-surface-container-low">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-xs font-bold text-on-surface-variant mr-1">
-                        Lọc theo Khối:
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setStudentAccountGradeFilter('ALL');
-                          setStudentAccountClassFilter('ALL');
-                        }}
-                        className={`px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${
-                          studentAccountGradeFilter === 'ALL'
-                            ? 'bg-primary text-on-primary'
-                            : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container'
-                        }`}
-                      >
-                        Tất cả Khối ({students.length})
-                      </button>
-                      {[6, 7, 8, 9].map((g) => {
-                        const gradeCount = students.filter(
-                          (s) => s.grade === g || Number(s.classId?.charAt(0)) === g
-                        ).length;
-                        return (
-                          <button
-                            key={g}
-                            type="button"
-                            onClick={() => {
-                              setStudentAccountGradeFilter(g);
-                              setStudentAccountClassFilter('ALL');
-                            }}
-                            className={`px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${
-                              studentAccountGradeFilter === g
-                                ? 'bg-primary text-on-primary'
-                                : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container'
-                            }`}
-                          >
-                            Khối {g} ({gradeCount})
-                          </button>
-                        );
-                      })}
-                    </div>
+                  {/* Filter Bar by Khối, Lớp, Trạng thái nộp bài (Đã nộp/Chưa nộp) & Nhóm học tập */}
+                  {(() => {
+                    const rosterSummary = computeStudentFilterSummary(students, {
+                      gradeFilter: studentAccountGradeFilter,
+                      classFilter: studentAccountClassFilter,
+                      liveSession,
+                    });
 
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-xs font-bold text-on-surface-variant">Lọc theo Lớp:</span>
-                      <select
-                        aria-label="Lọc tài khoản học sinh theo lớp"
-                        value={studentAccountClassFilter}
-                        onChange={(e) => setStudentAccountClassFilter(e.target.value)}
-                        className="px-3 py-1 rounded-full bg-surface-container-lowest text-on-surface text-xs font-bold border border-outline-variant/30 cursor-pointer"
-                      >
-                        <option value="ALL">Tất cả các lớp</option>
-                        {classes
-                          .filter(
-                            (c) =>
-                              studentAccountGradeFilter === 'ALL' ||
-                              c.grade === studentAccountGradeFilter
-                          )
-                          .map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name} (Khối {c.grade})
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-                  </div>
+                    return (
+                      <div className="flex flex-col gap-2.5 p-3.5 rounded-xl bg-surface-container-low">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold text-on-surface-variant mr-1">
+                              Lọc theo Khối:
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStudentAccountGradeFilter('ALL');
+                                setStudentAccountClassFilter('ALL');
+                              }}
+                              className={`px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${
+                                studentAccountGradeFilter === 'ALL'
+                                  ? 'bg-primary text-on-primary'
+                                  : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container'
+                              }`}
+                            >
+                              Tất cả Khối ({students.length})
+                            </button>
+                            {[6, 7, 8, 9].map((g) => {
+                              const gradeCount = students.filter(
+                                (s) => s.grade === g || Number(s.classId?.charAt(0)) === g
+                              ).length;
+                              return (
+                                <button
+                                  key={g}
+                                  type="button"
+                                  onClick={() => {
+                                    setStudentAccountGradeFilter(g);
+                                    setStudentAccountClassFilter('ALL');
+                                  }}
+                                  className={`px-3 py-1 rounded-full text-xs font-bold cursor-pointer ${
+                                    studentAccountGradeFilter === g
+                                      ? 'bg-primary text-on-primary'
+                                      : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container'
+                                  }`}
+                                >
+                                  Khối {g} ({gradeCount})
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold text-on-surface-variant">Lọc theo Lớp:</span>
+                            <select
+                              aria-label="Lọc tài khoản học sinh theo lớp"
+                              value={studentAccountClassFilter}
+                              onChange={(e) => setStudentAccountClassFilter(e.target.value)}
+                              className="px-3 py-1 rounded-full bg-surface-container-lowest text-on-surface text-xs font-bold border border-outline-variant/30 cursor-pointer"
+                            >
+                              <option value="ALL">Tất cả các lớp</option>
+                              {classes
+                                .filter(
+                                  (c) =>
+                                    studentAccountGradeFilter === 'ALL' ||
+                                    c.grade === studentAccountGradeFilter
+                                )
+                                .map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.name} (Khối {c.grade})
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Row 2: Lọc theo Trạng thái nộp bài (Đã nộp / Chưa nộp) & Nhóm học tập (Nhóm 1..4) */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-outline-variant/20">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold text-on-surface-variant mr-1">
+                              Trạng thái nộp bài:
+                            </span>
+                            {(
+                              [
+                                { id: 'ALL', label: `Tất cả (${rosterSummary.total})` },
+                                { id: 'Đã nộp', label: `✓ Đã nộp (${rosterSummary.submittedCount})` },
+                                { id: 'Chưa nộp', label: `⏳ Chưa nộp (${rosterSummary.notSubmittedCount})` },
+                              ] as const
+                            ).map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => setStudentSubmissionFilter(opt.id)}
+                                className={`px-3 py-1 rounded-full text-xs font-bold cursor-pointer transition-all ${
+                                  studentSubmissionFilter === opt.id
+                                    ? opt.id === 'Đã nộp'
+                                      ? 'bg-emerald-600 text-white'
+                                      : opt.id === 'Chưa nộp'
+                                      ? 'bg-amber-600 text-white'
+                                      : 'bg-primary text-on-primary'
+                                    : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container'
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold text-on-surface-variant mr-1">
+                              Nhóm học tập:
+                            </span>
+                            {(
+                              [
+                                { id: 'ALL', label: 'Tất cả nhóm' },
+                                { id: 1, label: `Nhóm 1 (${rosterSummary.groupCounts[1]})` },
+                                { id: 2, label: `Nhóm 2 (${rosterSummary.groupCounts[2]})` },
+                                { id: 3, label: `Nhóm 3 (${rosterSummary.groupCounts[3]})` },
+                                { id: 4, label: `Nhóm 4 (${rosterSummary.groupCounts[4]})` },
+                              ] as const
+                            ).map((grp) => (
+                              <button
+                                key={String(grp.id)}
+                                type="button"
+                                onClick={() => setStudentGroupFilter(grp.id)}
+                                className={`px-3 py-1 rounded-full text-xs font-bold cursor-pointer transition-all ${
+                                  studentGroupFilter === grp.id
+                                    ? 'bg-[#8a4b16] text-white'
+                                    : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container'
+                                }`}
+                              >
+                                {grp.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   <DataBoundary
-                    data={students.filter((st) => {
-                      const stGrade = st.grade || Number(st.classId?.charAt(0)) || 6;
-                      const matchGrade =
-                        studentAccountGradeFilter === 'ALL' ||
-                        stGrade === studentAccountGradeFilter;
-                      const matchClass =
-                        studentAccountClassFilter === 'ALL' ||
-                        st.classId === studentAccountClassFilter;
-                      return matchGrade && matchClass;
+                    data={filterTeacherPortalStudents(students, {
+                      gradeFilter: studentAccountGradeFilter,
+                      classFilter: studentAccountClassFilter,
+                      submissionFilter: studentSubmissionFilter,
+                      groupFilter: studentGroupFilter,
+                      searchQuery: studentSearchKeyword,
+                      liveSession,
                     })}
                     isLoading={isLoading}
                     loadingMessage="Đang tải danh sách tài khoản học sinh từ CSDL..."
-                    emptyTitle="Chưa có tài khoản học sinh nào trong bộ lọc này"
-                    emptyDescription="Vui lòng nạp danh sách lớp từ Excel, thêm học sinh mới bên trên hoặc chọn 'Tất cả Khối'."
+                    emptyTitle="Chưa có học sinh nào khớp với bộ lọc hiện tại"
+                    emptyDescription="Vui lòng chọn lại bộ lọc Trạng thái nộp bài (Tất cả / Đã nộp / Chưa nộp) hoặc Nhóm học tập."
                   >
                     {(filteredRosterStudents) => (
                       <div className="overflow-x-auto max-h-80">
@@ -4648,7 +5303,8 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                             <tr className="border-b border-outline-variant/30 font-label-sm text-label-sm text-on-surface-variant">
                               <th className="py-2 px-3">Mã HS</th>
                               <th className="py-2 px-3">Họ và tên</th>
-                              <th className="py-2 px-3">Ngày sinh</th>
+                              <th className="py-2 px-3">Nhóm học tập</th>
+                              <th className="py-2 px-3">Trạng thái nộp bài</th>
                               <th className="py-2 px-3">Khối / Lớp</th>
                               <th className="py-2 px-3">Tài khoản tự động</th>
                               <th className="py-2 px-3">Mật khẩu chung</th>
@@ -4658,12 +5314,27 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                           <tbody className="divide-y divide-outline-variant/20 font-body-sm text-body-sm">
                             {filteredRosterStudents.map((st) => {
                               const stGrade = st.grade || Number(st.classId?.charAt(0)) || 6;
+                              const subStatus = getEffectiveStudentSubmissionStatus(st, liveSession);
+                              const isSubmitted = subStatus === 'Đã nộp';
                               return (
                                 <tr key={st.id} className="hover:bg-surface-container-low">
                                   <td className="py-2 px-3 font-bold text-primary">{st.id}</td>
                                   <td className="py-2 px-3 font-bold text-on-surface">{st.name}</td>
-                                  <td className="py-2 px-3 text-on-surface-variant">
-                                    {st.dob || '15/05/2013'}
+                                  <td className="py-2 px-3">
+                                    <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-800 dark:text-amber-300 font-bold text-xs">
+                                      Nhóm {st.groupNumber || 1}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-3">
+                                    <span
+                                      className={`px-2.5 py-0.5 rounded-full font-bold text-xs ${
+                                        isSubmitted
+                                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                                          : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                                      }`}
+                                    >
+                                      {isSubmitted ? '✓ Đã nộp' : '⏳ Chưa nộp'}
+                                    </span>
                                   </td>
                                   <td className="py-2 px-3">
                                     <span className="px-2.5 py-0.5 rounded-full bg-secondary-fixed text-secondary font-bold text-xs">
@@ -4831,8 +5502,8 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   </div>
                 )}
 
-                {/* FILTER CONTROLS: CHỌN KHỐI, CHỌN LỚP, CHỌN ĐỢT ĐÁNH GIÁ */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 bg-surface-container-low rounded-xl">
+                {/* FILTER CONTROLS: CHỌN KHỐI, CHỌN LỚP, ĐỢT ĐÁNH GIÁ, TRẠNG THÁI NỘP BÀI & NHÓM HỌC TẬP */}
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3 p-3.5 bg-surface-container-low rounded-xl">
                   {/* Filter 1: Chọn Khối */}
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-bold text-on-surface flex items-center gap-1">
@@ -4920,17 +5591,89 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       })}
                     </div>
                   </div>
+
+                  {/* Filter 4: Trạng thái nộp bài (Đã nộp / Chưa nộp) */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-bold text-on-surface flex items-center gap-1">
+                      <span className="material-symbols-outlined text-emerald-600 text-[16px]">task_alt</span>
+                      <span>4. Trạng thái nộp bài:</span>
+                    </label>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {(
+                        [
+                          { id: 'ALL', label: 'Tất cả' },
+                          { id: 'Đã nộp', label: '✓ Đã nộp' },
+                          { id: 'Chưa nộp', label: '⏳ Chưa nộp' },
+                        ] as const
+                      ).map((subOpt) => {
+                        const isSelected = studentSubmissionFilter === subOpt.id;
+                        return (
+                          <button
+                            key={subOpt.id}
+                            type="button"
+                            onClick={() => setStudentSubmissionFilter(subOpt.id)}
+                            className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                              isSelected
+                                ? subOpt.id === 'Đã nộp'
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : subOpt.id === 'Chưa nộp'
+                                  ? 'bg-amber-600 text-white shadow-xs'
+                                  : 'bg-[#18536f] text-white shadow-xs'
+                                : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container'
+                            }`}
+                          >
+                            {subOpt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Filter 5: Nhóm học tập (Nhóm 1..4) */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-bold text-on-surface flex items-center gap-1">
+                      <span className="material-symbols-outlined text-amber-600 text-[16px]">diversity_3</span>
+                      <span>5. Nhóm học tập:</span>
+                    </label>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {(
+                        [
+                          { id: 'ALL', label: 'Tất cả' },
+                          { id: 1, label: 'Nhóm 1' },
+                          { id: 2, label: 'Nhóm 2' },
+                          { id: 3, label: 'Nhóm 3' },
+                          { id: 4, label: 'Nhóm 4' },
+                        ] as const
+                      ).map((grpOpt) => {
+                        const isSelected = studentGroupFilter === grpOpt.id;
+                        return (
+                          <button
+                            key={String(grpOpt.id)}
+                            type="button"
+                            onClick={() => setStudentGroupFilter(grpOpt.id)}
+                            className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-[#8a4b16] text-white shadow-xs'
+                                : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container'
+                            }`}
+                          >
+                            {grpOpt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
 
                 {/* DỮ LIỆU TÍNH TOÁN THEO BỘ LỌC */}
                 {(() => {
-                  const filteredStudents = students.filter((st) => {
-                    const stGrade = st.grade || Number(st.classId?.charAt(0)) || 6;
-                    const matchGrade =
-                      gradebookGradeFilter === 'ALL' || stGrade === gradebookGradeFilter;
-                    const matchClass =
-                      gradebookClassFilter === 'ALL' || st.classId === gradebookClassFilter;
-                    return matchGrade && matchClass;
+                  const filteredStudents = filterTeacherPortalStudents(students, {
+                    gradeFilter: gradebookGradeFilter,
+                    classFilter: gradebookClassFilter,
+                    submissionFilter: studentSubmissionFilter,
+                    groupFilter: studentGroupFilter,
+                    searchQuery: studentSearchKeyword,
+                    liveSession,
                   });
 
                   const totalStudents = filteredStudents.length;
@@ -5816,17 +6559,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       <QuestionMasterInspectorModal
         isOpen={showQuestionInspectorModal}
         onClose={() => setShowQuestionInspectorModal(false)}
-        liveSession={liveSession}
-        onUpdateLiveSession={onUpdateLiveSession}
-        onShowToast={onShowToast}
-      />
-
-      {/* Lecture Slide Manager Modal (Nạp bài giảng PDF, PPTX) */}
-      <LectureSlideManagerModal
-        isOpen={showLectureSlideModal}
-        onClose={() => setShowLectureSlideModal(false)}
-        initialGrade={selectedNotebookGrade}
-        initialPeriod={selectedNotebookPeriod}
         liveSession={liveSession}
         onUpdateLiveSession={onUpdateLiveSession}
         onShowToast={onShowToast}

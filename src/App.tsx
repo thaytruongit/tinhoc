@@ -38,11 +38,13 @@ import {
   getAllSlideDecksFromIndexedDb,
   saveSlideDeckToIndexedDb,
   getSlideDeckForLessonFromIndexedDb,
+  deleteSlideDeckFromIndexedDb,
 } from './utils/indexedDbSlideStorage';
 import {
   stripLargeBlobsForLocalStorage,
   ensureDeckSlideImages,
   filterActiveSlideDecksForMemory,
+  isRealRenderedPdfSlideDeck,
 } from './utils/slideDeckManager';
 import {
   buildStageCompletionEvent,
@@ -193,14 +195,13 @@ export default function App() {
     }
   }, [classes]);
 
-  // Persist slide decks to IndexedDB asynchronously (eliminating 5MB localStorage limit)
+  // Persist genuine rendered PDF slide decks to IndexedDB asynchronously (never save blank placeholders or synthetic SVG decks)
   useEffect(() => {
     const decks = liveSession?.lectureSlidesByLesson;
     if (decks && typeof decks === 'object') {
       for (const [k, d] of Object.entries(decks)) {
         if (d && typeof d === 'object') {
-          // Do not write lazy placeholder stubs to IndexedDB to preserve full persisted images
-          if ((d as any).isLazyLoaded !== false) {
+          if ((d as any).isLazyLoaded !== false && isRealRenderedPdfSlideDeck(d)) {
             saveSlideDeckToIndexedDb(k, d as any).catch(() => {});
           }
         }
@@ -208,7 +209,7 @@ export default function App() {
     }
   }, [liveSession?.lectureSlidesByLesson]);
 
-  // On-demand Lazy Loading hydration for active lesson: loads full high-res images from IndexedDB
+  // On-demand Lazy Loading hydration for active lesson: loads full high-res images from IndexedDB ONLY if it is a real rendered PDF
   useEffect(() => {
     let isCancelled = false;
     async function hydrateActiveLesson() {
@@ -223,24 +224,28 @@ export default function App() {
         try {
           const hydrated = await getSlideDeckForLessonFromIndexedDb(activeLessonKey);
           if (hydrated && !isCancelled) {
-            setLiveSession((prev) => {
-              const prevDecks = prev.lectureSlidesByLesson || {};
-              const nextDecks = {
-                ...prevDecks,
-                [activeLessonKey]: {
-                  ...hydrated,
-                  isLazyLoaded: true,
-                },
-              };
-              const governedDecks = filterActiveSlideDecksForMemory(
-                nextDecks,
-                activeLessonKey
-              ) as Record<string, LectureSlideDeck>;
-              return {
-                ...prev,
-                lectureSlidesByLesson: governedDecks,
-              };
-            });
+            if (isRealRenderedPdfSlideDeck(hydrated)) {
+              setLiveSession((prev) => {
+                const prevDecks = prev.lectureSlidesByLesson || {};
+                const nextDecks = {
+                  ...prevDecks,
+                  [activeLessonKey]: {
+                    ...hydrated,
+                    isLazyLoaded: true,
+                  },
+                };
+                const governedDecks = filterActiveSlideDecksForMemory(
+                  nextDecks,
+                  activeLessonKey
+                ) as Record<string, LectureSlideDeck>;
+                return {
+                  ...prev,
+                  lectureSlidesByLesson: governedDecks,
+                };
+              });
+            } else {
+              await deleteSlideDeckFromIndexedDb(activeLessonKey).catch(() => {});
+            }
           }
         } catch {
           // ignore
@@ -270,9 +275,19 @@ export default function App() {
     async function fetchBackendData() {
       setIsLoading(true);
       try {
-        // 1. Immediately hydrate any saved slide decks from IndexedDB (ultra-resilient across page reloads)
-        const idbDecks = await getAllSlideDecksFromIndexedDb().catch(() => ({}));
-        if (idbDecks && Object.keys(idbDecks).length > 0) {
+        // 1. Immediately hydrate any saved genuine PDF slide decks from IndexedDB (purging legacy synthetic SVG decks)
+        const rawIdbDecks = await getAllSlideDecksFromIndexedDb().catch(() => ({}));
+        const idbDecks: Record<string, LectureSlideDeck> = {};
+        if (rawIdbDecks && typeof rawIdbDecks === 'object') {
+          for (const [k, deck] of Object.entries(rawIdbDecks)) {
+            if (isRealRenderedPdfSlideDeck(deck)) {
+              idbDecks[k] = deck;
+            } else {
+              deleteSlideDeckFromIndexedDb(k).catch(() => {});
+            }
+          }
+        }
+        if (Object.keys(idbDecks).length > 0) {
           const governed = filterActiveSlideDecksForMemory(
             idbDecks,
             activeLessonKey
@@ -321,10 +336,16 @@ export default function App() {
         if (liveRes && typeof liveRes === 'object') {
           setLiveSession((prev) => {
             const normalized = normalizeLiveSession(liveRes, prev);
-            const serverDecks =
+            const rawServerDecks =
               slidesRes?.ok && slidesRes.decks && typeof slidesRes.decks === 'object'
                 ? slidesRes.decks
                 : {};
+            const serverDecks: Record<string, any> = {};
+            for (const [k, d] of Object.entries(rawServerDecks)) {
+              if (isRealRenderedPdfSlideDeck(d)) {
+                serverDecks[k] = d;
+              }
+            }
             const mergedDecks = {
               ...(idbDecks || {}),
               ...(prev.lectureSlidesByLesson || {}),

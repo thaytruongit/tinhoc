@@ -6,9 +6,6 @@ import {
   type LectureSlidePage,
   type LiveClassroomSession,
 } from '../data/mockCurriculumData';
-import * as pdfjsLib from 'pdfjs-dist';
-// @ts-ignore - Vite ?url import for pdf.js worker
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { buildInteractiveHtmlSlideTemplate } from '../utils/realtimeProgressAnalytics';
 import {
   saveSlideDeckToIndexedDb,
@@ -23,12 +20,16 @@ import {
   renumberSlides,
   extractTextFromPptxSlideXml,
   ensureDeckSlideImages,
+  generateFallbackSlideSvgDataUrl,
+  resolveSlideSourceInput,
   type HtmlSlideEmbedMode,
 } from '../utils/slideDeckManager';
-
-if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-}
+import { GoogleSheetsSlideDbPanel } from './GoogleSheetsSlideDbPanel';
+import {
+  loadPdfJsEngine,
+  BrowserDomCanvasFactory,
+  sanitizeBrowserProcessForPdfJs,
+} from '../utils/googleSheetsConnector';
 
 interface LectureSlideManagerModalProps {
   isOpen?: boolean;
@@ -319,17 +320,41 @@ async function extractVideoFileDataAndThumbnail(
   return { videoDataUrl, thumbnailDataUrl };
 }
 
+async function loadPdfJsLibrary(): Promise<any> {
+  return loadPdfJsEngine();
+}
+
 /**
  * Extracts all pages of a PDF file in the browser using pdfjs-dist and converts every page
  * into a high-resolution WebP slide image.
  */
-async function extractPdfPagesAsImages(
+export async function extractPdfPagesAsImages(
   file: File,
   onProgress?: (current: number, total: number) => void
 ): Promise<{ pageImages: string[]; pageTexts: string[] }> {
+  sanitizeBrowserProcessForPdfJs();
+  const pdfjsLib = await loadPdfJsLibrary();
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-  const pdf = await loadingTask.promise;
+  let pdf: any;
+  try {
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer),
+      canvasFactory: new BrowserDomCanvasFactory(),
+      isEvalSupported: false,
+      useSystemFonts: true,
+    });
+    pdf = await loadingTask.promise;
+  } catch {
+    const fallbackTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer),
+      canvasFactory: new BrowserDomCanvasFactory(),
+      disableWorker: true,
+      isEvalSupported: false,
+      disableFontFace: true,
+      useSystemFonts: true,
+    });
+    pdf = await fallbackTask.promise;
+  }
   const numPages = pdf.numPages;
   const pageImages: string[] = [];
   const pageTexts: string[] = [];
@@ -338,7 +363,7 @@ async function extractPdfPagesAsImages(
     onProgress?.(pageNum, numPages);
     const page = await pdf.getPage(pageNum);
     const baseViewport = page.getViewport({ scale: 1 });
-    const targetScale = Math.min(2.0, Math.max(1.2, 1440 / baseViewport.width));
+    const targetScale = Math.min(2.0, Math.max(1.2, 1440 / Math.max(1, baseViewport.width)));
     const viewport = page.getViewport({ scale: targetScale });
 
     const canvas = document.createElement('canvas');
@@ -346,7 +371,14 @@ async function extractPdfPagesAsImages(
     canvas.height = Math.round(viewport.height);
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({
+        canvasContext: ctx,
+        viewport,
+        canvas,
+        canvasFactory: new BrowserDomCanvasFactory(),
+      } as any).promise;
       let dataUrl = canvas.toDataURL('image/webp', 0.82);
       if (!dataUrl.startsWith('data:image/webp')) {
         dataUrl = canvas.toDataURL('image/jpeg', 0.84);
@@ -374,7 +406,7 @@ async function extractPdfPagesAsImages(
  * extracts all slides (`ppt/slides/slide*.xml`) and embedded slide images (`ppt/media/*`),
  * and converts every single slide into a 1280x720 WebP image (`imageUrl`)!
  */
-async function extractPptxSlidesAsImages(
+export async function extractPptxSlidesAsImages(
   file: File,
   periodSpec: CurriculumPeriodSpec,
   onProgress?: (current: number, total: number) => void
@@ -585,6 +617,135 @@ async function extractPptxSlidesAsImages(
   return extractedSlides;
 }
 
+/**
+ * Converts a local or downloaded File (.pptx, .ppt, .pdf, .html, image, video) into LectureSlidePage[]
+ * ready to be saved and presented immediately on the Teacher Live screen.
+ */
+export async function convertSlideFileToPages(
+  file: File,
+  periodSpec: CurriculumPeriodSpec,
+  onProgress?: (statusText: string) => void
+): Promise<{
+  fileType: 'pdf' | 'pptx' | 'html' | 'video' | 'image';
+  slides: LectureSlidePage[];
+}> {
+  const lower = file.name.toLowerCase();
+  const isPdf = lower.endsWith('.pdf') || file.type === 'application/pdf';
+  const isPptx =
+    lower.endsWith('.pptx') ||
+    lower.endsWith('.ppt') ||
+    lower.endsWith('.ppsx') ||
+    file.type.includes('presentation');
+  const isHtml = lower.endsWith('.html') || lower.endsWith('.htm') || file.type === 'text/html';
+  const isVideo =
+    lower.endsWith('.mp4') ||
+    lower.endsWith('.webm') ||
+    lower.endsWith('.mov') ||
+    file.type.startsWith('video/');
+
+  if (isPdf) {
+    onProgress?.(`Đang tách & chuyển đổi các trang PDF từ "${file.name}" sang ảnh Slide...`);
+    const { pageImages, pageTexts } = await extractPdfPagesAsImages(file, (cur, tot) => {
+      onProgress?.(`Đang chuyển trang PDF ${cur}/${tot} sang Ảnh Slide...`);
+    });
+    const slides: LectureSlidePage[] = pageImages.map((imgUrl, idx) => {
+      const rawText = (pageTexts[idx] || '').trim();
+      return {
+        slideNumber: idx + 1,
+        title: `Slide ${idx + 1}: ${periodSpec.lessonTitle} (${file.name})`,
+        subtitle: `Khối ${periodSpec.grade} • Tiết ${periodSpec.period} • Trang PDF ${idx + 1}/${pageImages.length}`,
+        bulletPoints: rawText
+          ? [rawText.slice(0, 180), `Nguồn: ${file.name} (Trang ${idx + 1}/${pageImages.length})`]
+          : [
+              `Trang Slide #${idx + 1} trích xuất trực tiếp từ tệp PDF ${file.name}.`,
+              `Chủ đề: ${periodSpec.topic}`,
+            ],
+        highlightNote: `Ảnh Slide PDF Trang ${idx + 1}/${pageImages.length}`,
+        imageUrl: imgUrl,
+      };
+    });
+    return { fileType: 'pdf', slides };
+  }
+
+  if (isPptx) {
+    onProgress?.(`Đang giải nén & chuyển đổi từng trang PowerPoint "${file.name}"...`);
+    const slides = await extractPptxSlidesAsImages(file, periodSpec, (cur, tot) => {
+      onProgress?.(`Đang chuyển đổi Slide PowerPoint ${cur}/${tot} sang Ảnh...`);
+    });
+    return { fileType: 'pptx', slides };
+  }
+
+  if (isHtml) {
+    const htmlContent = await file.text();
+    return {
+      fileType: 'html',
+      slides: [
+        {
+          slideNumber: 1,
+          title: `Slide Web HTML: ${file.name}`,
+          subtitle: `Khối ${periodSpec.grade} • Tiết ${periodSpec.period}`,
+          bulletPoints: [`Trình chiếu trực tiếp tệp HTML: ${file.name}`],
+          highlightNote: `Tệp HTML tương tác: ${file.name}`,
+          htmlContent,
+          imageUrl: generateFallbackSlideSvgDataUrl({
+            grade: periodSpec.grade,
+            period: periodSpec.period,
+            slideIndex: 0,
+            totalSlides: 1,
+            title: `Slide Web HTML: ${file.name}`,
+            subtitle: periodSpec.lessonTitle,
+            bulletPoints: [`Tệp HTML tương tác: ${file.name}`],
+          }),
+        },
+      ],
+    };
+  }
+
+  if (isVideo) {
+    const videoUrl = URL.createObjectURL(file);
+    return {
+      fileType: 'video',
+      slides: [
+        {
+          slideNumber: 1,
+          title: `Video Bài Giảng: ${file.name}`,
+          subtitle: `Khối ${periodSpec.grade} • Tiết ${periodSpec.period}`,
+          bulletPoints: [`Trình chiếu Video bài giảng: ${file.name}`],
+          highlightNote: `Video bài giảng: ${file.name}`,
+          videoUrl,
+          videoTitle: file.name,
+          imageUrl: generateFallbackSlideSvgDataUrl({
+            grade: periodSpec.grade,
+            period: periodSpec.period,
+            slideIndex: 0,
+            totalSlides: 1,
+            title: `Video Bài Giảng: ${file.name}`,
+            subtitle: periodSpec.lessonTitle,
+            bulletPoints: [`Video bài giảng: ${file.name}`],
+          }),
+        },
+      ],
+    };
+  }
+
+  // Default: Image file
+  const webpDataUrl = await convertImageFileToWebpDataUrl(file);
+  return {
+    fileType: 'image',
+    slides: [
+      {
+        slideNumber: 1,
+        title: `Slide Ảnh: ${file.name}`,
+        subtitle: `Khối ${periodSpec.grade} • Tiết ${periodSpec.period}`,
+        bulletPoints: [`Ảnh bài giảng: ${file.name}`],
+        highlightNote: `Ảnh Slide: ${file.name}`,
+        imageUrl: webpDataUrl,
+      },
+    ],
+  };
+}
+
+
 export const PRESET_EXPLANATION_VIDEOS: {
   id: string;
   title: string;
@@ -642,6 +803,7 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
   const [htmlEmbedMode, setHtmlEmbedMode] = useState<HtmlSlideEmbedMode>('simulation-single');
   const [htmlInsertPosition, setHtmlInsertPosition] = useState<number>(1);
   const [showHtmlEmbedEditor, setShowHtmlEmbedEditor] = useState<boolean>(false);
+  const [quickModalPathOrUrl, setQuickModalPathOrUrl] = useState<string>('');
 
   // Individual Slide Edit State
   const [editingSlideIdx, setEditingSlideIdx] = useState<number | null>(null);
@@ -1499,6 +1661,156 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
     onClose();
   };
 
+  /**
+   * Opens and runs a slide deck immediately from a pasted Google Drive link, Google Slides link,
+   * direct remote URL, or local computer path (.pptx, .pdf).
+   */
+  const handleRunFromPathOrUrlInModal = async (overrideInput?: string, autoLaunchLive = true) => {
+    const raw = String(overrideInput !== undefined ? overrideInput : quickModalPathOrUrl).trim();
+    const resolved = resolveSlideSourceInput(raw);
+    if (resolved.kind === 'empty') {
+      onShowToast(
+        '⚠️ Hãy dán đường dẫn Google Drive / Google Slides hoặc đường dẫn tệp (.pptx, .pdf) trên máy tính!'
+      );
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadProgressText(`Đang mở Slide từ đường dẫn "${resolved.displayName}"...`);
+
+    try {
+      let serverResp: any = null;
+      try {
+        const res = await fetch('/api/slides/load-from-path-or-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pathOrUrl: raw, lessonKey }),
+        });
+        if (res.ok) {
+          serverResp = await res.json();
+        }
+      } catch {
+        // Offline / static fallback
+      }
+
+      if (serverResp?.ok && serverResp.mode === 'binary' && serverResp.base64Data) {
+        const binaryString = atob(serverResp.base64Data);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], {
+          type: serverResp.mimeType || 'application/octet-stream',
+        });
+        const fileObj = new File([blob], serverResp.fileName || resolved.displayName, {
+          type: serverResp.mimeType || 'application/octet-stream',
+        });
+
+        const { fileType, slides } = await convertSlideFileToPages(fileObj, periodSpec, (msg) => {
+          setUploadProgressText(msg);
+        });
+        const nextDeck: LectureSlideDeck = {
+          lessonKey,
+          grade: selectedGrade,
+          period: selectedPeriod,
+          fileName: fileObj.name,
+          fileType,
+          fileSize: `${Math.max(1, Math.round(fileObj.size / 1024))} KB`,
+          uploadedAt: new Date().toLocaleTimeString('vi-VN', {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          storageBucket: 'slide-storage-1gb',
+          totalCompressedKb: Math.max(1, Math.round(fileObj.size / 1024)),
+          isUserUploaded: true,
+          slides,
+        };
+        await persistDeckToDatabaseAndSession(nextDeck, 0);
+        setPreviewSlideIdx(0);
+        onShowToast(
+          `🚀 Đã tự động mở & nạp ${slides.length} trang Slide từ "${fileObj.name}"!`
+        );
+        if (autoLaunchLive && onOpenLivePresenterWithSlide) {
+          onOpenLivePresenterWithSlide(selectedGrade, selectedPeriod);
+          onClose();
+        }
+        return;
+      }
+
+      if (resolved.kind === 'local-path') {
+        setIsUploading(false);
+        setUploadProgressText('');
+        onShowToast(
+          `📂 Đã nhận diện đường dẫn máy tính "${resolved.displayName}" — Hãy chọn tệp trong hộp thoại vừa bật để chạy ngay!`
+        );
+        fileInputRef.current?.click();
+        return;
+      }
+
+      const embedUrl = serverResp?.embedUrl || resolved.embedUrl || resolved.cleanInput;
+      const sourceBadge =
+        resolved.kind === 'google-slides'
+          ? 'Google Slides Live'
+          : resolved.kind === 'google-drive'
+          ? 'Google Drive Live (.PPTX / .PDF)'
+          : 'Slide Trực tuyến (.PPTX / .PDF)';
+
+      const embeddedSlide: LectureSlidePage = {
+        slideNumber: 1,
+        title: `${sourceBadge}: ${resolved.displayName}`,
+        subtitle: `Khối ${selectedGrade} • Tiết ${selectedPeriod}: ${periodSpec.lessonTitle}`,
+        bulletPoints: [
+          `Trình chiếu trực tiếp từ đường dẫn: ${resolved.cleanInput}`,
+        ],
+        highlightNote: `Đang chạy trực tiếp từ ${sourceBadge}`,
+        htmlEmbedUrl: embedUrl,
+        imageUrl: generateFallbackSlideSvgDataUrl({
+          grade: selectedGrade,
+          period: selectedPeriod,
+          slideIndex: 0,
+          totalSlides: 1,
+          title: `${sourceBadge}: ${resolved.displayName}`,
+          subtitle: periodSpec.lessonTitle,
+          bulletPoints: [`Nguồn: ${resolved.cleanInput}`],
+        }),
+      };
+
+      const nextDeck: LectureSlideDeck = {
+        lessonKey,
+        grade: selectedGrade,
+        period: selectedPeriod,
+        fileName: `${resolved.displayName} (${sourceBadge})`,
+        fileType: resolved.inferredFileType,
+        fileSize: 'Google Drive / Link',
+        uploadedAt: new Date().toLocaleTimeString('vi-VN', {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        storageBucket: 'slide-storage-1gb',
+        totalCompressedKb: 12,
+        isUserUploaded: true,
+        htmlEmbedUrl: embedUrl,
+        slides: [embeddedSlide],
+      };
+
+      await persistDeckToDatabaseAndSession(nextDeck, 0);
+      setPreviewSlideIdx(0);
+      onShowToast(
+        `🚀 Đã mở & đồng bộ ngay Slide "${resolved.displayName}" từ ${sourceBadge}!`
+      );
+      if (autoLaunchLive && onOpenLivePresenterWithSlide) {
+        onOpenLivePresenterWithSlide(selectedGrade, selectedPeriod);
+        onClose();
+      }
+    } catch (err: any) {
+      onShowToast(`⚠️ Lỗi mở đường dẫn Slide: ${err?.message || 'Vui lòng kiểm tra lại'}`);
+    } finally {
+      setIsUploading(false);
+      setUploadProgressText('');
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -1547,7 +1859,23 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
         </div>
 
         {/* Body Content */}
-        <div className="p-5 sm:p-6 overflow-y-auto flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 bg-slate-50/60">
+        <div className="p-5 sm:p-6 overflow-y-auto flex-1 flex flex-col gap-5 bg-slate-50/60">
+          <GoogleSheetsSlideDbPanel
+            grade={selectedGrade}
+            period={selectedPeriod}
+            lessonTitle={periodSpec.lessonTitle}
+            currentDeck={existingDeck}
+            onApplyLoadedDeck={async (nextDeck, toastMsg) => {
+              await persistDeckToDatabaseAndSession(nextDeck, 0);
+              setPreviewSlideIdx(0);
+              if (toastMsg) {
+                onShowToast(toastMsg);
+              }
+            }}
+            onShowToast={onShowToast}
+          />
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* LEFT COLUMN (5 cols): Select Grade/Period, Upload PDF/PPTX/HTML/Video/Images, & HTML Embed Panel */}
           <div className="lg:col-span-5 flex flex-col gap-4">
             {/* Step 1: Select Grade & Period */}
@@ -1664,6 +1992,45 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
                   • <strong>Nạp Ảnh / Video:</strong> Chọn 1 hoặc nhiều ảnh/video cùng lúc để tạo bộ slide.
                 </p>
               </button>
+
+              {/* Quick Paste Google Drive URL or Local Computer Path inside Modal */}
+              <div className="p-3 rounded-xl bg-orange-50/90 border border-orange-200 flex flex-col gap-2">
+                <span className="text-[11px] font-black text-orange-950 flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[15px] text-orange-600">bolt</span>
+                  <span>Hoặc dán đường dẫn Google Drive / Đường dẫn trên máy tính (.PPTX, .PDF) để chạy ngay:</span>
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={quickModalPathOrUrl}
+                    onChange={(e) => setQuickModalPathOrUrl(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleRunFromPathOrUrlInModal(undefined, true);
+                      }
+                    }}
+                    onPaste={(e) => {
+                      const pasted = e.clipboardData?.getData('text/plain')?.trim();
+                      if (pasted) {
+                        e.preventDefault();
+                        setQuickModalPathOrUrl(pasted);
+                        handleRunFromPathOrUrlInModal(pasted, true);
+                      }
+                    }}
+                    placeholder="Dán link Google Drive hoặc C:\BaiGiang\Slide.pptx..."
+                    className="flex-1 px-2.5 py-2 rounded-lg bg-white border border-orange-300 text-xs font-semibold text-slate-900"
+                  />
+                  <button
+                    type="button"
+                    disabled={isUploading}
+                    onClick={() => handleRunFromPathOrUrlInModal(undefined, true)}
+                    className="px-3 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-xs font-black cursor-pointer shrink-0"
+                  >
+                    🚀 Chạy ngay
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Step 3: Embed HTML Slide Web (Simulation at Custom Position vs Full Deck at End) */}
@@ -2217,6 +2584,7 @@ export const LectureSlideManagerModal: React.FC<LectureSlideManagerModalProps> =
                 </button>
               </div>
             </div>
+          </div>
           </div>
         </div>
       </div>

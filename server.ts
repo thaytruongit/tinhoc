@@ -54,6 +54,11 @@ import {
 import {
   resolveMonotonicSlideSyncState,
   isLegacyDemoSlideDeck,
+  isRealRenderedPdfSlideDeck,
+  resolveSlideSourceInput,
+  buildFixedSlideFolderMapping,
+  matchFileToGradeAndPeriod,
+  DEFAULT_FIXED_SLIDE_ROOT_FOLDER,
 } from './src/utils/slideDeckManager.ts';
 
 dotenv.config();
@@ -1027,10 +1032,19 @@ async function startServer() {
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object') {
           const existing = (liveClassroomSession.lectureSlidesByLesson as Record<string, any>) || {};
-          liveClassroomSession.lectureSlidesByLesson = {
-            ...existing,
-            ...parsed,
-          };
+          const cleaned: Record<string, any> = { ...existing };
+          let purgedAny = false;
+          for (const [k, deck] of Object.entries(parsed as Record<string, any>)) {
+            if (deck && !isLegacyDemoSlideDeck(deck) && isRealRenderedPdfSlideDeck(deck)) {
+              cleaned[k] = deck;
+            } else {
+              purgedAny = true;
+            }
+          }
+          liveClassroomSession.lectureSlidesByLesson = cleaned;
+          if (purgedAny) {
+            saveSlidesBackupToDisk();
+          }
         }
       }
     } catch (e) {
@@ -1501,6 +1515,227 @@ async function startServer() {
       });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Instant Slide Loader from Google Drive URL, Google Slides URL, Remote URL, or Local Computer Path
+  app.post('/api/slides/load-from-path-or-url', async (req, res) => {
+    try {
+      const rawInput = String(req.body?.pathOrUrl || '').trim();
+      const lessonKey = String(req.body?.lessonKey || 'general').trim();
+      const resolved = resolveSlideSourceInput(rawInput);
+
+      if (resolved.kind === 'empty') {
+        return res.status(400).json({
+          ok: false,
+          error: 'Đường dẫn trống. Vui lòng dán đường dẫn Google Drive hoặc đường dẫn tệp trên máy tính.',
+        });
+      }
+
+      // Case 1: Local computer path (e.g., C:\BaiGiang\Tiet1.pptx, D:/Slide/Bai1.pdf, /Users/...)
+      if (resolved.kind === 'local-path' && resolved.normalizedLocalPath) {
+        const candidatePath = resolved.normalizedLocalPath;
+        if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).isFile()) {
+          const buffer = fs.readFileSync(candidatePath);
+          const isPdf =
+            buffer.length >= 4 &&
+            buffer[0] === 0x25 &&
+            buffer[1] === 0x50 &&
+            buffer[2] === 0x44 &&
+            buffer[3] === 0x46; // %PDF
+          const fileType = isPdf ? 'pdf' : resolved.inferredFileType;
+          const mimeType =
+            fileType === 'pdf'
+              ? 'application/pdf'
+              : 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+
+          return res.json({
+            ok: true,
+            mode: 'binary',
+            resolved,
+            fileName: resolved.displayName,
+            fileType,
+            mimeType,
+            sizeKb: Math.max(1, Math.round(buffer.length / 1024)),
+            base64Data: buffer.toString('base64'),
+          });
+        }
+
+        // File is on the teacher's client machine while server is remote (or browser needs File Picker)
+        return res.json({
+          ok: true,
+          mode: 'client-local-picker',
+          resolved,
+          fileName: resolved.displayName,
+          fileType: resolved.inferredFileType,
+          message:
+            'Đường dẫn thuộc ổ đĩa máy tính cá nhân — Hệ thống tự động mở hộp chọn tệp tương ứng để nạp ngay!',
+        });
+      }
+
+      // Case 2: Google Drive / Google Slides / Remote URL
+      // Try fetching binary if publicly accessible (e.g. Google Slides export PDF or public Drive download)
+      const fetchCandidates: string[] = [];
+      if (resolved.exportPdfUrl) fetchCandidates.push(resolved.exportPdfUrl);
+      if (resolved.downloadUrl) fetchCandidates.push(resolved.downloadUrl);
+
+      for (const candidateUrl of fetchCandidates) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 7000);
+          const resp = await fetch(candidateUrl, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            },
+          });
+          clearTimeout(timer);
+
+          if (resp.ok) {
+            const ab = await resp.arrayBuffer();
+            const buf = Buffer.from(ab);
+            // Check magic bytes for PDF (%PDF) or ZIP/PPTX (PK\x03\x04)
+            const isPdfMagic =
+              buf.length > 16 &&
+              buf[0] === 0x25 &&
+              buf[1] === 0x50 &&
+              buf[2] === 0x44 &&
+              buf[3] === 0x46;
+            const isZipMagic =
+              buf.length > 16 &&
+              buf[0] === 0x50 &&
+              buf[1] === 0x4b &&
+              buf[2] === 0x03 &&
+              buf[3] === 0x04;
+
+            if ((isPdfMagic || isZipMagic) && buf.length < 22 * 1024 * 1024) {
+              const detectedType = isPdfMagic ? 'pdf' : 'pptx';
+              const detectedMime = isPdfMagic
+                ? 'application/pdf'
+                : 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+              const baseFileName = resolved.displayName.replace(/\.(pptx?|pdf)$/i, '');
+              return res.json({
+                ok: true,
+                mode: 'binary',
+                resolved,
+                fileName: `${baseFileName}.${detectedType}`,
+                fileType: detectedType,
+                mimeType: detectedMime,
+                embedUrl: resolved.embedUrl,
+                sizeKb: Math.max(1, Math.round(buf.length / 1024)),
+                base64Data: buf.toString('base64'),
+              });
+            }
+          }
+        } catch {
+          // Ignore binary download error and fall back cleanly to live embedUrl
+        }
+      }
+
+      // Clean fallback: use live Google Drive /preview, Google Slides /embed, or Office Online embedUrl
+      return res.json({
+        ok: true,
+        mode: 'embed',
+        resolved,
+        fileName: resolved.displayName,
+        fileType: resolved.inferredFileType,
+        embedUrl: resolved.embedUrl || resolved.cleanInput,
+        lessonKey,
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        ok: false,
+        error: err.message || 'Không thể xử lý đường dẫn Slide.',
+      });
+    }
+  });
+
+  // Auto-Map Slide Deck from Fixed Root Folder by Grade (Tin 6, 7, 8, 9) and Period (1..29)
+  app.post('/api/slides/resolve-fixed-folder', async (req, res) => {
+    try {
+      const rawGrade = Number(req.body?.grade);
+      const grade = ([6, 7, 8, 9].includes(rawGrade) ? rawGrade : 6) as 6 | 7 | 8 | 9;
+      const period = Math.max(1, Math.min(29, Number(req.body?.period) || 1));
+      const rootFolder = String(req.body?.rootFolder || DEFAULT_FIXED_SLIDE_ROOT_FOLDER).trim();
+      const lessonTitle = String(req.body?.lessonTitle || `Tiết ${period}: Bài học Tin học ${grade}`).trim();
+      const topic = String(req.body?.topic || `Chủ đề Tin học Khối ${grade}`).trim();
+      const yccd = String(req.body?.yccd || 'Đạt chuẩn Yêu cầu cần đạt Chương trình GDPT 2018').trim();
+
+      const mapping = buildFixedSlideFolderMapping(grade, period, rootFolder);
+      const lessonKey = mapping.lessonKey;
+
+      // 1. Check if physical file exists inside the configured rootFolder or built-in slide_library
+      const searchRoots = [
+        mapping.rootFolder,
+        path.join(DATA_DIR, 'fixed-slide-library'),
+        path.resolve(process.cwd(), 'slide_library'),
+      ];
+
+      let matchedDiskFilePath: string | null = null;
+      for (const baseRoot of searchRoots) {
+        if (!baseRoot) continue;
+        // First check direct candidate relative paths (.pdf only)
+        for (const rel of mapping.candidateRelativePaths) {
+          if (!/\.pdf$/i.test(rel)) continue;
+          const fullCandidate = path.join(baseRoot, ...rel.split('/'));
+          if (fs.existsSync(fullCandidate) && fs.statSync(fullCandidate).isFile()) {
+            matchedDiskFilePath = fullCandidate;
+            break;
+          }
+        }
+        if (matchedDiskFilePath) break;
+
+        // Also scan grade subfolder if it exists (.pdf files only)
+        const gradeFolderCandidate = path.join(baseRoot, `Tin ${grade}`);
+        if (fs.existsSync(gradeFolderCandidate) && fs.statSync(gradeFolderCandidate).isDirectory()) {
+          const files = fs.readdirSync(gradeFolderCandidate);
+          for (const f of files) {
+            if (!/\.pdf$/i.test(f)) continue;
+            const matched = matchFileToGradeAndPeriod(`Tin ${grade}/${f}`, grade);
+            if (matched && matched.grade === grade && matched.period === period) {
+              matchedDiskFilePath = path.join(gradeFolderCandidate, f);
+              break;
+            }
+          }
+        }
+        if (matchedDiskFilePath) break;
+      }
+
+      if (matchedDiskFilePath && fs.existsSync(matchedDiskFilePath)) {
+        const buffer = fs.readFileSync(matchedDiskFilePath);
+        const isGenuinePdf =
+          buffer.length > 4 && buffer.subarray(0, 4).toString('ascii') === '%PDF';
+        if (isGenuinePdf) {
+          const fileName = path.basename(matchedDiskFilePath);
+          return res.json({
+            ok: true,
+            mode: 'binary',
+            exists: true,
+            lessonKey,
+            mapping,
+            fileName,
+            fileType: 'pdf',
+            mimeType: 'application/pdf',
+            sizeKb: Math.max(1, Math.round(buffer.length / 1024)),
+            base64Data: buffer.toString('base64'),
+          });
+        }
+      }
+
+      // No physical .PDF file found in fixed folder -> do NOT generate synthetic text slides!
+      // Return mode: 'not-found' so the client displays a clean Blank White Slide ("trang slide trắng").
+      return res.json({
+        ok: true,
+        mode: 'not-found',
+        exists: false,
+        lessonKey,
+        mapping,
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        ok: false,
+        error: err.message || 'Lỗi khi ánh xạ tự động Slide theo thư mục cố định.',
+      });
     }
   });
 

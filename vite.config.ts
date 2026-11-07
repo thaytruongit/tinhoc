@@ -5,6 +5,7 @@ import {defineConfig} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
+  const rootDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve();
   return {
     base: './',
     plugins: [
@@ -12,7 +13,6 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
         manifest: {
           id: './',
           name: 'CloudPlay Learning OS - Tin Học THPT & THCS',
@@ -51,6 +51,7 @@ export default defineConfig(() => {
           navigateFallback: null,
           maximumFileSizeToCacheInBytes: 16 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          globIgnores: ['**/assets/aistudio/**', '**/gh-pages-dist/**', '**/docs/**'],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -102,12 +103,15 @@ export default defineConfig(() => {
         },
       }),
     ],
+    build: {
+      chunkSizeWarningLimit: 5000,
+    },
     resolve: {
       dedupe: ['react', 'react-dom'],
       alias: {
-        '@': path.resolve(__dirname, '.'),
-        react: path.resolve(__dirname, 'node_modules/react'),
-        'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
+        '@': path.resolve(rootDir, '.'),
+        react: path.resolve(rootDir, 'node_modules/react'),
+        'react-dom': path.resolve(rootDir, 'node_modules/react-dom'),
       },
     },
     optimizeDeps: {

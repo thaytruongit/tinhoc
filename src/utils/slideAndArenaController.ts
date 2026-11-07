@@ -7,11 +7,15 @@ import {
 
 export { generateFallbackSlideSvgDataUrl };
 
-export type PresenterKeyAction = 'next' | 'prev' | null;
+export type PresenterKeyAction = 'next' | 'prev' | 'fullscreen' | 'exit-fullscreen' | null;
 
 /**
- * Resolves keyboard / wireless presenter clicker key events into slide navigation actions.
- * Supports Space, ArrowRight, PageDown ('next') and ArrowLeft, PageUp ('prev').
+ * Resolves keyboard / wireless presenter clicker key events into slide navigation & fullscreen actions.
+ * Supports:
+ * - 'next': Space, ArrowRight, PageDown, ArrowDown, N
+ * - 'prev': ArrowLeft, PageUp, ArrowUp, P
+ * - 'fullscreen': F, f, F11
+ * - 'exit-fullscreen': Escape
  * Ignores events when focus is inside an interactive text input/textarea/select.
  */
 export function resolvePresenterKeyAction(
@@ -30,13 +34,25 @@ export function resolvePresenterKeyAction(
     return null;
   }
 
+  if (key === 'Escape' || code === 'Escape') {
+    return 'exit-fullscreen';
+  }
+
+  if (key === 'f' || key === 'F' || code === 'KeyF' || key === 'F11' || code === 'F11') {
+    return 'fullscreen';
+  }
+
   if (
     key === ' ' ||
     code === 'Space' ||
     key === 'ArrowRight' ||
     code === 'ArrowRight' ||
     key === 'PageDown' ||
-    code === 'PageDown'
+    code === 'PageDown' ||
+    key === 'ArrowDown' ||
+    code === 'ArrowDown' ||
+    key === 'n' ||
+    key === 'N'
   ) {
     return 'next';
   }
@@ -45,7 +61,11 @@ export function resolvePresenterKeyAction(
     key === 'ArrowLeft' ||
     code === 'ArrowLeft' ||
     key === 'PageUp' ||
-    code === 'PageUp'
+    code === 'PageUp' ||
+    key === 'ArrowUp' ||
+    code === 'ArrowUp' ||
+    key === 'p' ||
+    key === 'P'
   ) {
     return 'prev';
   }
@@ -691,10 +711,6 @@ export function normalizeLiveSession<T extends Record<string, any>>(
           isUserUploaded,
         };
 
-        if (isLegacyDemoSlideDeck(mergedDeck)) {
-          continue;
-        }
-
         // Parse grade and period from key (e.g. "k6-tiet-1" or "k7-tiet-12")
         const keyMatch = /^k(\d+)-tiet-(\d+)$/.exec(k);
         const deckGrade = keyMatch ? Number(keyMatch[1]) : safeGrade;
@@ -726,6 +742,10 @@ export function normalizeLiveSession<T extends Record<string, any>>(
               : slide.imageUrl,
           };
         });
+
+        if (isLegacyDemoSlideDeck({ ...mergedDeck, slides: mergedSlides })) {
+          continue;
+        }
 
         // Ensure EVERY slide has a valid, sharp imageUrl so it NEVER falls back to plain text
         const safeSlides = ensureDeckSlideImages(mergedSlides, {
@@ -859,5 +879,196 @@ export function normalizeClassroomList<T extends Record<string, any> = Record<st
     });
   return normalized.length > 0 ? normalized : fallbackList;
 }
+
+export type StudentSubmissionFilterMode = 'ALL' | 'Đã nộp' | 'Chưa nộp';
+export type StudentGroupFilterMode = 'ALL' | 1 | 2 | 3 | 4;
+
+export interface TeacherPortalStudentFilterOptions {
+  gradeFilter?: 6 | 7 | 8 | 9 | number | 'ALL';
+  classFilter?: string | 'ALL';
+  submissionStatusFilter?: StudentSubmissionFilterMode;
+  submissionFilter?: StudentSubmissionFilterMode;
+  groupFilter?: StudentGroupFilterMode;
+  searchQuery?: string;
+  submittedStudentIds?: Set<string> | string[];
+  liveSession?: any;
+}
+
+/**
+ * Extracts a Set of student IDs who have submitted in the given liveSession or ID collection.
+ */
+function resolveSubmittedIdSet(
+  source?: Set<string> | string[] | Record<string, any>
+): Set<string> | undefined {
+  if (!source) return undefined;
+  if (source instanceof Set) return source;
+  if (Array.isArray(source)) return new Set(source.map(String));
+  if (typeof source === 'object') {
+    const ids = new Set<string>();
+    if (Array.isArray(source.taggedSubmissions)) {
+      for (const sub of source.taggedSubmissions) {
+        if (sub?.studentId) ids.add(String(sub.studentId));
+      }
+    }
+    if (Array.isArray(source.practicalSubmissions)) {
+      for (const sub of source.practicalSubmissions) {
+        if (sub?.studentId) ids.add(String(sub.studentId));
+      }
+    }
+    if (Array.isArray(source.liveArenaSubmissions)) {
+      for (const sub of source.liveArenaSubmissions) {
+        if (sub?.studentId) ids.add(String(sub.studentId));
+      }
+    }
+    return ids.size > 0 ? ids : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Resolves a student's effective submission status ('Đã nộp' | 'Chưa nộp')
+ * from their roster status or any recorded live/tagged submissions.
+ */
+export function getEffectiveStudentSubmissionStatus(
+  student: { id?: string; submissionStatus?: string },
+  submittedStudentIdsOrLiveSession?: Set<string> | string[] | Record<string, any>
+): 'Đã nộp' | 'Chưa nộp' {
+  if (!student) return 'Chưa nộp';
+  const idSet = resolveSubmittedIdSet(submittedStudentIdsOrLiveSession);
+  if (idSet && student.id && idSet.has(String(student.id))) {
+    return 'Đã nộp';
+  }
+  return student.submissionStatus === 'Đã nộp' ? 'Đã nộp' : 'Chưa nộp';
+}
+
+/**
+ * Filters the TeacherPortal student list by Grade, Class, Submission Status ('Đã nộp' / 'Chưa nộp'),
+ * Learning Group (Nhóm 1, 2, 3, 4), and text search query.
+ */
+export function filterTeacherPortalStudents<
+  T extends {
+    id: string;
+    name: string;
+    username?: string;
+    classId: string;
+    grade?: number;
+    groupNumber?: number;
+    group?: number;
+    submissionStatus?: string;
+  }
+>(students: T[], options: TeacherPortalStudentFilterOptions = {}): T[] {
+  if (!Array.isArray(students)) return [];
+  const {
+    gradeFilter = 'ALL',
+    classFilter = 'ALL',
+    submissionStatusFilter,
+    submissionFilter,
+    groupFilter = 'ALL',
+    searchQuery = '',
+    submittedStudentIds,
+    liveSession,
+  } = options;
+
+  const effectiveSubmissionFilter = submissionStatusFilter ?? submissionFilter ?? 'ALL';
+  const idSet = resolveSubmittedIdSet(submittedStudentIds ?? liveSession);
+
+  const cleanSearch = String(searchQuery || '').trim().toLowerCase();
+
+  return students.filter((st) => {
+    if (!st) return false;
+    const stGrade = st.grade || Number(st.classId?.charAt(0)) || 6;
+    if (gradeFilter !== 'ALL' && stGrade !== Number(gradeFilter)) {
+      return false;
+    }
+    if (classFilter !== 'ALL' && st.classId !== classFilter) {
+      return false;
+    }
+    if (effectiveSubmissionFilter !== 'ALL') {
+      const effectiveStatus = getEffectiveStudentSubmissionStatus(st, idSet);
+      if (effectiveStatus !== effectiveSubmissionFilter) {
+        return false;
+      }
+    }
+    if (groupFilter !== 'ALL') {
+      const stGroup = Number(st.groupNumber ?? st.group) || 1;
+      if (stGroup !== Number(groupFilter)) {
+        return false;
+      }
+    }
+    if (cleanSearch) {
+      const matchName = String(st.name || '').toLowerCase().includes(cleanSearch);
+      const matchId = String(st.id || '').toLowerCase().includes(cleanSearch);
+      const matchUser = String(st.username || '').toLowerCase().includes(cleanSearch);
+      const matchClass = String(st.classId || '').toLowerCase().includes(cleanSearch);
+      if (!matchName && !matchId && !matchUser && !matchClass) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+export interface StudentFilterSummary {
+  total: number;
+  submittedCount: number;
+  notSubmittedCount: number;
+  groupCounts: Record<1 | 2 | 3 | 4, number>;
+}
+
+/**
+ * Computes summary counts for the Submission Status filter ('Đã nộp' / 'Chưa nộp')
+ * and Learning Group filter (Nhóm 1, 2, 3, 4) for a given class/grade scope.
+ */
+export function computeStudentFilterSummary<
+  T extends {
+    id: string;
+    name: string;
+    username?: string;
+    classId: string;
+    grade?: number;
+    groupNumber?: number;
+    group?: number;
+    submissionStatus?: string;
+  }
+>(
+  students: T[],
+  baseOptions: Omit<
+    TeacherPortalStudentFilterOptions,
+    'submissionStatusFilter' | 'submissionFilter' | 'groupFilter'
+  > = {}
+): StudentFilterSummary {
+  const scoped = filterTeacherPortalStudents(students, {
+    ...baseOptions,
+    submissionStatusFilter: 'ALL',
+    groupFilter: 'ALL',
+  });
+
+  const idSet = resolveSubmittedIdSet(
+    baseOptions.submittedStudentIds ?? baseOptions.liveSession
+  );
+
+  let submittedCount = 0;
+  let notSubmittedCount = 0;
+  const groupCounts: Record<1 | 2 | 3 | 4, number> = { 1: 0, 2: 0, 3: 0, 4: 0 };
+
+  for (const st of scoped) {
+    const status = getEffectiveStudentSubmissionStatus(st, idSet);
+    if (status === 'Đã nộp') submittedCount++;
+    else notSubmittedCount++;
+
+    const g = (Number(st.groupNumber ?? st.group) || 1) as 1 | 2 | 3 | 4;
+    if (g >= 1 && g <= 4) {
+      groupCounts[g] = (groupCounts[g] || 0) + 1;
+    }
+  }
+
+  return {
+    total: scoped.length,
+    submittedCount,
+    notSubmittedCount,
+    groupCounts,
+  };
+}
+
 
 

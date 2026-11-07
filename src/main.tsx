@@ -4,15 +4,27 @@ import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import './index.css';
 
 if (typeof window !== 'undefined') {
+  (window as any).__CLOUDPLAY_BOOTSTRAPPED__ = true;
   window.addEventListener('vite:preloadError', (event) => {
     event.preventDefault();
-    window.location.reload();
+    try {
+      if (!sessionStorage.getItem('cloudplay_preload_reloaded')) {
+        sessionStorage.setItem('cloudplay_preload_reloaded', '1');
+        window.location.reload();
+      }
+    } catch {
+      // ignore
+    }
   });
 }
 
-createRoot(document.getElementById('root')!).render(
-  <ErrorBoundary>
-    <App />
-  </ErrorBoundary>
-);
+const rootEl = document.getElementById('root');
+if (rootEl) {
+  createRoot(rootEl).render(
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}
+
 

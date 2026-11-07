@@ -19,19 +19,26 @@ import {
   normalizeLiveSession,
   normalizeStudentRosterList,
   normalizeClassroomList,
+  filterTeacherPortalStudents,
+  computeStudentFilterSummary,
+  getEffectiveStudentSubmissionStatus,
 } from './slideAndArenaController';
 
-test('resolvePresenterKeyAction handles Space, ArrowRight, PageDown, ArrowLeft, PageUp for wireless clicker', () => {
+test('resolvePresenterKeyAction handles Space, ArrowRight, PageDown, ArrowLeft, PageUp, F (fullscreen), and Escape for wireless clicker', () => {
   assert.equal(resolvePresenterKeyAction(' ', 'Space', 'DIV', false), 'next');
   assert.equal(resolvePresenterKeyAction('ArrowRight', 'ArrowRight', 'BODY', false), 'next');
   assert.equal(resolvePresenterKeyAction('PageDown', 'PageDown', 'BUTTON', false), 'next');
   assert.equal(resolvePresenterKeyAction('ArrowLeft', 'ArrowLeft', 'DIV', false), 'prev');
   assert.equal(resolvePresenterKeyAction('PageUp', 'PageUp', 'DIV', false), 'prev');
+  assert.equal(resolvePresenterKeyAction('f', 'KeyF', 'DIV', false), 'fullscreen');
+  assert.equal(resolvePresenterKeyAction('F', 'KeyF', 'BODY', false), 'fullscreen');
+  assert.equal(resolvePresenterKeyAction('Escape', 'Escape', 'BODY', false), 'exit-fullscreen');
 
   // Ignored when inside input/textarea/select
   assert.equal(resolvePresenterKeyAction(' ', 'Space', 'INPUT', false), null);
   assert.equal(resolvePresenterKeyAction('ArrowRight', 'ArrowRight', 'TEXTAREA', false), null);
   assert.equal(resolvePresenterKeyAction('ArrowRight', 'ArrowRight', 'DIV', true), null);
+  assert.equal(resolvePresenterKeyAction('f', 'KeyF', 'INPUT', false), null);
 });
 
 test('isStudentLiveViewUnlocked and isolated activity builders enforce standby on Live start, isolated per-activity broadcast, and clean stop', () => {
@@ -327,5 +334,53 @@ test('normalizeLiveSession ensures every slide has valid imageUrl and merges fal
   assert.ok(deck.slides[1].imageUrl.length > 50);
   assert.ok(deck.slides[1].imageUrl.startsWith('data:image/svg+xml;utf8,'));
 });
+
+test('filterTeacherPortalStudents and computeStudentFilterSummary filter students by submission status (Đã nộp / Chưa nộp) and learning group (Nhóm 1..4)', () => {
+  const sampleStudents = [
+    { id: '61001', name: 'Bùi Minh Anh', classId: '6A10', grade: 6, groupNumber: 1, submissionStatus: 'Đã nộp' },
+    { id: '61002', name: 'Trần Gia Bảo', classId: '6A10', grade: 6, groupNumber: 2, submissionStatus: 'Chưa nộp' },
+    { id: '61003', name: 'Lê Hoàng Châu', classId: '6A10', grade: 6, groupNumber: 3, submissionStatus: 'Đã nộp' },
+    { id: '61004', name: 'Phạm Quốc Dũng', classId: '6A10', grade: 6, groupNumber: 4, submissionStatus: 'Đang làm' },
+    { id: '71001', name: 'Nguyễn Khánh Linh', classId: '7A10', grade: 7, groupNumber: 1, submissionStatus: 'Chưa nộp' },
+  ];
+
+  // Summary for class 6A10
+  const summary6A10 = computeStudentFilterSummary(sampleStudents, { classFilter: '6A10' });
+  assert.equal(summary6A10.total, 4);
+  assert.equal(summary6A10.submittedCount, 2);
+  assert.equal(summary6A10.notSubmittedCount, 2); // 'Chưa nộp' + 'Đang làm' count as not yet submitted ('Chưa nộp')
+  assert.equal(summary6A10.groupCounts[1], 1);
+  assert.equal(summary6A10.groupCounts[2], 1);
+  assert.equal(summary6A10.groupCounts[3], 1);
+  assert.equal(summary6A10.groupCounts[4], 1);
+
+  // Filter by 'Đã nộp' in 6A10
+  const submittedOnly = filterTeacherPortalStudents(sampleStudents, {
+    classFilter: '6A10',
+    submissionStatusFilter: 'Đã nộp',
+  });
+  assert.equal(submittedOnly.length, 2);
+  assert.deepEqual(submittedOnly.map((s) => s.id), ['61001', '61003']);
+
+  // Filter by 'Chưa nộp' in 6A10
+  const notSubmittedOnly = filterTeacherPortalStudents(sampleStudents, {
+    classFilter: '6A10',
+    submissionStatusFilter: 'Chưa nộp',
+  });
+  assert.equal(notSubmittedOnly.length, 2);
+  assert.deepEqual(notSubmittedOnly.map((s) => s.id), ['61002', '61004']);
+
+  // Filter by Group 3
+  const group3Only = filterTeacherPortalStudents(sampleStudents, {
+    classFilter: '6A10',
+    groupFilter: 3,
+  });
+  assert.equal(group3Only.length, 1);
+  assert.equal(group3Only[0].id, '61003');
+
+  // Dynamic submittedStudentIds override (e.g. student 61002 just submitted live)
+  assert.equal(getEffectiveStudentSubmissionStatus(sampleStudents[1], ['61002']), 'Đã nộp');
+});
+
 
 

@@ -14,6 +14,13 @@ import {
   createLazySlideDeckPlaceholder,
   hydrateSlideDeckImages,
   filterActiveSlideDecksForMemory,
+  resolveSlideSourceInput,
+  buildFixedSlideFolderMapping,
+  buildFixedFolderPdfSlideCacheDeck,
+  matchFileToGradeAndPeriod,
+  isRealRenderedPdfSlideDeck,
+  isLegacyDemoSlideDeck,
+  BLANK_WHITE_SLIDE_DATA_URL,
   type ManagedLectureSlidePage,
 } from './slideDeckManager';
 import {
@@ -334,4 +341,133 @@ describe('slideDeckManager pure logic unit tests', () => {
     assert.ok(reconstructed.startsWith('data:image/webp;base64,'));
     assert.equal(reconstructed, rawDataUrl);
   });
+
+  it('parses Google Drive, Google Slides, local computer paths, and remote URLs via resolveSlideSourceInput', () => {
+    // 1. Google Drive /file/d/ link
+    const gDrive = resolveSlideSourceInput(
+      'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz123456/view?usp=sharing'
+    );
+    assert.equal(gDrive.kind, 'google-drive');
+    assert.equal(gDrive.driveFileId, '1AbCdEfGhIjKlMnOpQrStUvWxYz123456');
+    assert.equal(
+      gDrive.embedUrl,
+      'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz123456/preview'
+    );
+    assert.equal(
+      gDrive.downloadUrl,
+      'https://drive.google.com/uc?export=download&id=1AbCdEfGhIjKlMnOpQrStUvWxYz123456'
+    );
+
+    // 2. Google Slides link
+    const gSlides = resolveSlideSourceInput(
+      'https://docs.google.com/presentation/d/1SlideDeckId987654321/edit#slide=id.p1'
+    );
+    assert.equal(gSlides.kind, 'google-slides');
+    assert.equal(gSlides.driveFileId, '1SlideDeckId987654321');
+    assert.equal(
+      gSlides.embedUrl,
+      'https://docs.google.com/presentation/d/1SlideDeckId987654321/embed?start=false&loop=false&delayms=3000'
+    );
+    assert.equal(
+      gSlides.exportPdfUrl,
+      'https://docs.google.com/presentation/d/1SlideDeckId987654321/export/pdf'
+    );
+
+    // 3. Windows quoted local path ("Copy as path")
+    const winPptx = resolveSlideSourceInput('"C:\\BaiGiang\\TinHoc6\\Tiet1_ThongTin.pptx"');
+    assert.equal(winPptx.kind, 'local-path');
+    assert.equal(winPptx.inferredFileType, 'pptx');
+    assert.equal(winPptx.displayName, 'Tiet1_ThongTin.pptx');
+    assert.equal(winPptx.normalizedLocalPath, 'C:\\BaiGiang\\TinHoc6\\Tiet1_ThongTin.pptx');
+
+    // 4. Local file:/// PDF path
+    const fileUrlPdf = resolveSlideSourceInput('file:///D:/GiaoAn/Bai_2_Xu_Ly_Thong_Tin.pdf');
+    assert.equal(fileUrlPdf.kind, 'local-path');
+    assert.equal(fileUrlPdf.inferredFileType, 'pdf');
+    assert.equal(fileUrlPdf.displayName, 'Bai_2_Xu_Ly_Thong_Tin.pdf');
+    assert.equal(fileUrlPdf.normalizedLocalPath, 'D:/GiaoAn/Bai_2_Xu_Ly_Thong_Tin.pdf');
+
+    // 5. Direct remote PPTX link uses Office Online embed viewer
+    const remotePptx = resolveSlideSourceInput('https://example.edu.vn/slides/Bai1.pptx');
+    assert.equal(remotePptx.kind, 'remote-url');
+    assert.equal(remotePptx.inferredFileType, 'pptx');
+    assert.ok(remotePptx.embedUrl?.startsWith('https://view.officeapps.live.com/op/embed.aspx?src='));
+  });
+
+  it('maps fixed folder paths strictly to PDF files by Grade (Tin 6, 7, 8, 9) and Period (1..29) and builds Slide Image Cache decks', () => {
+    const map6_1 = buildFixedSlideFolderMapping(6, 1, 'D:\\BaiGiangTinHoc');
+    assert.equal(map6_1.lessonKey, 'k6-tiet-1');
+    assert.equal(map6_1.gradeFolderName, 'Tin 6');
+    assert.equal(map6_1.gradeFolderPath, 'D:\\BaiGiangTinHoc\\Tin 6');
+    assert.equal(map6_1.primaryFileName, 'Tiet 1.pdf');
+    assert.equal(map6_1.primaryFilePath, 'D:\\BaiGiangTinHoc\\Tin 6\\Tiet 1.pdf');
+    assert.ok(map6_1.candidateRelativePaths.includes('Tin 6/Tiet 1.pdf'));
+    assert.ok(map6_1.candidateRelativePaths.includes('Tin 6/Tiết 1.pdf'));
+    assert.ok(map6_1.candidateRelativePaths.every((p) => p.toLowerCase().endsWith('.pdf')));
+
+    // Deduplicates trailing \Tin 6 segment so C:\BaiGiang\Slide\Tin 6 does not become C:\BaiGiang\Slide\Tin 6\Tin 6
+    const deduped = buildFixedSlideFolderMapping(6, 1, 'C:\\BaiGiang\\Slide\\Tin 6');
+    assert.equal(deduped.gradeFolderPath, 'C:\\BaiGiang\\Slide\\Tin 6');
+    assert.equal(deduped.primaryFilePath, 'C:\\BaiGiang\\Slide\\Tin 6\\Tiet 1.pdf');
+
+    const map9_29 = buildFixedSlideFolderMapping(9, 29, '/Users/teacher/SlideTinHoc');
+    assert.equal(map9_29.lessonKey, 'k9-tiet-29');
+    assert.equal(map9_29.gradeFolderPath, '/Users/teacher/SlideTinHoc/Tin 9');
+    assert.equal(map9_29.primaryFilePath, '/Users/teacher/SlideTinHoc/Tin 9/Tiet 29.pdf');
+
+    // Match relative file paths from folder scan (strictly .pdf only)
+    const m1PptxIgnored = matchFileToGradeAndPeriod('BaiGiangTinHoc/Tin 6/Tiet 1.pptx');
+    assert.equal(m1PptxIgnored, null);
+
+    const m1Pdf = matchFileToGradeAndPeriod('BaiGiangTinHoc/Tin 6/Tiet 1.pdf');
+    assert.ok(m1Pdf);
+    assert.equal(m1Pdf.lessonKey, 'k6-tiet-1');
+    assert.equal(m1Pdf.grade, 6);
+    assert.equal(m1Pdf.period, 1);
+    assert.equal(m1Pdf.inferredFileType, 'pdf');
+
+    const m2 = matchFileToGradeAndPeriod('Khối 8/Tiết 14 - Thư điện tử.pdf');
+    assert.ok(m2);
+    assert.equal(m2.lessonKey, 'k8-tiet-14');
+    assert.equal(m2.grade, 8);
+    assert.equal(m2.period, 14);
+    assert.equal(m2.inferredFileType, 'pdf');
+
+    // When no PDF pages are provided (file not found), returns a 1-page Blank White Slide ("trang slide trắng")
+    const blankDeck = buildFixedFolderPdfSlideCacheDeck({
+      grade: 6,
+      period: 1,
+      rootFolder: 'C:\\BaiGiang\\Slide',
+    });
+    assert.equal(blankDeck.isBlankSlideDeck, true);
+    assert.equal(blankDeck.hasRealPdfPages, false);
+    assert.equal(blankDeck.isUserUploaded, false);
+    assert.equal(blankDeck.slides.length, 1);
+    assert.equal(blankDeck.slides[0].imageUrl, BLANK_WHITE_SLIDE_DATA_URL);
+    assert.equal((blankDeck.slides[0] as any).isBlankSlide, true);
+    assert.equal(isRealRenderedPdfSlideDeck(blankDeck), false);
+
+    // When original PDF pages are extracted, preserves the exact original rendered page images
+    const originalPages = [
+      'data:image/webp;base64,UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA',
+      'data:image/webp;base64,UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3BBBBBB',
+    ];
+    const realPdfDeck = buildFixedFolderPdfSlideCacheDeck({
+      grade: 6,
+      period: 1,
+      rootFolder: 'C:\\BaiGiang\\Slide',
+      extractedPageImages: originalPages,
+      sourceFileName: 'Tiet 1.pdf',
+    });
+    assert.equal(realPdfDeck.isBlankSlideDeck, false);
+    assert.equal(realPdfDeck.hasRealPdfPages, true);
+    assert.equal(realPdfDeck.isUserUploaded, true);
+    assert.equal(realPdfDeck.slides.length, 2);
+    assert.equal(realPdfDeck.slides[0].imageUrl, originalPages[0]);
+    assert.equal(realPdfDeck.slides[1].imageUrl, originalPages[1]);
+    assert.equal(isRealRenderedPdfSlideDeck(realPdfDeck), true);
+    assert.equal(isLegacyDemoSlideDeck(realPdfDeck), false);
+  });
 });
+
+

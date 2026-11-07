@@ -255,16 +255,50 @@ export function resolveMonotonicSlideSyncState(params: {
   };
 }
 
+export const BLANK_WHITE_SLIDE_DATA_URL =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#ffffff"/></svg>'
+  );
+
 /**
- * Checks whether a stored slide deck is a legacy auto-generated demo deck (which should be wiped).
- * Real uploaded decks either have `isUserUploaded: true`, or contain real File Storage URLs, data URLs, HTML, or video.
+ * Checks whether a slide deck contains genuine rendered PDF page bitmaps (WebP/PNG/JPEG/FileStorage)
+ * rather than a blank white placeholder or legacy synthetic SVG text slides.
+ */
+export function isRealRenderedPdfSlideDeck(deck: any): boolean {
+  if (!deck || typeof deck !== 'object') return false;
+  if (deck.isBlankSlideDeck === true) return false;
+  if (deck.hasRealPdfPages === true) return true;
+  const slides = Array.isArray(deck.slides) ? deck.slides : [];
+  if (slides.length === 0) return false;
+  return slides.some((s: any) => {
+    if (!s || typeof s !== 'object' || s.isBlankSlide === true) return false;
+    const url = typeof s.imageUrl === 'string' ? s.imageUrl.trim() : '';
+    if (!url) return false;
+    // Reject synthetic SVG text slides
+    if (url.startsWith('data:image/svg+xml')) return false;
+    return (
+      url.startsWith('data:image/webp') ||
+      url.startsWith('data:image/png') ||
+      url.startsWith('data:image/jpeg') ||
+      url.startsWith('data:image/jpg') ||
+      url.startsWith('blob:') ||
+      url.startsWith('/api/file-storage/slides/file/') ||
+      Boolean(s.storageFileId)
+    );
+  });
+}
+
+/**
+ * Checks whether a stored slide deck is a legacy auto-generated demo deck or synthetic SVG text deck (which should be wiped).
+ * Real uploaded decks either contain real bitmap images (WebP/PNG/JPEG/FileStorage), HTML, or video, or are an explicit blank white slide deck.
  */
 export function isLegacyDemoSlideDeck(deck: any): boolean {
   if (!deck || typeof deck !== 'object') return true;
-  if (deck.isUserUploaded === true) return false;
+  if (deck.isBlankSlideDeck === true) return false;
   const slides = Array.isArray(deck.slides) ? deck.slides : [];
-  if (slides.length === 0) return false;
-  // Check if any slide has real user content (htmlContent, htmlEmbedUrl, videoUrl, or non-empty imageUrl with storageFileId)
+  if (slides.length === 0) return true;
+  // Check if any slide has real user content (htmlContent, htmlEmbedUrl, videoUrl, or non-SVG bitmap imageUrl)
   const hasRealContent = slides.some(
     (s: any) =>
       Boolean(s?.htmlContent) ||
@@ -272,8 +306,10 @@ export function isLegacyDemoSlideDeck(deck: any): boolean {
       Boolean(s?.videoUrl) ||
       Boolean(s?.storageFileId) ||
       (typeof s?.imageUrl === 'string' &&
+        !s.imageUrl.startsWith('data:image/svg+xml') &&
         (s.imageUrl.startsWith('/api/file-storage/slides/file/') ||
-          s.imageUrl.startsWith('data:image/')))
+          s.imageUrl.startsWith('data:image/') ||
+          s.imageUrl.startsWith('blob:')))
   );
   return !hasRealContent;
 }
@@ -652,4 +688,533 @@ export function resolveSlideImageLazy(
 ): string {
   if (!slide) return '';
   return slide.imageUrl || '';
+}
+
+export type SlideSourceInputKind =
+  | 'google-drive'
+  | 'google-slides'
+  | 'local-path'
+  | 'remote-url'
+  | 'empty';
+
+export interface ResolvedSlideSourceInput {
+  kind: SlideSourceInputKind;
+  rawInput: string;
+  cleanInput: string;
+  displayName: string;
+  inferredFileType: 'pptx' | 'pdf' | 'html' | 'video' | 'image';
+  driveFileId?: string;
+  embedUrl?: string;
+  downloadUrl?: string;
+  exportPdfUrl?: string;
+  normalizedLocalPath?: string;
+}
+
+/**
+ * Parses a pasted URL or file path (from Google Drive, Google Slides, direct HTTP/HTTPS link,
+ * or a local computer path like `C:\BaiGiang\Tiet1.pptx`, `D:/Slide/Bai1.pdf`, `file:///...`)
+ * into a structured descriptor ready for immediate presentation on the Teacher Live screen.
+ */
+export function resolveSlideSourceInput(rawInput: string): ResolvedSlideSourceInput {
+  const raw = String(rawInput || '').trim();
+  // Strip surrounding double or single quotes (e.g. Windows "Copy as path" produces "C:\...\slide.pptx")
+  const clean = raw.replace(/^["']+|["']+$/g, '').trim();
+
+  if (!clean) {
+    return {
+      kind: 'empty',
+      rawInput: raw,
+      cleanInput: '',
+      displayName: '',
+      inferredFileType: 'pptx',
+    };
+  }
+
+  const lower = clean.toLowerCase();
+  const inferTypeFromExt = (str: string, fallback: 'pptx' | 'pdf' = 'pptx'): 'pptx' | 'pdf' | 'html' | 'video' | 'image' => {
+    const s = str.toLowerCase().split('?')[0].split('#')[0];
+    if (s.endsWith('.pdf')) return 'pdf';
+    if (s.endsWith('.pptx') || s.endsWith('.ppt') || s.endsWith('.ppsx')) return 'pptx';
+    if (s.endsWith('.html') || s.endsWith('.htm')) return 'html';
+    if (s.endsWith('.mp4') || s.endsWith('.webm') || s.endsWith('.mov')) return 'video';
+    if (s.endsWith('.png') || s.endsWith('.jpg') || s.endsWith('.jpeg') || s.endsWith('.webp')) return 'image';
+    return fallback;
+  };
+
+  // 1. Google Slides presentation URL: https://docs.google.com/presentation/d/<ID>/...
+  const gSlidesMatch = clean.match(/docs\.google\.com\/presentation\/d\/([a-zA-Z0-9_-]+)/i);
+  if (gSlidesMatch && gSlidesMatch[1]) {
+    const fileId = gSlidesMatch[1];
+    return {
+      kind: 'google-slides',
+      rawInput: raw,
+      cleanInput: clean,
+      displayName: `Google_Slides_${fileId.slice(0, 8)}.pptx`,
+      inferredFileType: 'pptx',
+      driveFileId: fileId,
+      embedUrl: `https://docs.google.com/presentation/d/${fileId}/embed?start=false&loop=false&delayms=3000`,
+      downloadUrl: `https://docs.google.com/presentation/d/${fileId}/export/pptx`,
+      exportPdfUrl: `https://docs.google.com/presentation/d/${fileId}/export/pdf`,
+    };
+  }
+
+  // 2. Google Drive file URL:
+  // - https://drive.google.com/file/d/<ID>/view...
+  // - https://drive.google.com/open?id=<ID>
+  // - https://drive.google.com/uc?id=<ID>
+  // - https://docs.google.com/file/d/<ID>/...
+  const gDrivePathMatch = clean.match(/(?:drive|docs)\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/i);
+  const gDriveQueryMatch = clean.match(/drive\.google\.com\/(?:open|uc|file)\?[^#]*?\bid=([a-zA-Z0-9_-]+)/i);
+  const driveFileId = (gDrivePathMatch && gDrivePathMatch[1]) || (gDriveQueryMatch && gDriveQueryMatch[1]);
+
+  if (driveFileId) {
+    const inferredFileType = lower.includes('pdf') ? 'pdf' : 'pptx';
+    const ext = inferredFileType === 'pdf' ? 'pdf' : 'pptx';
+    return {
+      kind: 'google-drive',
+      rawInput: raw,
+      cleanInput: clean,
+      displayName: `Google_Drive_${driveFileId.slice(0, 8)}.${ext}`,
+      inferredFileType,
+      driveFileId,
+      embedUrl: `https://drive.google.com/file/d/${driveFileId}/preview`,
+      downloadUrl: `https://drive.google.com/uc?export=download&id=${driveFileId}`,
+    };
+  }
+
+  // 3. Local computer path:
+  // - file:///C:/... or file:///Users/...
+  // - Windows drive path: C:\... or D:/...
+  // - Windows UNC path: \\Server\Share\...
+  // - Unix/macOS absolute/home path: /Users/..., /home/..., ~/...
+  // - Bare filename ending with .pptx, .ppt, .pdf
+  const isFileProtocol = /^file:\/\//i.test(clean);
+  const isWindowsDrive = /^[a-zA-Z]:[\\/]/.test(clean);
+  const isUncPath = /^\\\\[^\\]+/.test(clean);
+  const isUnixLocalPath = /^(\/Users\/|\/home\/|\/var\/|\/tmp\/|\/mnt\/|\/media\/|~\/)/i.test(clean);
+  const isBareSlideFilename = !/^https?:\/\//i.test(clean) && /\.(pptx?|ppsx|pdf|html?)$/i.test(clean);
+
+  if (isFileProtocol || isWindowsDrive || isUncPath || isUnixLocalPath || isBareSlideFilename) {
+    let normalizedLocalPath = clean;
+    if (isFileProtocol) {
+      try {
+        normalizedLocalPath = decodeURIComponent(clean.replace(/^file:\/\/\/?/i, ''));
+        // On Unix/macOS if it doesn't start with Windows drive letter like C:, restore leading slash
+        if (!/^[a-zA-Z]:/.test(normalizedLocalPath) && !normalizedLocalPath.startsWith('/')) {
+          normalizedLocalPath = '/' + normalizedLocalPath;
+        }
+      } catch {
+        normalizedLocalPath = clean.replace(/^file:\/\/\/?/i, '');
+      }
+    }
+    const parts = normalizedLocalPath.split(/[\\/]+/).filter(Boolean);
+    const baseName = parts[parts.length - 1] || 'Slide_May_Tinh.pptx';
+    const inferredFileType = inferTypeFromExt(baseName, 'pptx');
+
+    return {
+      kind: 'local-path',
+      rawInput: raw,
+      cleanInput: clean,
+      displayName: baseName,
+      inferredFileType,
+      normalizedLocalPath,
+    };
+  }
+
+  // 4. Remote HTTP/HTTPS URL (or domain URL)
+  const fullUrl = /^https?:\/\//i.test(clean) ? clean : `https://${clean}`;
+  const urlPath = fullUrl.split('?')[0].split('#')[0];
+  const segments = urlPath.split('/').filter(Boolean);
+  const lastSeg = segments[segments.length - 1] || 'Slide_Truc_Tuyen.pptx';
+  const inferredFileType = inferTypeFromExt(urlPath, 'pptx');
+
+  let embedUrl = fullUrl;
+  if (inferredFileType === 'pptx') {
+    // Use Microsoft Office Online Viewer for remote .pptx/.ppt links so it renders directly in iframe
+    if (/\.(pptx?|ppsx)$/i.test(urlPath)) {
+      embedUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(fullUrl)}`;
+    }
+  }
+
+  return {
+    kind: 'remote-url',
+    rawInput: raw,
+    cleanInput: fullUrl,
+    displayName: decodeURIComponent(lastSeg),
+    inferredFileType,
+    embedUrl,
+    downloadUrl: fullUrl,
+  };
+}
+
+export const DEFAULT_FIXED_SLIDE_ROOT_FOLDER = 'D:\\BaiGiangTinHoc';
+
+export interface FixedSlideFolderMapping {
+  lessonKey: string;
+  grade: 6 | 7 | 8 | 9;
+  period: number;
+  rootFolder: string;
+  gradeFolderName: string;
+  gradeFolderPath: string;
+  primaryFileName: string;
+  primaryFilePath: string;
+  candidateRelativePaths: string[];
+  displayLabel: string;
+}
+
+/**
+ * Normalizes a user-configured fixed slide root folder path so that:
+ * - Trailing slashes or quotes are removed.
+ * - If the user pasted a path ending in a file name (e.g. `...\Tin 6\Tiet 1.pdf`), the file name is stripped.
+ * - If the user entered a path already ending in a grade folder (e.g. `C:\BaiGiang\Slide\Tin 6`),
+ *   the trailing `Tin 6` segment is stripped so `buildFixedSlideFolderMapping` never duplicates `\Tin 6\Tin 6`.
+ */
+export function normalizeFixedSlideRootFolder(customRootFolder?: string): string {
+  const raw =
+    String(customRootFolder || DEFAULT_FIXED_SLIDE_ROOT_FOLDER)
+      .trim()
+      .replace(/^["']+|["']+$/g, '')
+      .trim() || DEFAULT_FIXED_SLIDE_ROOT_FOLDER;
+
+  const sep = raw.includes('\\') ? '\\' : '/';
+  let cleaned = raw.replace(/[\\/]+$/, '');
+
+  // Strip trailing file segment if user pasted a file path like "...\Tin 6\Tiet 1.pdf"
+  if (/\.(pdf|pptx?|ppsx|html?)$/i.test(cleaned)) {
+    const lastSepIdx = Math.max(cleaned.lastIndexOf('\\'), cleaned.lastIndexOf('/'));
+    if (lastSepIdx > 0) {
+      cleaned = cleaned.slice(0, lastSepIdx).replace(/[\\/]+$/, '');
+    }
+  }
+
+  // Strip trailing grade folder segment if user included "\Tin 6", "\Tin 7", "\Khối 8", etc.
+  const trailingGradeRegex =
+    /[\\/](?:tin\s*h[oọ]c|tin|kh[oố]i|khoi|l[oớ]p|lop)[_\s-]*[6789]$/i;
+  if (trailingGradeRegex.test(cleaned)) {
+    cleaned = cleaned.replace(trailingGradeRegex, '').replace(/[\\/]+$/, '');
+  }
+
+  return cleaned || (sep === '\\' ? DEFAULT_FIXED_SLIDE_ROOT_FOLDER : '/BaiGiangTinHoc');
+}
+
+/**
+ * Builds deterministic fixed-folder mapping for a specific Grade (6, 7, 8, 9) and Period (1..29).
+ * Exclusively maps `.pdf` lecture files (e.g. `Tin 6\Tiet 1.pdf`) to extract Slide Images into the Slide Image Cache
+ * and push them onto `Slide Bài Giảng` ready for Live presentation.
+ */
+export function buildFixedSlideFolderMapping(
+  grade: 6 | 7 | 8 | 9,
+  period: number,
+  customRootFolder?: string
+): FixedSlideFolderMapping {
+  const safeGrade = ([6, 7, 8, 9].includes(Number(grade)) ? Number(grade) : 6) as 6 | 7 | 8 | 9;
+  const safePeriod = Math.max(1, Math.min(29, Math.round(Number(period) || 1)));
+  const cleanRoot = normalizeFixedSlideRootFolder(customRootFolder);
+  const sep = cleanRoot.includes('\\') ? '\\' : '/';
+
+  const gradeFolderName = `Tin ${safeGrade}`;
+  const gradeFolderPath = `${cleanRoot}${sep}${gradeFolderName}`;
+  const paddedPeriod = String(safePeriod).padStart(2, '0');
+  const primaryFileName = `Tiet ${safePeriod}.pdf`;
+  const primaryFilePath = `${gradeFolderPath}${sep}${primaryFileName}`;
+
+  const gradeVariants = [
+    `Tin ${safeGrade}`,
+    `Tin_${safeGrade}`,
+    `Tin${safeGrade}`,
+    `Khoi ${safeGrade}`,
+    `Khối ${safeGrade}`,
+    `Khoi_${safeGrade}`,
+  ];
+  const fileVariants = [
+    `Tiet ${safePeriod}.pdf`,
+    `Tiết ${safePeriod}.pdf`,
+    `Tiet_${safePeriod}.pdf`,
+    `Tiet_${paddedPeriod}.pdf`,
+    `Tiet_${safePeriod}_Tin_${safeGrade}.pdf`,
+    `Bai ${safePeriod}.pdf`,
+    `Bài ${safePeriod}.pdf`,
+  ];
+
+  const candidateRelativePaths: string[] = [];
+  for (const gFolder of gradeVariants) {
+    for (const fName of fileVariants) {
+      candidateRelativePaths.push(`${gFolder}/${fName}`);
+    }
+  }
+
+  return {
+    lessonKey: `k${safeGrade}-tiet-${safePeriod}`,
+    grade: safeGrade,
+    period: safePeriod,
+    rootFolder: cleanRoot,
+    gradeFolderName,
+    gradeFolderPath,
+    primaryFileName,
+    primaryFilePath,
+    candidateRelativePaths,
+    displayLabel: `Thư mục ${gradeFolderName} / Tiết ${safePeriod} (PDF → Ảnh Slide)`,
+  };
+}
+
+export interface MatchedSlideFileDescriptor {
+  lessonKey: string;
+  grade: 6 | 7 | 8 | 9;
+  period: number;
+  fileName: string;
+  inferredFileType: 'pdf';
+}
+
+/**
+ * Matches a `.pdf` file path or relative path from a fixed directory (e.g. "BaiGiang/Tin 6/Tiet 1.pdf",
+ * "Tin 7/Tiết 15 - Bài 8.pdf", "Khoi_8/Tiet_04.pdf") to its corresponding Grade (6..9)
+ * and Period (1..29). Strictly accepts `.pdf` files only so they can be extracted into Slide Images.
+ */
+export function matchFileToGradeAndPeriod(
+  relativePathOrFileName: string,
+  fallbackGrade: 6 | 7 | 8 | 9 = 6
+): MatchedSlideFileDescriptor | null {
+  const raw = String(relativePathOrFileName || '').trim();
+  if (!raw) return null;
+
+  const normalized = raw.replace(/\\/g, '/');
+  const parts = normalized.split('/').filter(Boolean);
+  const fileName = parts[parts.length - 1] || '';
+  const lowerFile = fileName.toLowerCase();
+
+  // Strictly accept ONLY .pdf files for fixed folder mapping -> slide image extraction
+  if (!/\.pdf$/i.test(lowerFile)) {
+    return null;
+  }
+
+  // 1. Detect Grade (6, 7, 8, 9) from folder path or filename
+  let detectedGrade: 6 | 7 | 8 | 9 | null = null;
+  const fullLower = normalized.toLowerCase();
+  const gradeMatch = fullLower.match(/(?:tin\s*h[oọ]c|tin|kh[oố]i|khoi|l[oớ]p|lop|grade|k)[_\s-]*([6789])(?![0-9])/i);
+  if (gradeMatch && gradeMatch[1]) {
+    detectedGrade = Number(gradeMatch[1]) as 6 | 7 | 8 | 9;
+  }
+  const finalGrade = detectedGrade || fallbackGrade;
+
+  // 2. Detect Period (1..29) from filename
+  const nameWithoutExt = fileName.replace(/\.[^.]+$/, '');
+  let detectedPeriod: number | null = null;
+
+  // Explicit "Tiet X" / "Tiết X" / "Period X" / "T01" / "Bai X" pattern
+  const explicitPeriodMatch = nameWithoutExt.match(
+    /(?:ti[eế]t|tiet|period|b[aà]i|bai|t)[_\s-]*0*([1-9]|[12][0-9])(?![0-9])/i
+  );
+  if (explicitPeriodMatch && explicitPeriodMatch[1]) {
+    const p = Number(explicitPeriodMatch[1]);
+    if (p >= 1 && p <= 29) {
+      detectedPeriod = p;
+    }
+  }
+
+  // Fallback: leading number in filename like "01_ThongTin.pdf" or "1 - Bai 1.pdf"
+  if (!detectedPeriod) {
+    const leadingNumMatch = nameWithoutExt.match(/^0*([1-9]|[12][0-9])(?:[_\s.-]|$)/);
+    if (leadingNumMatch && leadingNumMatch[1]) {
+      const p = Number(leadingNumMatch[1]);
+      if (p >= 1 && p <= 29) {
+        detectedPeriod = p;
+      }
+    }
+  }
+
+  if (!detectedPeriod) return null;
+
+  return {
+    lessonKey: `k${finalGrade}-tiet-${detectedPeriod}`,
+    grade: finalGrade,
+    period: detectedPeriod,
+    fileName,
+    inferredFileType: 'pdf',
+  };
+}
+
+/**
+ * Builds a Slide Image Deck for `(grade, period)` from the fixed `.pdf` folder mapping.
+ * - When `extractedPageImages` is provided (from rendering a real `.pdf` file via `pdfjs-dist`),
+ *   it preserves the exact original PDF visual pages (`hasRealPdfPages: true`, `isBlankSlideDeck: false`).
+ * - When `extractedPageImages` is omitted or empty (no `.pdf` file found for this period),
+ *   it returns a 1-page Blank White Slide (`trang slide trắng`, `isBlankSlideDeck: true`) instead of synthetic text slides.
+ */
+export function buildFixedFolderPdfSlideCacheDeck(params: {
+  grade: 6 | 7 | 8 | 9;
+  period: number;
+  rootFolder?: string;
+  lessonTitle?: string;
+  topic?: string;
+  yccd?: string;
+  extractedPageImages?: string[];
+  extractedPageTexts?: string[];
+  sourceFileName?: string;
+  sizeKb?: number;
+}) {
+  const mapping = buildFixedSlideFolderMapping(
+    params.grade,
+    params.period,
+    params.rootFolder
+  );
+  const cleanTitle =
+    String(params.lessonTitle || `Tiết ${mapping.period}: Bài học Tin học ${mapping.grade}`)
+      .replace(/^Tiết\s*\d+:\s*/i, '')
+      .trim() || `Bài học Tin học ${mapping.grade}`;
+  const cleanTopic =
+    String(params.topic || `Chủ đề Tin học Khối ${mapping.grade}`).trim();
+
+  const hasExtractedPages =
+    Array.isArray(params.extractedPageImages) && params.extractedPageImages.length > 0;
+
+  if (hasExtractedPages) {
+    const total = params.extractedPageImages!.length;
+    const rawSlides: ManagedLectureSlidePage[] = params.extractedPageImages!.map((imgUrl, idx) => {
+      const pageTxt = String(params.extractedPageTexts?.[idx] || '').trim();
+      return {
+        slideNumber: idx + 1,
+        title: `Slide ${idx + 1}/${total}: Tiết ${mapping.period} — ${cleanTitle}`,
+        subtitle: `${mapping.gradeFolderPath} • ${params.sourceFileName || mapping.primaryFileName}`,
+        bulletPoints: pageTxt
+          ? [
+              pageTxt.slice(0, 180),
+              `Bản gốc PDF: ${mapping.primaryFilePath} (Trang ${idx + 1}/${total})`,
+            ]
+          : [
+              `Trang Slide #${idx + 1}/${total} nguyên bản từ tệp PDF ${mapping.primaryFilePath}.`,
+              `Chủ đề: ${cleanTopic}`,
+            ],
+        highlightNote: `🖼️ Bản gốc PDF (${mapping.gradeFolderName} / ${mapping.primaryFileName} • Trang ${idx + 1}/${total})`,
+        imageUrl: imgUrl,
+      };
+    });
+
+    const displayFileName = params.sourceFileName || mapping.primaryFileName;
+    const totalKb = params.sizeKb || rawSlides.length * 48;
+
+    return {
+      lessonKey: mapping.lessonKey,
+      grade: mapping.grade,
+      period: mapping.period,
+      fileName: `${displayFileName} (${mapping.gradeFolderName} • Bản gốc PDF)`,
+      fileType: 'pdf' as const,
+      fileSize: `${totalKb} KB`,
+      fileSizeLabel: `Bản gốc PDF: ${mapping.primaryFilePath}`,
+      uploadedAt: new Date().toLocaleTimeString('vi-VN', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      storageBucket: 'slide-storage-1gb' as const,
+      totalCompressedKb: totalKb,
+      isUserUploaded: true,
+      hasRealPdfPages: true,
+      isBlankSlideDeck: false,
+      isLazyLoaded: true,
+      mappedFolderPath: mapping.gradeFolderPath,
+      mappedFilePath: mapping.primaryFilePath,
+      slides: rawSlides,
+    };
+  }
+
+  // No PDF file found -> Return a 1-page Blank White Slide ("trang slide trắng")
+  const blankSlide: ManagedLectureSlidePage & { isBlankSlide?: boolean } = {
+    slideNumber: 1,
+    title: `Trang Slide trắng (Chưa tìm thấy tệp ${mapping.primaryFileName})`,
+    subtitle: `${mapping.primaryFilePath}`,
+    bulletPoints: [],
+    highlightNote: `Trang Slide trắng — Chưa có tệp PDF tại ${mapping.primaryFilePath}`,
+    imageUrl: BLANK_WHITE_SLIDE_DATA_URL,
+    isBlankSlide: true,
+  };
+
+  return {
+    lessonKey: mapping.lessonKey,
+    grade: mapping.grade,
+    period: mapping.period,
+    fileName: `Trang Slide trắng (${mapping.primaryFileName})`,
+    fileType: 'pdf' as const,
+    fileSize: '0 KB',
+    fileSizeLabel: `Chưa tìm thấy tệp PDF: ${mapping.primaryFilePath}`,
+    uploadedAt: new Date().toLocaleTimeString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+    storageBucket: 'slide-storage-1gb' as const,
+    totalCompressedKb: 1,
+    isUserUploaded: false,
+    hasRealPdfPages: false,
+    isBlankSlideDeck: true,
+    isLazyLoaded: true,
+    mappedFolderPath: mapping.gradeFolderPath,
+    mappedFilePath: mapping.primaryFilePath,
+    slides: [blankSlide],
+  };
+}
+
+/**
+ * Prunes non-visible slide images from JavaScript heap memory to prevent browser tab crashes
+ * on low-spec lab PCs (2GB - 4GB RAM).
+ * Keeps a sliding window of [currentSlideIndex - windowRadius, currentSlideIndex + windowRadius].
+ * Slides outside this window have heavy image strings cleared into placeholder references
+ * while preserving title, metadata, and backup keys so they can be reloaded on-demand.
+ */
+export function pruneSlideDeckMemory<T extends ManagedLectureSlidePage>(
+  slides: T[],
+  currentSlideIndex: number,
+  windowRadius = 2
+): {
+  prunedSlides: T[];
+  freedCount: number;
+} {
+  if (!Array.isArray(slides) || slides.length === 0) {
+    return { prunedSlides: slides, freedCount: 0 };
+  }
+
+  let freedCount = 0;
+  const prunedSlides = slides.map((slide, idx) => {
+    const isWithinWindow = Math.abs(idx - currentSlideIndex) <= windowRadius;
+    if (isWithinWindow) {
+      return slide;
+    }
+
+    // Outside the visible window: if it holds a large base64 dataUrl (> 50KB), clear it to placeholder
+    if (slide.imageUrl && slide.imageUrl.startsWith('data:image/') && slide.imageUrl.length > 50000) {
+      freedCount++;
+      return {
+        ...slide,
+        imageUrl: undefined,
+        isLazyPlaceholder: true,
+        lazyLoadKey: slide.lazyLoadKey || `slide_p${slide.slideNumber}`,
+      };
+    }
+    return slide;
+  });
+
+  return { prunedSlides, freedCount };
+}
+
+/**
+ * Formats interactive slide and simulation URLs (Google Slides, Canva, PhET, Scratch, Office 365)
+ * into safe, high-performance embeddable URLs for live classrooms.
+ */
+export function formatInteractiveWebSlideUrl(rawUrl: string): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim();
+
+  // Google Slides edit/present link -> embed link
+  if (trimmed.includes('docs.google.com/presentation/d/')) {
+    const match = trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) {
+      return `https://docs.google.com/presentation/d/${match[1]}/embed?start=false&loop=false&delayms=3000`;
+    }
+  }
+
+  // Canva view link -> embed link
+  if (trimmed.includes('canva.com/design/')) {
+    if (!trimmed.includes('/view?embed')) {
+      return trimmed.replace(/\/view(\?.*)?$/, '/view?embed');
+    }
+  }
+
+  return trimmed;
 }

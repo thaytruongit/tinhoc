@@ -31,14 +31,23 @@ export function dataUrlToBlob(dataUrl: string): Blob | null {
     return null;
   }
   try {
-    const parts = dataUrl.split(',');
-    const mimeMatch = parts[0].match(/:(.*?);/);
+    const commaIdx = dataUrl.indexOf(',');
+    if (commaIdx === -1) return null;
+    const header = dataUrl.slice(0, commaIdx);
+    const payload = dataUrl.slice(commaIdx + 1);
+    if (!payload) return null;
+
+    const mimeMatch = header.match(/^data:([^;,]+)/i);
     const mime = mimeMatch ? mimeMatch[1] : 'image/webp';
-    const b64Data = parts[1];
-    if (!b64Data) return null;
+    const isBase64 = /;base64/i.test(header);
+
+    if (!isBase64) {
+      const decodedText = decodeURIComponent(payload);
+      return new Blob([decodedText], { type: mime });
+    }
 
     if (typeof window !== 'undefined' && typeof window.atob === 'function') {
-      const binaryStr = window.atob(b64Data);
+      const binaryStr = window.atob(payload);
       const len = binaryStr.length;
       const u8arr = new Uint8Array(len);
       for (let i = 0; i < len; i++) {
@@ -46,7 +55,7 @@ export function dataUrlToBlob(dataUrl: string): Blob | null {
       }
       return new Blob([u8arr], { type: mime });
     } else if (typeof Buffer !== 'undefined') {
-      const buf = Buffer.from(b64Data, 'base64');
+      const buf = Buffer.from(payload, 'base64');
       return new Blob([buf], { type: mime });
     }
     return null;

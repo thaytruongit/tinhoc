@@ -1024,7 +1024,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     onChangeView('trang-chu');
     onShowToast(
       `Đã đồng bộ vào Tiết Live của Lớp ${currentStudent.classId}: Khối ${selectedGrade} • Tiết ${liveSession.activePeriod} (${
-        liveSession.activeLiveView === 'slide'
+        liveSession.activeLiveView === 'waiting'
+          ? 'Phòng Chờ Lớp Học'
+          : liveSession.activeLiveView === 'slide'
           ? 'Slide Bài Giảng'
           : `Hoạt động ${liveSession.activeStage}`
       })!`
@@ -1241,6 +1243,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         }}
         onAwardXp={onAwardXp}
         onShowToast={onShowToast}
+        onUpdateLiveSession={onUpdateLiveSession}
       />
     );
   }
