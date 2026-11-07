@@ -696,7 +696,7 @@ export default function App() {
       }
       fetch('/api/live-session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(next),
       }).catch(() => {});
       if (supabase && isSupabaseRealtimeConfigured) {
@@ -1033,11 +1033,30 @@ export default function App() {
     }
   };
 
+  const getAuthHeaders = (): Record<string, string> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    try {
+      const token = localStorage.getItem('cloudplay_session_token');
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+    } catch {
+      // ignore
+    }
+    return headers;
+  };
+
   const handleLogout = async () => {
     try {
       if (auth?.currentUser) {
         await signOutFirebase();
       }
+    } catch {
+      // ignore
+    }
+    try {
+      localStorage.removeItem('cloudplay_session_token');
+      localStorage.removeItem('cloudplay_user_role');
     } catch {
       // ignore
     }
@@ -1049,7 +1068,7 @@ export default function App() {
     try {
       const res = await fetch('/api/db/reset-academic-year', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
       });
       const data = await res.json().catch(() => null);
       if (data?.ok && Array.isArray(data.students) && data.students.length > 0) {
@@ -1111,7 +1130,7 @@ export default function App() {
         }),
         fetch('/api/live-session', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify(liveSession),
         }),
       ]);

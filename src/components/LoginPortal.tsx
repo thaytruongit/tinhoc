@@ -66,7 +66,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
@@ -77,6 +77,38 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
         setErrorMsg('Vui lòng nhập đầy đủ Tài khoản / Mã học sinh và Mật khẩu.');
         return;
       }
+
+      // 1. Thử xác thực với Backend API bảo mật
+      try {
+        const resp = await fetch('/api/auth/student/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ studentId: cleanId, password: cleanPass }),
+        });
+        const data = await resp.json();
+        if (resp.ok && data.ok) {
+          if (data.token) {
+            localStorage.setItem('cloudplay_session_token', data.token);
+            localStorage.setItem('cloudplay_user_role', 'student');
+          }
+          const matched = data.student || students.find(
+            (s) =>
+              s.id.toLowerCase() === cleanId.toLowerCase() ||
+              (s.username && s.username.toLowerCase() === cleanId.toLowerCase())
+          );
+          if (matched) {
+            onShowToast(`Học sinh ${matched.name} (${matched.classId}) kết nối trực tuyến thành công!`);
+            onLoginStudent(matched);
+            return;
+          }
+        } else if (data.error && resp.status === 401) {
+          setErrorMsg(data.error);
+          return;
+        }
+      } catch {
+        // Fallback offline nếu server không kết nối được
+      }
+
       const matched =
         students.find(
           (s) =>
@@ -99,6 +131,31 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
         setErrorMsg('Vui lòng nhập Tài khoản Giáo viên và Mật khẩu.');
         return;
       }
+
+      // 1. Thử xác thực qua Backend API
+      try {
+        const resp = await fetch('/api/auth/teacher/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: cleanUser, password: cleanPass }),
+        });
+        const data = await resp.json();
+        if (resp.ok && data.ok) {
+          if (data.token) {
+            localStorage.setItem('cloudplay_session_token', data.token);
+            localStorage.setItem('cloudplay_user_role', 'teacher');
+          }
+          onShowToast('Xác thực Giáo viên thành công! Đang mở Bàn Điều Khiển Giảng Dạy...');
+          onLoginTeacher(cleanUser);
+          return;
+        } else if (data.error) {
+          setErrorMsg(data.error);
+          return;
+        }
+      } catch {
+        // Offline fallback
+      }
+
       onShowToast('Xác thực Giáo viên thành công! Đang mở Bàn Điều Khiển Giảng Dạy...');
       onLoginTeacher(cleanUser);
     }
