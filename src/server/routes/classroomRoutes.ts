@@ -494,3 +494,4 @@ router.post('/api/db/progress', requireStudentOrTeacherAuth, async (req: Authent
 });
 
 export default router;
+

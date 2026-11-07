@@ -1,4 +1,4 @@
-# 🚀 CloudPlay Learning OS v4.5 — Hệ Thống Quản Trị Giảng Dạy & Học Tập Tin Học GDPT 2018
+# 🚀 Dạy học số — Hệ Thống Quản Trị Giảng Dạy & Học Tập Tin Học GDPT 2018
 
 > **Tác giả & Quản trị hệ thống:** Thầy Đỗ Mạnh Trường (`manhtruongdo1984@gmail.com`)  
 > **Chương trình GDPT 2018:** Môn Tin Học THCS & THPT (Khối 6, 7, 8, 9, 10, 11, 12)  
@@ -71,7 +71,7 @@ npm run start
 1. **Push source code lên GitHub Repository (Public hoặc Private):**
    ```bash
    git add .
-   git commit -m "Deploy CloudPlay Learning OS v4.5 Supabase Edition"
+   git commit -m "Deploy Dạy học số — Tin Học GDPT 2018"
    git push origin main
    ```
 2. **Cấu hình Environment Variables trên Render/Vercel/Railway:**

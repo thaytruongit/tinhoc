@@ -14,7 +14,7 @@ const router = Router();
  */
 router.get('/api/curriculum', (_req: Request, res: Response) => {
   res.json({
-    platform: 'CloudPlay Learning OS v4.5',
+    platform: 'Dạy học số',
     curriculumStandard: 'Chương trình GDPT 2018 - Môn Tin Học (THCS & THPT)',
     activeSemester: 'HK I (2024 - 2025)',
     teacher: {
@@ -110,3 +110,4 @@ router.get('/api/curriculum/full-json', (req: Request, res: Response) => {
 });
 
 export default router;
+

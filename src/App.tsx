@@ -1061,7 +1061,7 @@ export default function App() {
       // ignore
     }
     setAppMode('login');
-    showToast('Đã đăng xuất khỏi phiên trực tuyến CloudPlay OS.');
+    showToast('Đã đăng xuất khỏi phiên trực tuyến Dạy học số.');
   };
 
   const handleResetAcademicYear = async () => {

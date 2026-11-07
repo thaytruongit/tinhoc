@@ -47,7 +47,7 @@ router.get('/api/github/sync-snapshot', (_req: Request, res: Response) => {
       ok: true,
       snapshot: {
         schemaVersion: '2.0.0',
-        appTitle: 'CloudPlay Interactive Learning — Tin Học GDPT 2018 (Khối 6-9)',
+        appTitle: 'Dạy học số — Tin Học GDPT 2018 (Khối 6-9)',
         syncedAtIso: new Date().toISOString(),
         prioritizeGitHubPublic: true,
         googleSheetsCsdlConfig: liveClassroomSession.googleSheetsCsdlConfig || null,
@@ -126,3 +126,4 @@ router.post('/api/github/sync-snapshot', requireTeacherAuth, async (req: Authent
 });
 
 export default router;
+

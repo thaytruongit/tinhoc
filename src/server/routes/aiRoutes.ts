@@ -784,7 +784,7 @@ router.post('/api/ai/chat', async (req: Request, res: Response) => {
   const selectedModel = model === 'gemini-2.5-flash' ? 'gemini-2.5-flash' : 'gemini-3.8-flash';
   const isInClassLive = learningMode === 'IN_CLASS_LIVE';
 
-  const systemInstruction = `Bạn là "Trợ lý AI Cú Vàng" — Gia sư Sư phạm môn Tin học THCS & THPT của CloudPlay Learning OS (tác giả Thầy Đỗ Mạnh Trường, chuẩn GDPT 2018, tích hợp Năng lực số CV 3456 và Năng lực AI QĐ 3439).
+  const systemInstruction = `Bạn là "Trợ lý AI Cú Vàng" — Gia sư Sư phạm môn Tin học THCS & THPT của hệ thống Dạy học số (tác giả Thầy Đỗ Mạnh Trường, chuẩn GDPT 2018, tích hợp Năng lực số CV 3456 và Năng lực AI QĐ 3439).
 Bối cảnh bài học: ${lessonContext}.
 Chế độ: ${isInClassLive ? 'TRÊN LỚP (IN-CLASS LIVE)' : 'Ở NHÀ (SELF-PACED)'}.
 Nguyên tắc: Thân thiện, sư phạm, gợi mở từng bước thay vì chỉ chép đáp án.`;
@@ -833,7 +833,7 @@ router.post('/api/ai/smart-review', async (req: Request, res: Response) => {
   const { question, lessonContext, studentName = 'Học sinh', grade = 7, period = 1 } = req.body || {};
   const userQuestion = typeof question === 'string' && question.trim() ? question.trim() : 'Giải thích các khái niệm khó trong tiết học này.';
 
-  const systemInstruction = `Bạn là "Trợ lý Ôn Tập Thông Minh AI" môn Tin học THCS & THPT (Hệ thống CloudPlay Learning OS, tác giả Thầy Đỗ Mạnh Trường).
+  const systemInstruction = `Bạn là "Trợ lý Ôn Tập Thông Minh AI" môn Tin học THCS & THPT (Hệ thống Dạy học số, tác giả Thầy Đỗ Mạnh Trường).
 Nhiệm vụ: Giúp học sinh ${studentName} giải đáp thắc mắc trong Khối ${grade} • Tiết ${period}.
 Bối cảnh bài học: ${lessonContext || 'Tin học GDPT 2018'}.`;
 
@@ -1080,3 +1080,4 @@ router.get('/api/ai/status', (_req: Request, res: Response) => {
 });
 
 export default router;
+

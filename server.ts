@@ -1,7 +1,7 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
- * CloudPlay Learning OS v4.5 — Modular Enterprise Server
+ * Dạy học số — Modular Enterprise Server
  * Tác giả: Thầy Đỗ Mạnh Trường (manhtruongdo1984@gmail.com)
  */
 
@@ -92,7 +92,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 CloudPlay Learning OS v4.5 Server running on http://localhost:${PORT}`);
+    console.log(`🚀 Dạy học số Server running on http://localhost:${PORT}`);
   });
 }
 

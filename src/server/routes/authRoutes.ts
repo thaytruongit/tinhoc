@@ -188,3 +188,4 @@ router.post('/api/auth/room-pin', requireTeacherAuth, (req: AuthenticatedRequest
 });
 
 export default router;
+

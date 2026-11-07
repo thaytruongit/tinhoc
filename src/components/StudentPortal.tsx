@@ -1260,7 +1260,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               </div>
               <div className="flex flex-col">
                 <span className="font-headline-md text-headline-md text-on-surface leading-tight tracking-tight">
-                  CloudPlay OS
+                  Dạy học số
                 </span>
                 <span className="font-label-sm text-label-sm text-secondary font-bold tracking-wide uppercase">
                   Lớp {currentStudent.classId} • Khối {selectedGrade}

@@ -190,7 +190,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-headline-sm text-headline-sm text-on-surface">
-                      CloudPlay Learning OS
+                      Dạy học số
                     </span>
                     <span className="px-2.5 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed font-label-sm text-label-sm uppercase tracking-wide">
                       Tin Học THCS &amp; THPT
@@ -468,7 +468,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                     </div>
                     <div>
                       <p className="font-headline-sm text-headline-sm text-primary">
-                        Đăng nhập trực tuyến CloudPlay Learning OS
+                        Đăng nhập trực tuyến Dạy học số
                       </p>
                       <p className="font-body-sm text-body-sm text-on-surface-variant">
                         Mật khẩu khởi tạo mặc định toàn trường:{' '}
@@ -727,7 +727,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                   Chuẩn GDPT 2018 Tin học
                 </span>
                 <span className="font-label-sm text-label-sm text-on-surface-variant">
-                  Phiên bản CloudPlay v4.5 Online
+                  Nền tảng Dạy học số Trực tuyến
                 </span>
               </div>
             </div>

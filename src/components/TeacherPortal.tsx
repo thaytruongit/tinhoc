@@ -1885,7 +1885,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               </div>
               <div>
                 <span className="font-headline-sm text-headline-sm text-on-surface block leading-tight">
-                  CloudPlay OS
+                  Dạy học số
                 </span>
                 <span className="font-label-sm text-label-sm text-secondary block">
                   Cổng Giáo Viên &amp; Quản Trị

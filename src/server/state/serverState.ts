@@ -518,3 +518,4 @@ export function getGenAIClient(customApiKey?: string): GoogleGenAI | null {
     },
   });
 }
+

@@ -64,3 +64,4 @@ setInterval(() => {
 }, SIX_HOURS_MS);
 
 export default router;
+
